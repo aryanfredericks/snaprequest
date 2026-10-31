@@ -104,7 +104,14 @@ impl Prepared {
     }
 }
 
-pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prepared> {
+/// Builds the request. `jar_cookies` are cookies from the client's jar for this URL;
+/// they are merged into the user's `Cookie` header (user values win) or sent in a new one.
+pub(crate) async fn prepare(
+    req: &Request,
+    url: &Url,
+    user_agent: &str,
+    jar_cookies: &[(String, String)],
+) -> Result<Prepared> {
     let body = body::encode(&req.body).await?;
     let mut headers = HeaderMap::new();
 
@@ -112,9 +119,18 @@ pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Resul
     if !has_header(req, "host") {
         headers.insert(header::HOST, header_value(&host_header(url))?);
     }
+    let mut jar_merged = jar_cookies.is_empty();
     for h in req.enabled_headers() {
         let name = HeaderName::from_bytes(h.name.trim().as_bytes())
             .map_err(|_| Error::InvalidRequest(format!("invalid header name `{}`", h.name)))?;
+        if name == header::COOKIE && !jar_merged {
+            jar_merged = true;
+            headers.append(
+                name,
+                header_value(&super::cookies::merge(Some(&h.value), jar_cookies))?,
+            );
+            continue;
+        }
         let value = match &body.boundary {
             // A hand-written `multipart/form-data` type without the boundary would make the
             // body unparseable, so complete it with the boundary we actually use.
@@ -138,6 +154,12 @@ pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Resul
         headers.insert(
             header::ACCEPT_ENCODING,
             HeaderValue::from_static(super::decode::ACCEPT_ENCODING),
+        );
+    }
+    if !jar_merged {
+        headers.insert(
+            header::COOKIE,
+            header_value(&super::cookies::merge(None, jar_cookies))?,
         );
     }
     if let Some(ct) = &body.content_type
@@ -227,7 +249,7 @@ mod tests {
     async fn default_headers_in_order() {
         let req = Request::get("http://example.com:8080/a?b=1").header("x-trace", "1");
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test").await.unwrap();
+        let p = prepare(&req, &url, "snapreq/test", &[]).await.unwrap();
         assert_eq!(
             names(&p),
             ["Host", "X-Trace", "User-Agent", "Accept", "Accept-Encoding"]
@@ -248,7 +270,7 @@ mod tests {
             .header("Accept", "application/json");
         req.headers.push(KeyValue::new("X-Off", "1").disabled());
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test").await.unwrap();
+        let p = prepare(&req, &url, "snapreq/test", &[]).await.unwrap();
         assert_eq!(
             names(&p),
             ["Host", "User-Agent", "Accept", "Accept-Encoding"]
@@ -262,7 +284,7 @@ mod tests {
             content: r#"{"a":1}"#.into(),
         });
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua").await.unwrap();
+        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
         let ct = p
             .sent_headers
             .iter()
@@ -285,7 +307,7 @@ mod tests {
             .header("TE", "gzip")
             .header("X-Ok", "1");
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua").await.unwrap();
+        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
         let h2 = p.to_http(true);
         assert_eq!(h2.uri(), "https://x.test/");
         assert!(h2.headers().get("connection").is_none());
@@ -301,7 +323,7 @@ mod tests {
             .header("Content-Type", "multipart/form-data")
             .body(Body::Multipart { parts: vec![] });
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua").await.unwrap();
+        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
         let ct = p
             .sent_headers
             .iter()
@@ -326,11 +348,11 @@ mod tests {
     async fn invalid_headers_are_rejected() {
         let req = Request::get("http://x.test/").header("bad header", "v");
         let url = req.effective_url().unwrap();
-        let err = prepare(&req, &url, "ua").await.err().unwrap();
+        let err = prepare(&req, &url, "ua", &[]).await.err().unwrap();
         assert!(err.to_string().contains("invalid header name"), "{err}");
 
         let req = Request::get("http://x.test/").header("x", "line\nbreak");
-        let err = prepare(&req, &url, "ua").await.err().unwrap();
+        let err = prepare(&req, &url, "ua", &[]).await.err().unwrap();
         assert!(err.to_string().contains("invalid header value"), "{err}");
     }
 

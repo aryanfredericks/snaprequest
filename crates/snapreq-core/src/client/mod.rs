@@ -3,6 +3,7 @@
 mod body;
 mod build;
 mod conn;
+mod cookies;
 mod decode;
 mod meter;
 mod proxy;
@@ -10,6 +11,7 @@ mod recorder;
 mod redirect;
 mod tls;
 
+pub use self::cookies::StoredCookie;
 pub use self::tls::Certificate;
 
 use std::sync::{Arc, Mutex};
@@ -65,6 +67,7 @@ struct Inner {
     config: ClientConfig,
     pool: Pool,
     tls: TlsContext,
+    cookies: cookies::Jar,
 }
 
 impl Default for Client {
@@ -83,6 +86,8 @@ struct Hop {
     prepared: Prepared,
     tls: Option<RequestTls>,
     proxy: Option<proxy::Proxy>,
+    /// Names of the jar cookies included in this hop's `Cookie` header.
+    jar_cookie_names: Vec<String>,
 }
 
 // Created once per request and immediately destructured; boxing would only add an allocation.
@@ -104,12 +109,27 @@ impl Client {
     fn from_parts(config: ClientConfig, tls: TlsContext) -> Self {
         let pool = Pool::new(config.pool_idle_timeout, config.pool_max_idle_per_host);
         Self {
-            inner: Arc::new(Inner { config, pool, tls }),
+            inner: Arc::new(Inner {
+                config,
+                pool,
+                tls,
+                cookies: cookies::Jar::default(),
+            }),
         }
     }
 
     pub fn config(&self) -> &ClientConfig {
         &self.inner.config
+    }
+
+    /// Unexpired cookies currently in this client's jar.
+    pub fn cookies(&self) -> Vec<StoredCookie> {
+        self.inner.cookies.list()
+    }
+
+    /// Empties this client's cookie jar.
+    pub fn clear_cookies(&self) {
+        self.inner.cookies.clear();
     }
 
     /// Sends `req`, follows redirects if enabled, and reads the whole response.
@@ -142,7 +162,13 @@ impl Client {
 
     /// Encodes the body and picks the TLS configuration for one hop.
     async fn prepare_hop(&self, req: &Request, url: &url::Url) -> Result<Hop> {
-        let prepared = build::prepare(req, url, &self.inner.config.user_agent).await?;
+        let jar_cookies = if req.settings.cookies {
+            self.inner.cookies.for_request(url)
+        } else {
+            Vec::new()
+        };
+        let prepared =
+            build::prepare(req, url, &self.inner.config.user_agent, &jar_cookies).await?;
         let tls = match url.scheme() {
             "https" => Some(
                 self.inner
@@ -158,6 +184,7 @@ impl Client {
             prepared,
             tls,
             proxy,
+            jar_cookie_names: jar_cookies.into_iter().map(|(n, _)| n).collect(),
         })
     }
 
@@ -172,7 +199,26 @@ impl Client {
         let mut current = req.clone();
         let mut followed = 0u32;
         loop {
+            if !hop.jar_cookie_names.is_empty() {
+                rec.record(TraceEvent::Info {
+                    message: format!(
+                        "sending {} cookie(s) from the jar: {}",
+                        hop.jar_cookie_names.len(),
+                        hop.jar_cookie_names.join(", ")
+                    ),
+                });
+            }
             let resp = self.run(&current, &url, &hop, rec).await?;
+            if current.settings.cookies {
+                let set_cookie = resp
+                    .headers
+                    .iter()
+                    .filter(|h| h.name.eq_ignore_ascii_case("set-cookie"))
+                    .map(|h| h.value.as_str());
+                for message in self.inner.cookies.store(&url, set_cookie) {
+                    rec.record(TraceEvent::Info { message });
+                }
+            }
             if !current.settings.follow_redirects {
                 return Ok(resp);
             }

@@ -45,6 +45,7 @@ impl TestServer {
 /// - `/gzip`: gzip-encoded text if the request accepts gzip, otherwise plain text
 /// - `/redirect/<n>`: 302 to `/redirect/<n-1>`; `/redirect/0` replies `done`
 /// - `/status-to/<code>?to=<url>`: redirect with that status to `url`
+/// - `/login`: sets `sid=s3cr3t` and redirects to `/echo`
 async fn handle(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
@@ -93,6 +94,12 @@ async fn handle(
             .status(code.parse::<u16>().unwrap())
             .header("location", to);
         "redirecting".into()
+    } else if path == "/login" {
+        resp = resp
+            .status(302)
+            .header("set-cookie", "sid=s3cr3t; Path=/; HttpOnly")
+            .header("location", "/echo");
+        Bytes::new()
     } else if path == "/gzip" {
         let text = "compressible ".repeat(100);
         let accepts_gzip = req
@@ -788,4 +795,97 @@ async fn redirect_to_unsupported_scheme_fails() {
     );
     assert_eq!(err.phase, Phase::Redirect);
     assert!(err.message.contains("`ftp` URL"), "{}", err.message);
+}
+
+fn infos(trace: &[snapreq_core::model::TraceEntry]) -> Vec<String> {
+    trace
+        .iter()
+        .filter_map(|e| match &e.event {
+            TraceEvent::Info { message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn cookies_set_during_a_redirect_are_sent_on_the_next_hop() {
+    let server = start_server().await;
+    let client = Client::default();
+    let resp = client
+        .execute(&Request::get(server.url("/login")))
+        .await
+        .unwrap();
+
+    let echo = resp.text().unwrap();
+    assert!(echo.starts_with("GET /echo\n"), "{echo}");
+    assert!(echo.contains("cookie: sid=s3cr3t\n"), "{echo}");
+    assert_eq!(
+        infos(&resp.trace),
+        [
+            "stored cookie `sid`",
+            "sending 1 cookie(s) from the jar: sid"
+        ]
+    );
+
+    let jar = client.cookies();
+    assert_eq!(jar.len(), 1);
+    assert_eq!(
+        (jar[0].name.as_str(), jar[0].value.as_str()),
+        ("sid", "s3cr3t")
+    );
+    assert!(jar[0].http_only);
+
+    // Later requests to the same server carry the cookie too.
+    let later = client
+        .execute(&Request::get(server.url("/echo")))
+        .await
+        .unwrap();
+    assert!(later.text().unwrap().contains("cookie: sid=s3cr3t\n"));
+}
+
+#[tokio::test]
+async fn user_cookie_header_is_merged_with_the_jar() {
+    let server = start_server().await;
+    let client = Client::default();
+    client
+        .execute(&Request::get(server.url("/login")))
+        .await
+        .unwrap();
+
+    let req = Request::get(server.url("/echo")).header("Cookie", "theme=dark");
+    let echo = client.execute(&req).await.unwrap();
+    assert!(
+        echo.text()
+            .unwrap()
+            .contains("cookie: theme=dark; sid=s3cr3t\n")
+    );
+
+    // A user value for the same name wins.
+    let req = Request::get(server.url("/echo")).header("Cookie", "sid=mine");
+    let echo = client.execute(&req).await.unwrap();
+    assert!(echo.text().unwrap().contains("cookie: sid=mine\n"));
+}
+
+#[tokio::test]
+async fn cookies_can_be_disabled_per_request_and_cleared() {
+    let server = start_server().await;
+    let client = Client::default();
+
+    let mut no_jar = Request::get(server.url("/login"));
+    no_jar.settings.cookies = false;
+    let resp = client.execute(&no_jar).await.unwrap();
+    assert!(!resp.text().unwrap().contains("cookie:"));
+    assert!(client.cookies().is_empty());
+
+    client
+        .execute(&Request::get(server.url("/login")))
+        .await
+        .unwrap();
+    assert_eq!(client.cookies().len(), 1);
+    client.clear_cookies();
+    let resp = client
+        .execute(&Request::get(server.url("/echo")))
+        .await
+        .unwrap();
+    assert!(!resp.text().unwrap().contains("cookie:"));
 }

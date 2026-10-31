@@ -33,6 +33,8 @@ pub struct RequestSettings {
     pub decompress: bool,
     /// Which proxy to use.
     pub proxy: ProxyMode,
+    /// Use the client's cookie jar: send matching cookies and store `Set-Cookie`.
+    pub cookies: bool,
     /// Hosts pinned to fixed addresses instead of DNS, like curl's `--resolve`.
     /// TLS still verifies against the host name from the URL.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -51,6 +53,7 @@ impl Default for RequestSettings {
             decompress: true,
             resolve: Vec::new(),
             proxy: ProxyMode::Environment,
+            cookies: true,
         }
     }
 }

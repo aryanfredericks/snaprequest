@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.7, cookie jar (P1.6 done: decompression, redirects, HTTP/2, proxies)
+- **Current checkpoint:** P1.8, wire capture and secret redaction
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.7: cookie jar. Per-`Client` session jar (opt-in per request via `RequestSettings`, default on?) that stores
-   `Set-Cookie` from responses (including redirect hops) and sends matching `Cookie` headers (RFC 6265: domain,
-   path, secure, expiry, host-only). Trace: `info` events for stored/sent cookies. Persistable (serde) for P3 sessions.
-   Consider the `cookie_store` crate (MIT/Apache) vs. own implementation. User-set `Cookie` headers must be merged, not replaced.
+1. P1.8: wire capture + redaction. Optional exact request/response bytes as sent/received on the HTTP layer
+   (for HTTP/1.1 the `MeteredIo` can tee bytes into a bounded buffer; for HTTP/2 capture frames is out of scope,
+   record the reconstructed headers instead). Off by default (`RequestSettings::capture_wire`?) with a size cap.
+   Redaction: a client-level list of sensitive header names (Authorization, Cookie, Set-Cookie, Proxy-Authorization,
+   X-Api-Key, ...) and secret values; applied to trace events (`RequestHeaders`, `ResponseHeaders`, wire capture)
+   but never to what is sent. Today `Cookie`/`Authorization` values appear in the trace in clear text.
+   Then P1.9 (criterion benchmarks) closes Phase 1.
+
+## Cookie notes (P1.7)
+- `client/cookies.rs`: per-`Client` `Jar` over `cookie_store` (RFC 6265; `public_suffix` feature off, so a server could set a cookie for a public suffix; acceptable for an API tester, documented). `Client::cookies()` / `clear_cookies()`; `StoredCookie` is serde for later persistence (P3/P6).
+- `RequestSettings::cookies` (default true). Cookies are stored after every hop (redirect-aware) and sent per hop; trace has `info` events for stored/updated/deleted/rejected and sent cookies.
+- User `Cookie` header is merged with jar cookies; user values win per name.
 
 ## Proxy notes (P1.6d)
 - `RequestSettings::proxy: ProxyMode` = `"env"` (default) | `"direct"` | proxy URL (`http://`, `socks5://`, `socks5h://`, credentials in URL).
@@ -100,7 +108,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.6 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.7 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -128,6 +136,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.6b — 2026-10-31 — Redirect following with browser-compatible method rules and cross-origin credential stripping. 100 tests total.
 - P1.6c — 2026-10-31 — HTTP/2 via ALPN and prior knowledge, shared multiplexed connections. Verified against example.com, google.com, github.com. 108 tests total.
 - P1.6d — 2026-10-31 — Proxies: HTTP forward + CONNECT, SOCKS5/SOCKS5h, env vars with NO_PROXY. P1.6 complete. 122 tests total.
+- P1.7 — 2026-10-31 — Cookie jar (cookie_store), redirect-aware, merged with user Cookie headers. 128 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

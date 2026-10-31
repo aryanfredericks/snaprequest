@@ -25,6 +25,7 @@ brotli = "9"
 brotli-decompressor = "6"
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+cookie_store = { version = "0.22", default-features = false, features = ["serde_json"] }
 flate2 = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 http = "1"
