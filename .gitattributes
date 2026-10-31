@@ -1,2 +1,6 @@
-# Snapshot files must keep LF line endings on every platform.
-*.snap text eol=lf
+# Keep every text file LF on all platforms. Tests compare exact text (snapshots,
+# fixture collections with multi-line strings), so CRLF checkouts on Windows would fail.
+* text=auto eol=lf
+
+# Binary fixtures.
+*.png binary

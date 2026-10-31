@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
-- **Current checkpoint:** P3.3, `{{var}}` interpolation and dynamic variables
+- **Current checkpoint:** P3.4, secrets
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,14 +25,17 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P3.3: interpolation in `snapreq-collection`: `{{name}}` in URL, query, headers, body content, form/multipart
-   values, file paths and string settings (proxy). Dynamic variables: `{{$uuid}}`, `{{$timestamp}}` (unix s),
-   `{{$isoTimestamp}}`, `{{$randomInt}}`, maybe `{{$randomInt 1 100}}`? keep simple. Undefined variables → clear
-   error listing name, where it was used (field) and the scopes searched; nested `{{a}}` inside values resolve
-   recursively with a depth limit (cycles → error). Escaping literal `{{`: decide (`\{{`?) and document in FORMAT.md.
-   Collect the secret values used → `RequestSettings::secrets` so they are redacted.
-   Output: a function building a core `snapreq_core::Request` from collection + key path + scopes, resolving
-   relative paths against the request file's directory (P3.5 adds header/settings inheritance).
+1. P3.4: secrets. Values for `{ secret = true }` variables come from outside the collection:
+   (a) a local, git-ignored file next to the collection (`.snapreq/secrets.toml`? or `<collection>/.secrets/<env>.toml`;
+   names starting with `.` are already ignored by the loader), (b) environment variables `SNAPREQ_SECRET_<NAME>`?,
+   (c) `--var`. Decide, document in FORMAT.md, and add a check that a secret value never ends up in a saved file
+   (`save_environment` already writes only markers). Consider OS keychain later (keyring crate) — probably P8.
+   Then P3.5 inheritance, P3.6 CLI (`snapreq send path/to/request.toml -e dev`, `snapreq ls`, `snapreq new`).
+
+## Interpolation notes (P3.3)
+- `crates/snapreq-collection/src/interp.rs`: `Interpolator` (`{{name}}`, recursive with cycle detection, `\{{` literal, `$uuid`/`$timestamp`/`$isoTimestamp`/`$randomInt`), collects secret values used.
+- `crates/snapreq-collection/src/build.rs`: `build_request(collection, key_path, scopes)` → core `Request`; relative paths resolve against the request file's directory; disabled entries not interpolated; secret values → `settings.secrets`. Settings from the request file only (inheritance is P3.5).
+- CI on P3.1 failed on Windows: CRLF checkouts broke exact-text fixture assertions. Fixed with `.gitattributes` `* text=auto eol=lf` (verified by simulating CRLF fixtures locally).
 
 ## Variable notes (P3.2)
 - `crates/snapreq-collection/src/vars.rs`: `Variables` (ordered; scalar or `{ value, secret }`; secret values never serialized), `Environment::{load, list}`, `Scopes::for_request` (runtime > request > folders innermost-first > environment > collection > global; Bruno-like), `lookup` → (Variable, Scope), `visible()`, `set_runtime`.
@@ -163,7 +166,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
-| 3 Collections & environments | 🟨 in progress (P3.1–P3.2 done) |
+| 3 Collections & environments | 🟨 in progress (P3.1–P3.3 done) |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
@@ -200,6 +203,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P2.6 — 2026-10-31 — insta snapshot tests for all CLI output. Phase 2 complete. 181 tests total.
 - P3.1 — 2026-10-31 — Collection format v1 spec (docs/FORMAT.md), loading with file:line errors, stable saving (toml_edit, ADR-013). 196 tests total.
 - P3.2 — 2026-10-31 — Environments, `[vars]` tables and scope precedence. 203 tests total.
+- P3.3 — 2026-10-31 — `{{var}}` interpolation, dynamic variables, building core requests from collections. 212 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -212,3 +216,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (8):** P1.4 CI failed only on cargo-deny (unmaintained rustls-pemfile, vulnerable time). Fixed in the P1.5 commit; added `scripts/check.sh`.
 - **2026-10-31 (9):** P1.6a–P1.9 done and pushed (decompression, redirects, HTTP/2, proxies, cookies, wire capture/redaction, benchmarks). Phase 1 complete.
 - **2026-10-31 (10):** Phase 2 (CLI MVP) complete: send command, pretty output, verbose trace, waterfall, JSON output, snapshots. CI watcher now polls once a minute (GitHub's 60 requests/hour unauthenticated limit).
+- **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.

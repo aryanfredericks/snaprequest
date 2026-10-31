@@ -324,6 +324,16 @@ impl Scopes {
         out
     }
 
+    #[cfg(test)]
+    pub(crate) fn push_layer_for_tests(&mut self, vars: Variables) {
+        self.layers.push((Scope::Runtime, vars));
+    }
+
+    /// The scopes searched, highest precedence first (for error messages).
+    pub fn scope_names(&self) -> Vec<String> {
+        self.layers.iter().map(|(s, _)| s.to_string()).collect()
+    }
+
     /// Adds or replaces a runtime variable (highest precedence).
     pub fn set_runtime(&mut self, name: impl Into<String>, value: impl Into<String>) {
         if let Some((_, vars)) = self.layers.iter_mut().find(|(s, _)| *s == Scope::Runtime) {

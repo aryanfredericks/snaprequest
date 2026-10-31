@@ -170,6 +170,20 @@ defines `name`:
 Collection variables are defaults; the selected environment overrides them; folder and request
 variables are deliberate local overrides.
 
+### Placeholders
+
+- `{{name}}` is replaced by the variable's value; spaces inside the braces are allowed (`{{ name }}`).
+- Values may contain placeholders themselves (`base_url = "https://{{host}}"`); variables that refer
+  to each other in a loop are an error.
+- Placeholders work in the URL, query, headers, body content, form and multipart values, file paths
+  and the proxy setting. Disabled entries are left as written.
+- Built-in dynamic values, generated anew for every placeholder: `{{$uuid}}`, `{{$timestamp}}`
+  (Unix seconds), `{{$isoTimestamp}}` (RFC 3339, UTC) and `{{$randomInt}}` (0 to 1000).
+- `\{{` produces a literal `{{`.
+- An undefined variable is an error naming the file, the field (for example `headers.Authorization`)
+  and the scopes that were searched.
+- Values of secret variables are hidden in every trace and output.
+
 ## Environments
 
 Each file in `environments/` is one environment, named after the file (`environments/prod.toml`
