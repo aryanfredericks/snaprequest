@@ -211,6 +211,19 @@ The files in `.secrets/` are flat `name = "value"` tables. SnapRequest creates t
 even if the project's `.gitignore` forgets them, and makes them readable by their owner only on
 Unix. Secret values are hidden in every trace and output.
 
+## Inheritance
+
+Headers and settings flow from `snapreq.toml`, through each enclosing `folder.toml` (outermost first),
+down to the request file.
+
+- **Headers:** inherited headers come first. A header with the same name (case-insensitive) as an
+  inherited one replaces all inherited headers of that name. A disabled entry
+  (`X-Trace = { value = "on", enabled = false }`) switches the inherited header off for this folder
+  or request.
+- **Settings:** each key overrides the inherited value; keys that are not set are inherited. Relative
+  paths (`ca_cert`, `client_cert`, `client_key`) resolve against the directory of the file that set them.
+- **Variables:** see "Variables" for how `[vars]` tables combine.
+
 ## Ordering
 
 Collections and folders list their children in `order` (by key). Items not listed follow in

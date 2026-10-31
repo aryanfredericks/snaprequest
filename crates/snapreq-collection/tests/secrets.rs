@@ -54,7 +54,12 @@ fn stored_secrets_fill_variables_and_are_redacted() {
     let (c, _) = Collection::load(&root).unwrap();
     let scopes = scopes_with_secrets(&c, "dev", vec![]);
     let req = build_request(&c, "users/create-user", &scopes).unwrap();
-    assert_eq!(req.headers[0].value, "Bearer file-token-123");
+    let auth = req
+        .headers
+        .iter()
+        .find(|h| h.name == "Authorization")
+        .unwrap();
+    assert_eq!(auth.value, "Bearer file-token-123");
     assert_eq!(req.settings.secrets, ["file-token-123"]);
 
     #[cfg(unix)]

@@ -12,12 +12,21 @@ use crate::error::{Error, Result};
 use crate::files::{BodySpec, Settings};
 use crate::interp::Interpolator;
 use crate::kv::KeyValues;
-use crate::load::{Collection, RequestItem};
+use crate::load::{COLLECTION_FILE, Collection, FOLDER_FILE, RequestItem};
 use crate::vars::Scopes;
 
 /// Builds the request at `key_path` (for example `users/create-user`) with every
-/// placeholder resolved from `scopes`. Values of secret variables that were used end up
-/// in `settings.secrets`, so they are hidden in traces.
+/// placeholder resolved from `scopes`.
+///
+/// Headers and settings are inherited from the collection, then each enclosing folder
+/// (outermost first), then the request itself:
+/// - a header replaces every inherited header with the same name (case-insensitive);
+///   a disabled one switches the inherited header off;
+/// - a setting overrides the inherited value; relative paths resolve against the
+///   file that set them.
+///
+/// Values of secret variables that were used end up in `settings.secrets`, so they are
+/// hidden in traces.
 pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -> Result<Request> {
     let item = collection.find(key_path).ok_or_else(|| {
         Error::invalid(
@@ -25,24 +34,60 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
             format!("no request `{key_path}` in the collection"),
         )
     })?;
-    let file_path = collection.root.join(&item.path);
-    let base_dir = file_path.parent().unwrap_or(&collection.root).to_path_buf();
+
+    let root = &collection.root;
+    let mut layers: Vec<(PathBuf, PathBuf, &KeyValues, &Settings)> = vec![(
+        root.join(COLLECTION_FILE),
+        root.clone(),
+        &collection.file.headers,
+        &collection.file.settings,
+    )];
+    for folder in collection.folders_of(key_path) {
+        let dir = root.join(&folder.path);
+        layers.push((
+            dir.join(FOLDER_FILE),
+            dir,
+            &folder.file.headers,
+            &folder.file.settings,
+        ));
+    }
+
     let mut b = Builder {
         interp: Interpolator::new(scopes),
-        file: &file_path,
-        base_dir: &base_dir,
+        file: PathBuf::new(),
+        base_dir: PathBuf::new(),
     };
-    let mut req = b.request(item)?;
+    let mut headers = Vec::new();
+    let mut settings = RequestSettings::default();
+    for (file, dir, layer_headers, layer_settings) in layers {
+        b.file = file;
+        b.base_dir = dir;
+        let layer = b.key_values("headers", layer_headers)?;
+        merge_headers(&mut headers, layer);
+        settings = b.settings(layer_settings, settings)?;
+    }
+
+    let file_path = root.join(&item.path);
+    b.base_dir = file_path.parent().unwrap_or(root).to_path_buf();
+    b.file = file_path;
+    let mut req = b.request(item, headers, settings)?;
     req.settings.secrets = b.interp.into_secrets();
     Ok(req)
 }
 
+/// Appends `layer` to `inherited`, first removing inherited headers that `layer`
+/// names again (case-insensitive).
+fn merge_headers(inherited: &mut Vec<KeyValue>, layer: Vec<KeyValue>) {
+    inherited.retain(|h| !layer.iter().any(|l| l.name.eq_ignore_ascii_case(&h.name)));
+    inherited.extend(layer);
+}
+
 struct Builder<'a> {
     interp: Interpolator<'a>,
-    /// The request file, for error messages.
-    file: &'a Path,
+    /// The file being processed, for error messages.
+    file: PathBuf,
     /// Relative paths are resolved against this directory.
-    base_dir: &'a Path,
+    base_dir: PathBuf,
 }
 
 impl Builder<'_> {
@@ -50,7 +95,7 @@ impl Builder<'_> {
     fn text(&mut self, field: &str, text: &str) -> Result<String> {
         self.interp
             .interpolate(text)
-            .map_err(|e| Error::invalid(self.file, format!("{field}: {e}")))
+            .map_err(|e| Error::invalid(&self.file, format!("{field}: {e}")))
     }
 
     fn path(&mut self, field: &str, path: &Path) -> Result<PathBuf> {
@@ -79,17 +124,24 @@ impl Builder<'_> {
             .collect()
     }
 
-    fn request(&mut self, item: &RequestItem) -> Result<Request> {
+    fn request(
+        &mut self,
+        item: &RequestItem,
+        mut headers: Vec<KeyValue>,
+        settings: RequestSettings,
+    ) -> Result<Request> {
         let f = &item.file;
         let method = http::Method::from_bytes(f.method().as_bytes())
-            .map_err(|_| Error::invalid(self.file, format!("invalid method `{}`", f.method())))?;
+            .map_err(|_| Error::invalid(&self.file, format!("invalid method `{}`", f.method())))?;
         let mut req = Request::new(method, self.text("url", &f.url)?);
         req.query = self.key_values("query", &f.query)?;
-        req.headers = self.key_values("headers", &f.headers)?;
+        let own = self.key_values("headers", &f.headers)?;
+        merge_headers(&mut headers, own);
+        req.headers = headers;
         if let Some(body) = &f.body {
             req.body = self.body(body)?;
         }
-        req.settings = self.settings(&f.settings, RequestSettings::default())?;
+        req.settings = self.settings(&f.settings, settings)?;
         Ok(req)
     }
 
@@ -195,7 +247,7 @@ impl Builder<'_> {
             base.proxy = match p {
                 snapreq_core::model::ProxyMode::Url(u) => {
                     snapreq_core::model::ProxyMode::try_from(self.text("settings.proxy", u)?)
-                        .map_err(|e| Error::invalid(self.file, format!("settings.proxy: {e}")))?
+                        .map_err(|e| Error::invalid(&self.file, format!("settings.proxy: {e}")))?
                 }
                 other => other.clone(),
             };
