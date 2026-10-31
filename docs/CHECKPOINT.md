@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
-- **Current checkpoint:** P3.6, collection commands in the CLI (last checkpoint of Phase 3)
+- **Phase:** 4 Authentication helpers, starting (Phases 0–3 complete)
+- **Current checkpoint:** P4.1, Basic, Bearer and API-key auth
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,16 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P3.6: CLI commands for collections (in `snapreq-cli`):
-   - `snapreq send <collection-dir>/<path/to/request.toml>` or `snapreq send -c DIR users/create-user`: detect a
-     `.toml` request inside a collection (walk up to find `snapreq.toml`), build it with
-     `Scopes::for_request` + `Secrets::fill` + `build_request`, then reuse the existing execution/output path.
-     Options: `-e/--env NAME`, `--var name=value` (runtime scope, repeatable). CLI flags given explicitly still
-     override settings from files (timeouts, -k, proxy…) — decide precedence: explicit CLI flag > file.
-   - `snapreq ls [DIR]`: tree of folders/requests with method + name; `--env` list environments.
-   - `snapreq new collection DIR --name X`, `snapreq new request DIR/path.toml METHOD URL`.
-   - `snapreq secret set NAME [-e ENV]` (value from stdin/prompt, not argv, so it stays out of shell history).
-   - Snapshot/e2e tests with the fixture collection; docs/CLI.md section. Then Phase 3 done → Phase 4 auth.
+1. P4.1: auth in the model and the collection format. Core: `snapreq_core::model::Auth` enum (None, Basic{user,pass},
+   Bearer{token}, ApiKey{name, value, location: header|query}) on `Request`, applied by the engine when building the
+   request (so redirects can drop it cross-origin: credentials must follow the same rule as Authorization headers),
+   values learned as secrets for redaction. Collection format: `[auth]` table with `type = "basic" | "bearer" |
+   "api_key" | "none" | "inherit"` (default inherit) in snapreq.toml / folder.toml / request files; interpolated.
+   CLI: `--auth basic:user:pass`? Prefer `-u user[:pass]` (curl) and `--bearer TOKEN`. Update FORMAT.md + CLI.md.
+   Then P4.2 Digest, P4.3 OAuth 2.0, P4.4 AWS SigV4, P4.5 inheritance details.
+
+## CLI collection notes (P3.6)
+- `crates/snapreq-cli/src/collection_cmd.rs`: `resolve_target` (`-c DIR KEY`, a `.toml` path inside a collection, or a key from inside a collection dir; otherwise URL), `build` (load → env → `--var` runtime scope → `Secrets::fill` → `build_request` → `apply_overrides`), `ls`, `new_collection`, `new_request`, `secret_set` (rpassword prompt or stdin).
+- `send.rs`: `apply_overrides` only touches what was given on the command line (explicit flags win over files).
+- A `--var` value for a variable declared secret anywhere is added to `settings.secrets` (`Scopes::is_declared_secret`).
+- Globals scope is still empty in the CLI (a user-level globals file can come later, e.g. with the server).
 
 ## Inheritance notes (P3.5)
 - `build_request` layers collection → folders (outer→inner) → request. Headers: `merge_headers` removes inherited names (case-insensitive) that a layer sets again, then appends the layer (disabled entries switch inherited headers off). Settings: `Builder::settings(layer, base)` applied per layer with that layer's file/dir for paths and error messages.
@@ -178,7 +181,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
-| 3 Collections & environments | 🟨 in progress (P3.1–P3.5 done) |
+| 3 Collections & environments | ✅ done |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
@@ -218,6 +221,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P3.3 — 2026-10-31 — `{{var}}` interpolation, dynamic variables, building core requests from collections. 212 tests total.
 - P3.4 — 2026-10-31 — Secrets from SNAPREQ_SECRET_* env vars and git-ignored `.secrets/` files. 217 tests total.
 - P3.5 — 2026-10-31 — Header and settings inheritance from collection and folders. 220 tests total.
+- P3.6 — 2026-10-31 — CLI: send collection requests (-c/-e/--var), ls, new, secret set. Phase 3 complete. 227 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -231,3 +235,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (9):** P1.6a–P1.9 done and pushed (decompression, redirects, HTTP/2, proxies, cookies, wire capture/redaction, benchmarks). Phase 1 complete.
 - **2026-10-31 (10):** Phase 2 (CLI MVP) complete: send command, pretty output, verbose trace, waterfall, JSON output, snapshots. CI watcher now polls once a minute (GitHub's 60 requests/hour unauthenticated limit).
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
+- **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.

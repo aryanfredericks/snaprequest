@@ -26,18 +26,14 @@ fn err<T>(msg: impl Into<String>) -> Result<T, ArgError> {
     Err(ArgError(msg.into()))
 }
 
-/// Builds the request described by `args`.
+/// Builds the request for `snapreq send [METHOD] URL`.
 pub(crate) fn build_request(args: &SendArgs) -> Result<Request, ArgError> {
-    let body = body(args)?;
+    let has_body = !body(args)?.is_none();
     let (method, url) = match args.target.as_slice() {
-        [url] => {
-            let method = if body.is_none() {
-                Method::GET
-            } else {
-                Method::POST
-            };
-            (method, url.clone())
-        }
+        [url] => (
+            if has_body { Method::POST } else { Method::GET },
+            url.clone(),
+        ),
         [method, url] => {
             let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
                 .map_err(|_| ArgError(format!("invalid HTTP method `{method}`")))?;
@@ -45,20 +41,37 @@ pub(crate) fn build_request(args: &SendArgs) -> Result<Request, ArgError> {
         }
         _ => return err("expected `[METHOD] URL`"),
     };
+    let mut req = Request::new(method, with_default_scheme(&url));
+    apply_overrides(&mut req, args)?;
+    Ok(req)
+}
 
-    let mut req = Request::new(method, with_default_scheme(&url)).body(body);
+/// Applies the options given on the command line on top of `req`. Options that were
+/// not given leave `req` unchanged, so settings from collection files are kept.
+///
+/// - `-H` replaces headers of the same name (case-insensitive) and adds new ones;
+/// - `-q` adds query parameters;
+/// - a body option replaces the body;
+/// - every connection, TLS and output option overrides the matching setting.
+pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), ArgError> {
     for h in &args.headers {
         let (name, value) = h
             .split_once(':')
             .ok_or_else(|| ArgError(format!("invalid header `{h}`, expected `Name: value`")))?;
-        if name.trim().is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return err(format!("invalid header `{h}`, the name is empty"));
         }
-        req.headers.push(KeyValue::new(name.trim(), value.trim()));
+        req.headers.retain(|e| !e.name.eq_ignore_ascii_case(name));
+        req.headers.push(KeyValue::new(name, value.trim()));
     }
     for q in &args.query {
         let (name, value) = q.split_once('=').unwrap_or((q, ""));
         req.query.push(KeyValue::new(name, value));
+    }
+    let body = body(args)?;
+    if !body.is_none() {
+        req.body = body;
     }
 
     let s = &mut req.settings;
@@ -80,25 +93,45 @@ pub(crate) fn build_request(args: &SendArgs) -> Result<Request, ArgError> {
         s.resolve
             .push(r.parse::<ResolveOverride>().map_err(ArgError)?);
     }
-    s.follow_redirects = !args.no_follow;
+    if args.no_follow {
+        s.follow_redirects = false;
+    }
     if let Some(n) = args.max_redirs {
         s.max_redirects = n;
     }
-    s.decompress = !args.no_decompress;
-    s.cookies = !args.no_cookies;
-    s.tls.verify = !args.insecure;
-    s.tls.ca_cert.clone_from(&args.cacert);
+    if args.no_decompress {
+        s.decompress = false;
+    }
+    if args.no_cookies {
+        s.cookies = false;
+    }
+    if args.insecure {
+        s.tls.verify = false;
+    }
+    if let Some(ca) = &args.cacert {
+        s.tls.ca_cert = Some(ca.clone());
+    }
     if let (Some(cert), Some(key)) = (&args.cert, &args.key) {
         s.tls.client_cert = Some(ClientCertificate {
             cert: cert.clone(),
             key: key.clone(),
         });
     }
-    s.tls.min_version = args.tls_min.map(tls_version);
-    s.tls.max_version = args.tls_max.map(tls_version);
-    s.capture_wire = args.verbose >= 2;
-    s.secrets.clone_from(&args.secrets);
-    Ok(req)
+    if let Some(v) = args.tls_min {
+        s.tls.min_version = Some(tls_version(v));
+    }
+    if let Some(v) = args.tls_max {
+        s.tls.max_version = Some(tls_version(v));
+    }
+    if args.verbose >= 2 {
+        s.capture_wire = true;
+    }
+    for secret in &args.secrets {
+        if !s.secrets.contains(secret) {
+            s.secrets.push(secret.clone());
+        }
+    }
+    Ok(())
 }
 
 fn body(args: &SendArgs) -> Result<Body, ArgError> {
@@ -215,7 +248,9 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Request, ArgError> {
         let cli = Cli::try_parse_from(["snapreq", "send"].iter().chain(args)).unwrap();
-        let Command::Send(send) = cli.command;
+        let Command::Send(send) = cli.command else {
+            panic!("expected the send command");
+        };
         build_request(&send)
     }
 

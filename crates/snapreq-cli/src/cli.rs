@@ -17,6 +17,8 @@ pub(crate) struct Cli {
     pub command: Command,
 }
 
+// Parsed once per process; boxing `SendArgs` would only add noise.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     /// Send one HTTP request and show the response.
@@ -25,15 +27,98 @@ pub(crate) enum Command {
     ///   snapreq send https://httpbin.org/get
     ///   snapreq send POST https://api.example.com/users --json '{"name":"snap"}'
     ///   snapreq send PUT https://api.example.com/avatar -F image=@me.png -H 'Authorization: Bearer TOKEN'
+    ///   snapreq send my-api/users/create-user.toml -e dev --var name=snap
+    ///   snapreq send -c my-api users/create-user -e prod
     #[command(verbatim_doc_comment)]
     Send(SendArgs),
+
+    /// List the folders and requests of a collection.
+    Ls(LsArgs),
+
+    /// Create a collection or a request file.
+    #[command(subcommand)]
+    New(NewCommand),
+
+    /// Manage secret values (stored outside the collection, never committed).
+    #[command(subcommand)]
+    Secret(SecretCommand),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LsArgs {
+    /// Collection directory (default: the current one, or the nearest parent with `snapreq.toml`).
+    #[arg(value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum NewCommand {
+    /// Create a new collection in DIR.
+    Collection {
+        /// Directory to create (must not contain a collection yet).
+        dir: PathBuf,
+        /// Collection name (default: the directory name).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Create a request file inside a collection.
+    Request {
+        /// Path of the new file, e.g. `my-api/users/get-user.toml`.
+        path: PathBuf,
+        /// `[METHOD] URL`.
+        #[arg(value_name = "METHOD_OR_URL", num_args = 1..=2, required = true)]
+        target: Vec<String>,
+        /// Display name.
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SecretCommand {
+    /// Store a secret value in `.secrets/<env>.toml` (or `.secrets/shared.toml`).
+    /// The value is read from a hidden prompt, or from stdin when it is not a terminal.
+    Set {
+        /// Variable name.
+        name: String,
+        /// Environment the value is for (default: shared by all environments).
+        #[arg(short = 'e', long = "env")]
+        env: Option<String>,
+        /// Collection directory (default: the current one, or the nearest parent).
+        #[arg(short = 'c', long = "collection", value_name = "DIR")]
+        collection: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct SendArgs {
-    /// `[METHOD] URL`. The method defaults to GET, or POST when a body is given.
-    #[arg(value_name = "METHOD_OR_URL", num_args = 1..=2, required = true)]
+    /// `[METHOD] URL`, a request file (`dir/req.toml`), or a request key with `-c`.
+    /// The method defaults to GET, or POST when a body is given.
+    #[arg(value_name = "TARGET", num_args = 1..=2, required = true)]
     pub target: Vec<String>,
+
+    // --- Collection --------------------------------------------------------------
+    /// Collection directory; TARGET is then a request key such as `users/create-user`.
+    #[arg(
+        short = 'c',
+        long = "collection",
+        value_name = "DIR",
+        help_heading = "Collection"
+    )]
+    pub collection: Option<PathBuf>,
+
+    /// Environment to use (`environments/<NAME>.toml`).
+    #[arg(
+        short = 'e',
+        long = "env",
+        value_name = "NAME",
+        help_heading = "Collection"
+    )]
+    pub env: Option<String>,
+
+    /// Set a variable for this run, `name=value` (highest precedence). Repeatable.
+    #[arg(long = "var", value_name = "NAME=VALUE", help_heading = "Collection")]
+    pub vars: Vec<String>,
 
     // --- Request -----------------------------------------------------------------
     /// Request header, `Name: value`. Repeatable.

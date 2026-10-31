@@ -2,6 +2,9 @@
 
 ```
 snapreq send [METHOD] URL [OPTIONS]
+snapreq send REQUEST_FILE.toml [-e ENV] [--var name=value] [OPTIONS]
+snapreq send -c COLLECTION_DIR REQUEST_KEY [-e ENV] [OPTIONS]
+snapreq ls | new | secret …
 ```
 
 `METHOD` defaults to `GET`, or `POST` when a body option is given. A URL without a scheme gets
@@ -18,6 +21,42 @@ snapreq send https://api.example.com/upload -F title=Holiday -F photo=@beach.jpg
 snapreq send https://internal.test/health --cacert company-ca.pem
 snapreq send https://staging.example.com/ --resolve staging.example.com:443:10.0.0.5
 ```
+
+## Collections
+
+Requests saved in a [collection](FORMAT.md) run with the same `send` command:
+
+```sh
+snapreq send my-api/users/create-user.toml -e dev        # a request file
+snapreq send -c my-api users/create-user -e prod         # a request key in a collection
+cd my-api && snapreq send users/create-user              # from inside the collection
+snapreq send my-api/health.toml --var base_url=http://localhost:9000
+```
+
+| Option | Meaning |
+|---|---|
+| `-c, --collection DIR` | The collection; TARGET is then a request key like `users/create-user`. |
+| `-e, --env NAME` | Use `environments/NAME.toml`. |
+| `--var name=value` | Set a variable for this run; it wins over every other scope (repeatable). |
+
+Headers, settings and variables are inherited as described in [FORMAT.md](FORMAT.md). Options given
+on the command line win over the files for that run: `-H` replaces headers of the same name, `-q`
+adds query parameters, a body option replaces the body, and every connection, TLS and output option
+overrides the matching setting. Options you do not give leave the files' settings alone.
+
+Other collection commands:
+
+```sh
+snapreq ls [DIR]                                   # folders, requests and environments
+snapreq new collection my-api [--name "My API"]    # creates my-api/snapreq.toml
+snapreq new request my-api/users/get.toml GET '{{base_url}}/users/{{id}}' --name "Get user"
+snapreq secret set token -e prod [-c my-api]       # prompts for the value (hidden)
+echo "$TOKEN" | snapreq secret set token -e prod   # or reads it from stdin
+```
+
+Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment variables, then
+`.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
+every trace and output, including when given with `--var`.
 
 ## Output
 

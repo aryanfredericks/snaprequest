@@ -39,6 +39,7 @@ insta = "1"
 mime_guess = "2"
 percent-encoding = "2"
 rcgen = "0.14"
+rpassword = "7"
 ring = "0.17"
 ruzstd = "0.9"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

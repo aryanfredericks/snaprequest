@@ -329,6 +329,14 @@ impl Scopes {
         self.layers.push((Scope::Runtime, vars));
     }
 
+    /// Whether any scope declares `name` as a secret (so a value given at runtime is
+    /// hidden too).
+    pub fn is_declared_secret(&self, name: &str) -> bool {
+        self.layers
+            .iter()
+            .any(|(_, vars)| vars.get(name).is_some_and(|v| v.secret))
+    }
+
     /// Calls `f` on every variable in every scope (used to fill in secret values).
     pub fn for_each_variable_mut(&mut self, mut f: impl FnMut(&mut Variable)) {
         for (_, vars) in &mut self.layers {

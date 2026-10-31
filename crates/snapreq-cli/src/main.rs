@@ -1,6 +1,7 @@
 //! `snapreq`: fast, self-hosted HTTP API testing and debugging.
 
 mod cli;
+mod collection_cmd;
 #[cfg(test)]
 mod fixtures;
 mod json_out;
@@ -18,7 +19,7 @@ use clap::Parser;
 use snapreq_core::{Client, Error};
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, ColorArg, Command, FormatArg, SendArgs};
+use crate::cli::{Cli, ColorArg, Command, FormatArg, NewCommand, SecretCommand, SendArgs};
 use crate::output::Parts;
 
 /// Process exit codes. Documented in `docs/CLI.md`; keep both in sync.
@@ -58,6 +59,26 @@ async fn main() -> ExitCode {
 
     let code = match cli.command {
         Command::Send(args) => run_send(&args).await,
+        Command::Ls(args) => report(collection_cmd::ls(
+            args.dir.as_deref(),
+            &mut std::io::stdout().lock(),
+        )),
+        Command::New(NewCommand::Collection { dir, name }) => report(
+            collection_cmd::new_collection(&dir, name.as_deref())
+                .map(|p| eprintln!("created {}", p.display())),
+        ),
+        Command::New(NewCommand::Request { path, target, name }) => report(
+            collection_cmd::new_request(&path, &target, name.as_deref())
+                .map(|p| eprintln!("created {}", p.display())),
+        ),
+        Command::Secret(SecretCommand::Set {
+            name,
+            env,
+            collection,
+        }) => report(
+            collection_cmd::secret_set(&name, env.as_deref(), collection.as_deref())
+                .map(|p| eprintln!("stored `{name}` in {}", p.display())),
+        ),
     };
     ExitCode::from(code)
 }
@@ -79,7 +100,13 @@ async fn run_send(args: &SendArgs) -> u8 {
         exit::INVALID_REQUEST
     };
 
-    let request = match send::build_request(args) {
+    let built = collection_cmd::resolve_target(args).and_then(|target| match target {
+        collection_cmd::Target::Url => send::build_request(args),
+        collection_cmd::Target::Collection { root, key } => {
+            collection_cmd::build(&root, &key, args)
+        }
+    });
+    let request = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
     };
@@ -176,6 +203,17 @@ async fn run_send(args: &SendArgs) -> u8 {
                 Error::Execution(_) => exit::NETWORK,
                 _ => exit::INVALID_REQUEST,
             }
+        }
+    }
+}
+
+/// Prints an error for commands other than `send`; returns the exit code.
+fn report(result: Result<(), send::ArgError>) -> u8 {
+    match result {
+        Ok(()) => exit::OK,
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit::INVALID_REQUEST
         }
     }
 }
