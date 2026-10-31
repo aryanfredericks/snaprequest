@@ -3,11 +3,13 @@
 //! This crate must stay free of UI, CLI and storage concerns so that the CLI,
 //! the server and any future front end can all share it.
 
+pub mod client;
 pub mod error;
 pub mod model;
 mod serde_util;
 
-pub use error::{Error, Result};
+pub use client::{Client, ClientConfig};
+pub use error::{Error, ExecutionError, Result};
 pub use model::{Body, Request, Response};
 
 /// Version of the SnapRequest core crate.

@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.2, basic execution with hyper
+- **Current checkpoint:** P1.3, body types
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,20 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.2: `snapreq_core::Client` with `execute(&Request) -> Result<Response>`. hyper 1.x + hyper-util,
-   HTTP/1.1, connection pool, methods, headers, query, text/JSON bodies. Fill `Response` (status, version, headers,
-   body, sizes, final URL) and emit the trace events available without the custom connector
-   (`RequestHeaders`, `RequestSent`, `ResponseFirstByte`, `ResponseHeaders`, `ResponseComplete`).
-   Integration tests against a local hyper test server (no internet in tests).
-   DNS/connect/TLS events arrive with the instrumented connector in P1.4.
+1. P1.3: multipart (with file upload) and file bodies, streamed from disk instead of buffered.
+   Currently `build::encode_body` returns `Error::Unsupported` for `Body::Multipart` and `Body::File`.
+   The request body type is `Full<Bytes>`; switch to a boxed/streaming body (`http_body_util::combinators::BoxBody` or `StreamBody`).
+   Content-Length for multipart should be computed up front when all file sizes are known.
+
+## Engine notes (P1.2)
+- `crates/snapreq-core/src/client/`: `mod.rs` (Client, execute, exchange, retry), `conn.rs` (connect + pool), `meter.rs` (MeteredIo socket wrapper), `recorder.rs` (trace + failure), `build.rs` (model → http::Request).
+- Own pool per ADR-010. Pool key = scheme/host/port. Idle timeout 90 s, max 8 idle per host.
+- A pooled connection that fails before any response byte is retried once on a new connection (trace shows an `info` event).
+- DNS uses `tokio::net::lookup_host` for now and tries addresses sequentially; hickory + Happy Eyeballs + `--resolve` overrides belong to P1.4.
+- HTTPS returns `Error::Unsupported` until TLS lands (P1.4/P1.5).
+- Request headers go out title-cased (hyper `title_case_headers`); response header names are lowercase (hyper normalizes). Exact bytes come with wire capture (P1.8).
+- `Sizes.response_headers` = bytes read − body bytes, so it includes chunked framing overhead until P1.8.
+- Example: `cargo run -p snapreq-core --example get -- http://example.com/`.
 
 ## Model notes (P1.1, for later phases)
 - Model lives in `crates/snapreq-core/src/model/`: `Request`, `Body`, `KeyValue`, `RequestSettings`, `Response`, `Timings`, `Sizes`, `TraceEntry`/`TraceEvent`, `TlsInfo`, `CertificateInfo`.
@@ -43,7 +51,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1, P1.2 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -63,9 +71,11 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P0.4 — 2026-10-31 — Shared dependency versions in `[workspace.dependencies]`; workspace lints (`unsafe_code = forbid`, clippy warnings); `thiserror` error enum and `Result` alias per library crate; CLI uses `anyhow` + `tracing` (level via `--log-level` or `SNAPREQ_LOG`); release profile (thin LTO, strip).
 - P0.3 — 2026-10-31 — GitHub Actions CI (fmt, clippy, tests on Linux/macOS/Windows, MSRV 1.85, cargo-deny). First run all green.
 - P1.1 — 2026-10-31 — Request/response/trace data model with serde, 22 unit tests.
+- P1.2 — 2026-10-31 — `Client::execute` over HTTP/1.1 with own connection pool, socket metering, timeouts, stale-connection retry. 47 tests total (16 integration tests against local servers).
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
 - **2026-10-31 (2):** Decisions settled (SnapRequest / MIT / Svelte+TS / TOML). Renamed docs. Did P0.1, P0.2, P0.4 and wrote P0.3. `cargo fmt`, `clippy -D warnings` and `cargo test` all pass; `snapreq --version` prints `snapreq 0.1.0`.
 - **2026-10-31 (3):** `LICENSE` and `authors` set to Aryan Fredericks; repo URLs in `Cargo.toml` point to github.com/aryanfredericks/snaprequest; added `origin` remote; renamed the local folder to `snap-request`.
 - **2026-10-31 (4):** First commit pushed to GitHub (authored by Aryan Fredericks only; no Claude attribution). CI all green, Phase 0 done. P1.1 done: data model in `snapreq-core` (added `http`, `url`, `bytes`, `base64` deps; `clippy.toml` allows unwrap in tests).
+- **2026-10-31 (5):** P1.1 committed and pushed (CI green). P1.2 done: HTTP/1.1 engine (ADR-010: own pool on hyper's low-level conn API). Verified against http://example.com.

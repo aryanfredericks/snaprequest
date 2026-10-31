@@ -58,3 +58,13 @@ TOML is chosen over YAML because the Rust YAML ecosystem is unsettled and TOML h
 **Context:** Most API tests are simple checks. Embedding a JS engine adds size and security surface.
 **Decision:** Phase 5 ships declarative assertions in TOML; Phase 9 adds sandboxed JS via `rquickjs`.
 **Consequences:** CI usage is possible early, and scripting can be designed with real user feedback.
+
+## ADR-010: Own connection pool on hyper's low-level connection API
+**Status:** Accepted (2026-10-31)
+**Context:** hyper-util's pooled `Client` opens connections in the background, separate from the request that
+triggered them, so DNS/connect/TLS timings cannot be attributed to a specific request's trace.
+**Decision:** Use `hyper::client::conn::http1` (and `http2` later) directly. `snapreq-core` resolves, connects,
+handshakes and pools connections itself (keyed by scheme, host, port), and wraps every socket in a metering
+I/O adapter that records bytes and the first-read/last-write instants.
+**Consequences:** Exact per-request trace events, connection-reuse visibility and byte counts. We own pool
+correctness (idle timeouts, closed-connection detection).
