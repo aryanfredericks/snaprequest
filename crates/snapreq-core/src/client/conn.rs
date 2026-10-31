@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -21,24 +21,28 @@ use super::body::ReqBody;
 use super::error_chain;
 use super::meter::{Meter, MeteredIo};
 use super::recorder::Recorder;
-use super::tls;
+use super::tls::{self, RequestTls};
 use crate::Result;
-use crate::model::{Phase, RequestSettings, TraceEvent};
+use crate::model::{Phase, RequestSettings, TlsSettings, TraceEvent};
 
-/// Connections are shared only between requests to the same scheme, host and port.
+/// Connections are shared only between requests to the same scheme, host and port,
+/// and (for HTTPS) the same TLS settings, so a connection opened with verification
+/// off is never handed to a request that verifies.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PoolKey {
     scheme: String,
     host: String,
     port: u16,
+    tls: Option<TlsSettings>,
 }
 
 impl PoolKey {
-    pub(crate) fn new(url: &Url) -> Self {
+    pub(crate) fn new(url: &Url, tls: &TlsSettings) -> Self {
         Self {
             scheme: url.scheme().to_owned(),
             host: url.host_str().unwrap_or_default().to_ascii_lowercase(),
             port: url.port_or_known_default().unwrap_or(80),
+            tls: (url.scheme() == "https").then(|| tls.clone()),
         }
     }
 }
@@ -111,7 +115,7 @@ const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 pub(crate) async fn connect(
     url: &Url,
     settings: &RequestSettings,
-    tls: &Arc<rustls::ClientConfig>,
+    tls: Option<&RequestTls>,
     rec: &mut Recorder,
 ) -> Result<Conn> {
     let port = url.port_or_known_default().unwrap_or(80);
@@ -147,10 +151,9 @@ pub(crate) async fn connect(
     // Disabling Nagle avoids an artificial delay between headers and a small body.
     let _ = tcp.set_nodelay(true);
 
-    let stream = if url.scheme() == "https" {
-        MaybeTls::Tls(Box::new(tls::handshake(tls.clone(), tcp, url, rec).await?))
-    } else {
-        MaybeTls::Plain(tcp)
+    let stream = match tls {
+        Some(tls) => MaybeTls::Tls(Box::new(tls::handshake(tls, tcp, url, rec).await?)),
+        None => MaybeTls::Plain(tcp),
     };
 
     let meter = Meter::default();

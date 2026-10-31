@@ -9,7 +9,7 @@ Open-source, self-hosted HTTP API testing and debugging tool in Rust (CLI + self
 
 ## Working rules
 - One checkpoint at a time. A checkpoint is done only when its acceptance criteria pass and
-  `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` are clean.
+  `scripts/check.sh` passes (fmt, clippy -D warnings, tests, cargo-deny, MSRV build).
 - Tests ship together with features.
 - `snapreq-core` must stay free of UI, CLI and storage concerns.
 - Libraries use `thiserror`; binaries use `anyhow`. Logging through `tracing`.

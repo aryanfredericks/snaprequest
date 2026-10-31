@@ -14,5 +14,7 @@ pub(crate) use body::guess_content_type;
 pub use body::{Body, KeyValue, MultipartPart, PartValue};
 pub use request::Request;
 pub use response::{Header, HttpVersion, Response, Sizes, Timings};
-pub use settings::{HttpVersionPref, RequestSettings, ResolveOverride};
+pub use settings::{
+    ClientCertificate, HttpVersionPref, RequestSettings, ResolveOverride, TlsSettings, TlsVersion,
+};
 pub use trace::{CertificateInfo, Phase, TlsInfo, TraceEntry, TraceEvent};

@@ -60,10 +60,10 @@ pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Resul
     if !has_header(req, "accept") {
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
     }
-    if let Some(ct) = &body.content_type {
-        if !has_header(req, "content-type") {
-            headers.insert(header::CONTENT_TYPE, header_value(ct)?);
-        }
+    if let Some(ct) = &body.content_type
+        && !has_header(req, "content-type")
+    {
+        headers.insert(header::CONTENT_TYPE, header_value(ct)?);
     }
     if !req.body.is_none() && !has_header(req, "content-length") {
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len));

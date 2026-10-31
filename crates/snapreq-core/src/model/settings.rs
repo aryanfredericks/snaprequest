@@ -1,6 +1,7 @@
 //! Per-request execution settings.
 
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -24,8 +25,8 @@ pub struct RequestSettings {
     pub follow_redirects: bool,
     /// Maximum number of redirects to follow.
     pub max_redirects: u32,
-    /// Verify the server's TLS certificate. Turning this off is insecure.
-    pub verify_tls: bool,
+    /// TLS options (only used for `https` URLs).
+    pub tls: TlsSettings,
     /// Which HTTP version to use.
     pub http_version: HttpVersionPref,
     /// Transparently decompress gzip/br/zstd/deflate responses.
@@ -43,12 +44,69 @@ impl Default for RequestSettings {
             timeout: Some(Duration::from_secs(30)),
             follow_redirects: true,
             max_redirects: 10,
-            verify_tls: true,
+            tls: TlsSettings::default(),
             http_version: HttpVersionPref::Auto,
             decompress: true,
             resolve: Vec::new(),
         }
     }
+}
+
+/// TLS options for one request.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TlsSettings {
+    /// Verify the server's certificate chain and host name. Turning this off is insecure;
+    /// the trace still reports what verification would have said.
+    pub verify: bool,
+    /// PEM file with extra CA certificates to trust, in addition to the system store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_cert: Option<PathBuf>,
+    /// Client certificate for mutual TLS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_cert: Option<ClientCertificate>,
+    /// Lowest TLS version to allow. `None` means TLS 1.2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<TlsVersion>,
+    /// Highest TLS version to allow. `None` means TLS 1.3.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_version: Option<TlsVersion>,
+}
+
+impl Default for TlsSettings {
+    fn default() -> Self {
+        Self {
+            verify: true,
+            ca_cert: None,
+            client_cert: None,
+            min_version: None,
+            max_version: None,
+        }
+    }
+}
+
+impl TlsSettings {
+    /// `true` when nothing differs from the defaults.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// A client certificate chain and its private key, both PEM files.
+/// They may be the same file if it contains both.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClientCertificate {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+}
+
+/// A TLS protocol version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TlsVersion {
+    #[serde(rename = "1.2")]
+    Tls12,
+    #[serde(rename = "1.3")]
+    Tls13,
 }
 
 /// Pins `host` (optionally only on `port`) to fixed addresses.
@@ -128,9 +186,11 @@ mod tests {
     #[test]
     fn partial_settings_fill_in_defaults() {
         let s: RequestSettings =
-            serde_json::from_value(json!({ "timeout_ms": 1500.5, "verify_tls": false })).unwrap();
+            serde_json::from_value(json!({ "timeout_ms": 1500.5, "tls": { "verify": false } }))
+                .unwrap();
         assert_eq!(s.timeout, Some(Duration::from_micros(1_500_500)));
-        assert!(!s.verify_tls);
+        assert!(!s.tls.verify);
+        assert_eq!(s.tls.min_version, None);
         assert_eq!(s.max_redirects, RequestSettings::default().max_redirects);
     }
 
@@ -179,6 +239,22 @@ mod tests {
                 "`{bad}` should not parse"
             );
         }
+    }
+
+    #[test]
+    fn tls_settings_json() {
+        let tls: TlsSettings = serde_json::from_value(json!({
+            "min_version": "1.2",
+            "max_version": "1.3",
+            "client_cert": { "cert": "me.crt", "key": "me.key" }
+        }))
+        .unwrap();
+        assert!(tls.verify);
+        assert_eq!(tls.min_version, Some(TlsVersion::Tls12));
+        assert!(TlsVersion::Tls12 < TlsVersion::Tls13);
+        assert!(!tls.is_default());
+        assert!(TlsSettings::default().is_default());
+        assert!(serde_json::from_value::<TlsSettings>(json!({ "min_version": "1.1" })).is_err());
     }
 
     #[test]

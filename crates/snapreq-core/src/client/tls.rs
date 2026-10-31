@@ -1,11 +1,17 @@
 //! TLS: trust roots, the traced handshake, and certificate details for the trace.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use rustls::pki_types::{CertificateDer, ServerName};
-use rustls::{ClientConfig as RustlsConfig, ClientConnection, RootCertStore};
+use rustls::client::WebPkiServerVerifier;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::{
+    ClientConfig as RustlsConfig, ClientConnection, DigitallySignedStruct, RootCertStore,
+};
 use time::format_description::well_known::Rfc3339;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -15,7 +21,9 @@ use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 use super::error_chain;
 use super::recorder::Recorder;
-use crate::model::{CertificateInfo, Phase, TlsInfo, TraceEvent};
+use crate::model::{
+    CertificateInfo, ClientCertificate, Phase, TlsInfo, TlsSettings, TlsVersion, TraceEvent,
+};
 use crate::{Error, Result};
 
 /// A DER-encoded X.509 certificate.
@@ -30,9 +38,9 @@ impl Certificate {
 
     /// Parses every certificate in a PEM bundle.
     pub fn from_pem(pem: &[u8]) -> Result<Vec<Self>> {
-        let certs = rustls_pemfile::certs(&mut &pem[..])
+        let certs = CertificateDer::pem_slice_iter(pem)
             .map(|c| c.map(|c| Self(c.to_vec())))
-            .collect::<std::io::Result<Vec<_>>>()
+            .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| Error::InvalidRequest(format!("invalid PEM certificate: {e}")))?;
         if certs.is_empty() {
             return Err(Error::InvalidRequest(
@@ -47,43 +55,232 @@ impl Certificate {
     }
 }
 
-/// Builds the rustls configuration: OS trust store (or Mozilla roots if the OS store
-/// is empty or unreadable) plus any extra roots.
-pub(crate) fn build_config(extra_roots: &[Certificate]) -> Result<Arc<RustlsConfig>> {
-    let mut roots = RootCertStore::empty();
+/// Client-wide TLS state. Loading the OS trust store is the expensive part, so it
+/// happens once; per-request configurations are cheap to build from it.
+#[derive(Debug)]
+pub(crate) struct TlsContext {
+    roots: Arc<RootCertStore>,
+    default: Arc<RustlsConfig>,
+}
 
-    let native = rustls_native_certs::load_native_certs();
-    for err in &native.errors {
-        tracing::debug!(error = %err, "could not load some OS root certificates");
-    }
-    let (added, ignored) = roots.add_parsable_certificates(native.certs);
-    tracing::debug!(added, ignored, "loaded OS root certificates");
-    if added == 0 {
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        tracing::debug!("OS trust store empty, using Mozilla roots");
+/// The TLS configuration for one request.
+#[derive(Debug, Clone)]
+pub(crate) struct RequestTls {
+    config: Arc<RustlsConfig>,
+    /// Set when verification is off: receives what verification would have said.
+    verdict: Option<Arc<Mutex<Option<String>>>>,
+    /// Subject of the client certificate, if one is presented.
+    client_cert_subject: Option<String>,
+}
+
+impl TlsContext {
+    /// OS trust store (or Mozilla roots if it is empty or unreadable) plus `extra_roots`.
+    pub(crate) fn new(extra_roots: &[Certificate]) -> Result<Self> {
+        let mut roots = RootCertStore::empty();
+
+        let native = rustls_native_certs::load_native_certs();
+        for err in &native.errors {
+            tracing::debug!(error = %err, "could not load some OS root certificates");
+        }
+        let (added, ignored) = roots.add_parsable_certificates(native.certs);
+        tracing::debug!(added, ignored, "loaded OS root certificates");
+        if added == 0 {
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            tracing::debug!("OS trust store empty, using Mozilla roots");
+        }
+        for cert in extra_roots {
+            roots
+                .add(CertificateDer::from(cert.as_der().to_vec()))
+                .map_err(|e| Error::InvalidRequest(format!("invalid root certificate: {e}")))?;
+        }
+
+        let roots = Arc::new(roots);
+        let default = build(&roots, &TlsSettings::default(), None, None)?;
+        Ok(Self { roots, default })
     }
 
-    for cert in extra_roots {
-        roots
-            .add(CertificateDer::from(cert.as_der().to_vec()))
-            .map_err(|e| Error::InvalidRequest(format!("invalid root certificate: {e}")))?;
+    /// Configuration for `settings`. Reads CA and client certificate files, so file
+    /// problems surface here, before any connection is made.
+    pub(crate) async fn for_request(&self, settings: &TlsSettings) -> Result<RequestTls> {
+        if settings.is_default() {
+            return Ok(RequestTls {
+                config: self.default.clone(),
+                verdict: None,
+                client_cert_subject: None,
+            });
+        }
+
+        let roots = match &settings.ca_cert {
+            None => self.roots.clone(),
+            Some(path) => {
+                let mut roots = (*self.roots).clone();
+                for cert in Certificate::from_pem(&read_file(path, "CA certificate").await?)
+                    .map_err(|e| Error::InvalidRequest(format!("`{}`: {e}", path.display())))?
+                {
+                    roots.add(CertificateDer::from(cert.0)).map_err(|e| {
+                        Error::InvalidRequest(format!(
+                            "invalid CA certificate in `{}`: {e}",
+                            path.display()
+                        ))
+                    })?;
+                }
+                Arc::new(roots)
+            }
+        };
+
+        let client_auth = match &settings.client_cert {
+            None => None,
+            Some(cc) => Some(load_client_cert(cc).await?),
+        };
+        let client_cert_subject = client_auth
+            .as_ref()
+            .and_then(|(chain, _)| chain.first())
+            .map(|leaf| certificate_info(leaf).subject);
+
+        let verdict = (!settings.verify).then(|| Arc::new(Mutex::new(None)));
+        let config = build(&roots, settings, client_auth, verdict.clone())?;
+        Ok(RequestTls {
+            config,
+            verdict,
+            client_cert_subject,
+        })
+    }
+}
+
+type ClientAuth = (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>);
+
+fn build(
+    roots: &Arc<RootCertStore>,
+    settings: &TlsSettings,
+    client_auth: Option<ClientAuth>,
+    verdict: Option<Arc<Mutex<Option<String>>>>,
+) -> Result<Arc<RustlsConfig>> {
+    let min = settings.min_version.unwrap_or(TlsVersion::Tls12);
+    let max = settings.max_version.unwrap_or(TlsVersion::Tls13);
+    let versions: Vec<&'static rustls::SupportedProtocolVersion> = [
+        (TlsVersion::Tls12, &rustls::version::TLS12),
+        (TlsVersion::Tls13, &rustls::version::TLS13),
+    ]
+    .into_iter()
+    .filter(|(v, _)| (min..=max).contains(v))
+    .map(|(_, p)| p)
+    .collect();
+    if versions.is_empty() {
+        return Err(Error::InvalidRequest(
+            "TLS min_version is higher than max_version".into(),
+        ));
     }
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut config = RustlsConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| Error::InvalidRequest(format!("TLS configuration: {e}")))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let builder = RustlsConfig::builder_with_provider(provider.clone())
+        .with_protocol_versions(&versions)
+        .map_err(|e| Error::InvalidRequest(format!("TLS configuration: {e}")))?;
+
+    let builder = match verdict {
+        None => builder.with_root_certificates(roots.clone()),
+        Some(verdict) => {
+            let inner = WebPkiServerVerifier::builder_with_provider(roots.clone(), provider)
+                .build()
+                .map_err(|e| Error::InvalidRequest(format!("TLS configuration: {e}")))?;
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(RecordingVerifier { inner, verdict }))
+        }
+    };
+
+    let mut config = match client_auth {
+        None => builder.with_no_client_auth(),
+        Some((chain, key)) => builder
+            .with_client_auth_cert(chain, key)
+            .map_err(|e| Error::InvalidRequest(format!("client certificate: {e}")))?,
+    };
     // HTTP/2 negotiation arrives with the HTTP/2 transport.
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 
+async fn read_file(path: &Path, what: &str) -> Result<Vec<u8>> {
+    tokio::fs::read(path)
+        .await
+        .map_err(|e| Error::InvalidRequest(format!("cannot read {what} `{}`: {e}", path.display())))
+}
+
+async fn load_client_cert(cc: &ClientCertificate) -> Result<ClientAuth> {
+    let pem = read_file(&cc.cert, "client certificate").await?;
+    let chain: Vec<CertificateDer<'static>> = Certificate::from_pem(&pem)
+        .map_err(|e| Error::InvalidRequest(format!("`{}`: {e}", cc.cert.display())))?
+        .into_iter()
+        .map(|c| CertificateDer::from(c.0))
+        .collect();
+
+    let key_pem = read_file(&cc.key, "client key").await?;
+    let key = PrivateKeyDer::from_pem_slice(&key_pem).map_err(|e| match e {
+        rustls::pki_types::pem::Error::NoItemsFound => {
+            Error::InvalidRequest(format!("no private key found in `{}`", cc.key.display()))
+        }
+        e => Error::InvalidRequest(format!("`{}`: {e}", cc.key.display())),
+    })?;
+    Ok((chain, key))
+}
+
+/// Accepts any certificate but records what real verification would have decided,
+/// so the trace can say *why* the connection would normally fail. Handshake
+/// signatures are still checked.
+#[derive(Debug)]
+struct RecordingVerifier {
+    inner: Arc<WebPkiServerVerifier>,
+    verdict: Arc<Mutex<Option<String>>>,
+}
+
+impl ServerCertVerifier for RecordingVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+        let outcome = self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        );
+        if let Err(e) = outcome {
+            *self.verdict.lock().unwrap_or_else(|p| p.into_inner()) = Some(e.to_string());
+        }
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
 /// Performs the TLS handshake over `tcp`, recording `TlsStart`/`TlsEnd`.
 /// The certificate is verified against the URL's host, even when the address was pinned.
 pub(crate) async fn handshake(
-    config: Arc<RustlsConfig>,
+    tls: &RequestTls,
     tcp: TcpStream,
     url: &Url,
     rec: &mut Recorder,
@@ -97,12 +294,17 @@ pub(crate) async fn handshake(
         None => return Err(rec.fail("URL has no host", false)),
     };
     let shown = url.host_str().unwrap_or_default().to_owned();
+    if let Some(subject) = &tls.client_cert_subject {
+        rec.record(TraceEvent::Info {
+            message: format!("presenting client certificate {subject}"),
+        });
+    }
     rec.record(TraceEvent::TlsStart {
         server_name: shown.clone(),
     });
 
     let started = Instant::now();
-    let stream = TlsConnector::from(config)
+    let stream = TlsConnector::from(tls.config.clone())
         .connect(server_name, tcp)
         .await
         .map_err(|e| {
@@ -117,6 +319,17 @@ pub(crate) async fn handshake(
         info: tls_info(stream.get_ref().1),
         duration,
     });
+    if let Some(verdict) = &tls.verdict {
+        let verdict = verdict.lock().unwrap_or_else(|p| p.into_inner()).take();
+        rec.record(TraceEvent::Info {
+            message: match verdict {
+                Some(why) => format!(
+                    "TLS verification is DISABLED; this certificate would have been rejected: {why}"
+                ),
+                None => "TLS verification is disabled (the certificate would have passed)".into(),
+            },
+        });
+    }
     Ok(stream)
 }
 
@@ -239,6 +452,65 @@ mod tests {
         let certs = Certificate::from_pem(cert.pem().as_bytes()).unwrap();
         assert_eq!(certs, [Certificate::from_der(cert.der().to_vec())]);
         assert!(Certificate::from_pem(b"nothing here").is_err());
-        assert!(build_config(&certs).is_ok());
+        assert!(TlsContext::new(&certs).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn version_range_must_not_be_empty() {
+        let ctx = TlsContext::new(&[]).unwrap();
+        let err = ctx
+            .for_request(&TlsSettings {
+                min_version: Some(TlsVersion::Tls13),
+                max_version: Some(TlsVersion::Tls12),
+                ..TlsSettings::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("min_version is higher"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn missing_files_are_reported_with_their_path() {
+        let ctx = TlsContext::new(&[]).unwrap();
+        let err = ctx
+            .for_request(&TlsSettings {
+                ca_cert: Some("missing/ca.pem".into()),
+                ..TlsSettings::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot read CA certificate `missing/ca.pem`"),
+            "{err}"
+        );
+
+        let err = ctx
+            .for_request(&TlsSettings {
+                client_cert: Some(ClientCertificate {
+                    cert: "missing/me.crt".into(),
+                    key: "missing/me.key".into(),
+                }),
+                ..TlsSettings::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("cannot read client certificate"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_settings_reuse_the_shared_config() {
+        let ctx = TlsContext::new(&[]).unwrap();
+        let a = ctx.for_request(&TlsSettings::default()).await.unwrap();
+        let b = ctx.for_request(&TlsSettings::default()).await.unwrap();
+        assert!(Arc::ptr_eq(&a.config, &b.config));
     }
 }

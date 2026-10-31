@@ -21,7 +21,6 @@ mime_guess.workspace = true
 ring.workspace = true
 rustls.workspace = true
 rustls-native-certs.workspace = true
-rustls-pemfile.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 time.workspace = true
@@ -34,7 +33,7 @@ webpki-roots.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
-rcgen.workspace = true
+rcgen = { workspace = true, features = ["pem"] }
 rustls.workspace = true
 hyper = { workspace = true, features = ["server", "http1"] }
 serde_json.workspace = true

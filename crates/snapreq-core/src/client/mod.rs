@@ -19,6 +19,7 @@ use http_body_util::BodyExt;
 use self::build::Prepared;
 use self::conn::{Conn, Pool, PoolKey};
 use self::recorder::Recorder;
+use self::tls::{RequestTls, TlsContext};
 use crate::model::{Header, HttpVersion, Phase, Request, Response, Sizes, Timings, TraceEvent};
 use crate::{Error, Result};
 
@@ -60,14 +61,14 @@ pub struct Client {
 struct Inner {
     config: ClientConfig,
     pool: Pool,
-    tls: Arc<rustls::ClientConfig>,
+    tls: TlsContext,
 }
 
 impl Default for Client {
     /// A client with the default configuration (OS trust store, no extra roots).
     fn default() -> Self {
         let config = ClientConfig::default();
-        let tls = tls::build_config(&[])
+        let tls = TlsContext::new(&[])
             // Only extra roots can make this fail, and the default has none.
             .unwrap_or_else(|e| unreachable!("default TLS configuration is valid: {e}"));
         Self::from_parts(config, tls)
@@ -86,11 +87,11 @@ enum Outcome {
 impl Client {
     /// Creates a client. Fails only if an extra root certificate is invalid.
     pub fn new(config: ClientConfig) -> Result<Self> {
-        let tls = tls::build_config(&config.extra_root_certificates)?;
+        let tls = TlsContext::new(&config.extra_root_certificates)?;
         Ok(Self::from_parts(config, tls))
     }
 
-    fn from_parts(config: ClientConfig, tls: Arc<rustls::ClientConfig>) -> Self {
+    fn from_parts(config: ClientConfig, tls: TlsContext) -> Self {
         let pool = Pool::new(config.pool_idle_timeout, config.pool_max_idle_per_host);
         Self {
             inner: Arc::new(Inner { config, pool, tls }),
@@ -107,18 +108,22 @@ impl Client {
     /// the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
-        if !req.settings.verify_tls {
-            return Err(Error::Unsupported("disabling TLS verification".into()));
-        }
         if req.settings.http_version == crate::model::HttpVersionPref::Http2 {
             return Err(Error::Unsupported("HTTP/2".into()));
         }
         let prepared = build::prepare(req, &url, &self.inner.config.user_agent).await?;
+        let tls = match url.scheme() {
+            "https" => Some(self.inner.tls.for_request(&req.settings.tls).await?),
+            _ => None,
+        };
+        let tls = tls.as_ref();
 
         let mut rec = Recorder::new();
         match req.settings.timeout {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run(req, &url, &prepared, &mut rec)).await {
+                match tokio::time::timeout(limit, self.run(req, &url, &prepared, tls, &mut rec))
+                    .await
+                {
                     Ok(result) => result,
                     Err(_) => Err(rec.fail(
                         format!("request did not complete within {} ms", limit.as_millis()),
@@ -126,7 +131,7 @@ impl Client {
                     )),
                 }
             }
-            None => self.run(req, &url, &prepared, &mut rec).await,
+            None => self.run(req, &url, &prepared, tls, &mut rec).await,
         }
     }
 
@@ -135,9 +140,10 @@ impl Client {
         req: &Request,
         url: &url::Url,
         prepared: &Prepared,
+        tls: Option<&RequestTls>,
         rec: &mut Recorder,
     ) -> Result<Response> {
-        let key = PoolKey::new(url);
+        let key = PoolKey::new(url, &req.settings.tls);
 
         if let Some(conn) = self.reusable_conn(&key).await {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
@@ -153,7 +159,7 @@ impl Client {
             }
         }
 
-        let conn = self.connect(url, req, rec).await?;
+        let conn = self.connect(url, req, tls, rec).await?;
         match self.exchange(conn, url, prepared, rec, false).await? {
             Outcome::Done(resp, conn, reusable) => Ok(self.finish(key, resp, conn, reusable, rec)),
             Outcome::Stale(why) => Err(rec.fail(why, false)),
@@ -169,21 +175,25 @@ impl Client {
         None
     }
 
-    async fn connect(&self, url: &url::Url, req: &Request, rec: &mut Recorder) -> Result<Conn> {
+    async fn connect(
+        &self,
+        url: &url::Url,
+        req: &Request,
+        tls: Option<&RequestTls>,
+        rec: &mut Recorder,
+    ) -> Result<Conn> {
         match req.settings.connect_timeout {
-            Some(limit) => match tokio::time::timeout(
-                limit,
-                conn::connect(url, &req.settings, &self.inner.tls, rec),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(rec.fail(
-                    format!("no connection within {} ms", limit.as_millis()),
-                    true,
-                )),
-            },
-            None => conn::connect(url, &req.settings, &self.inner.tls, rec).await,
+            Some(limit) => {
+                match tokio::time::timeout(limit, conn::connect(url, &req.settings, tls, rec)).await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(rec.fail(
+                        format!("no connection within {} ms", limit.as_millis()),
+                        true,
+                    )),
+                }
+            }
+            None => conn::connect(url, &req.settings, tls, rec).await,
         }
     }
 

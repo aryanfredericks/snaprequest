@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.5, TLS options
+- **Current checkpoint:** P1.6, HTTP/2, decompression, redirects, timeouts, proxies
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,11 +25,21 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.5: TLS options per request: `verify_tls = false` (currently `Error::Unsupported` in `Client::execute`),
-   custom CA file per request, client certificate + key (mTLS), min/max TLS version.
-   rustls configs must then be built per distinct TLS option set and cached; **the pool key must include the
-   TLS options** so a connection made with verification off is never reused for a verifying request.
-   Insecure mode should add a clear `info` trace event.
+1. P1.6 (large; may be split into commits): HTTP/2 via ALPN (`h2` + `http/1.1` offered when `http_version` is
+   Auto; currently ALPN is `http/1.1` only and `Http2` returns `Error::Unsupported`), prior-knowledge h2 over plain TCP,
+   response decompression (gzip, br, zstd, deflate; send `Accept-Encoding` when `decompress` is on), redirect following
+   (`follow_redirects`/`max_redirects`, `Redirect` trace events, auth headers dropped on cross-origin redirects,
+   303 → GET), proxies (HTTP CONNECT, SOCKS5, `HTTP(S)_PROXY`/`NO_PROXY`).
+   Note: h2 connections are multiplexed, so the pool must share one `SendRequest` (cloneable) instead of check-out/in,
+   and the socket meter cannot attribute bytes per stream (document: timings for h2 come from hyper events only).
+
+## TLS options notes (P1.5)
+- `RequestSettings::tls: TlsSettings { verify, ca_cert, client_cert {cert,key}, min_version, max_version }` (replaced top-level `verify_tls`). Versions serialize as "1.2"/"1.3".
+- `TlsContext` (client-wide) caches the OS root store and a default rustls config; non-default settings build a config per request (files re-read each time, so renewed certs are picked up).
+- Verification off uses `RecordingVerifier`: accepts any certificate but runs real verification and reports its verdict as an `info` event. Handshake signatures are still checked.
+- Pool key includes `TlsSettings` for https, so insecure and verifying connections never mix.
+- PEM parsing via `rustls::pki_types::pem::PemObject` (`rustls-pemfile` is unmaintained, RUSTSEC-2025-0134).
+- MSRV raised to 1.88 (ADR-012) for the `time` advisory fix. `scripts/check.sh` runs all CI checks locally (cargo-deny and the 1.88 toolchain are installed on this machine).
 
 ## TLS / connect notes (P1.4)
 - `client/tls.rs`: rustls with ring provider; OS trust store (`rustls-native-certs`), Mozilla roots fallback; `ClientConfig::extra_root_certificates` (`Certificate::from_pem/from_der`). ALPN offers only `http/1.1` until HTTP/2 (P1.6).
@@ -68,7 +78,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.4 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.5 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -91,6 +101,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.2 — 2026-10-31 — `Client::execute` over HTTP/1.1 with own connection pool, socket metering, timeouts, stale-connection retry. 47 tests total (16 integration tests against local servers).
 - P1.3 — 2026-10-31 — Streaming request bodies: text, JSON, form, file, multipart with file uploads; exact Content-Length. 58 tests total.
 - P1.4 — 2026-10-31 — HTTPS via rustls with traced handshake and certificate chain, host pinning, Happy Eyeballs. ADR-011 (OS resolver, ring). 69 tests total.
+- P1.5 — 2026-10-31 — Per-request TLS options: verify off (with verdict in trace), CA file, mTLS, min/max version; pool separation. Fixed cargo-deny (rustls-pemfile unmaintained, time advisory → MSRV 1.88). 82 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -100,3 +111,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (5):** P1.1 committed and pushed (CI green). P1.2 done: HTTP/1.1 engine (ADR-010: own pool on hyper's low-level conn API). Verified against http://example.com.
 - **2026-10-31 (6):** P1.2 committed and pushed (CI green). P1.3 done: streaming bodies (added `futures-util`, `tokio-util`, `mime_guess`).
 - **2026-10-31 (7):** Maintainer asked for autonomous flow (commit+push after each passing checkpoint, no asking). P1.3 pushed (CI green). P1.4 done; real HTTPS to example.com verified.
+- **2026-10-31 (8):** P1.4 CI failed only on cargo-deny (unmaintained rustls-pemfile, vulnerable time). Fixed in the P1.5 commit; added `scripts/check.sh`.

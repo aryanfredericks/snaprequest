@@ -100,10 +100,10 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for MeteredIo<T> {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let res = Pin::new(&mut self.inner).poll_write(cx, buf);
-        if let Poll::Ready(Ok(n)) = res {
-            if n > 0 {
-                self.meter.on_write(n);
-            }
+        if let Poll::Ready(Ok(n)) = res
+            && n > 0
+        {
+            self.meter.on_write(n);
         }
         res
     }
@@ -114,10 +114,10 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for MeteredIo<T> {
         bufs: &[io::IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
         let res = Pin::new(&mut self.inner).poll_write_vectored(cx, bufs);
-        if let Poll::Ready(Ok(n)) = res {
-            if n > 0 {
-                self.meter.on_write(n);
-            }
+        if let Poll::Ready(Ok(n)) = res
+            && n > 0
+        {
+            self.meter.on_write(n);
         }
         res
     }

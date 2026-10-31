@@ -81,3 +81,11 @@ provider (pure Rust + asm, no CMake/NASM on Windows), trusting the OS certificat
 roots (`webpki-roots`) as fallback.
 **Consequences:** No resolver drift from the OS. Choosing a specific DNS server or DNS-over-HTTPS would need hickory
 later as an opt-in.
+
+## ADR-012: Minimum supported Rust version policy
+**Status:** Accepted (2026-10-31)
+**Context:** The MSRV started at 1.85 (the minimum for edition 2024). The fix for RUSTSEC-2026-0009 in `time`
+(pulled in by `x509-parser`) requires Rust 1.88, and the MSRV-aware resolver kept the vulnerable version locked.
+**Decision:** MSRV is now **1.88**. Policy: security fixes always win; otherwise the MSRV may be raised to any
+stable release at least 6 months old, and every raise is noted in the changelog. CI checks the MSRV.
+**Consequences:** End users install release binaries, so this only affects people building from source.

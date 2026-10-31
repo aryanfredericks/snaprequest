@@ -18,13 +18,17 @@ Thanks for your interest in contributing!
 
 ## Before opening a pull request
 
-All of these must pass (CI runs them too):
+Run `scripts/check.sh`. It runs the same checks as CI:
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo deny check                                  # licenses and security advisories
+cargo +1.88 check --workspace --all-targets       # minimum supported Rust version
 ```
+
+The last two are skipped with a hint if `cargo-deny` or the MSRV toolchain is not installed.
 
 ## Guidelines
 
