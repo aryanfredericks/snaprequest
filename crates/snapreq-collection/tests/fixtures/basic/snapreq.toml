@@ -1,0 +1,10 @@
+format = 1
+name = "Basic API"
+description = "Fixture used by the collection tests."
+order = ["health", "users", "missing-item"]
+
+[headers]
+Accept = "application/json"
+
+[settings]
+timeout_ms = 10000

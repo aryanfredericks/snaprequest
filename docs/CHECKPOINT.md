@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
-- **Current checkpoint:** P3.1, collection file format v1
+- **Current checkpoint:** P3.2, environments and variable scopes
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P3.1: collection file format v1 in `crates/snapreq-collection`. Write the spec first in `docs/FORMAT.md`
-   (collection = directory with `snapreq.toml`; one `<name>.toml` per request; folders = subdirectories with
-   optional `folder.toml`; explicit ordering; `format = 1` version key; body as inline TOML strings or
-   `body_file`), then serde types, loading (with precise error locations: file + line via `toml` spans),
-   saving (stable, diff-friendly ordering), and round-trip tests with fixtures in `tests/fixtures/`.
-   Variables/environments are P3.2–P3.3; keep `{{var}}` placeholders as plain strings in P3.1.
+1. P3.2: environments (`environments/<name>.toml`: flat `name = "value"` variables, optional secret
+   markers) and variable scopes with precedence: runtime > request > folder (innermost first) > collection
+   > environment > global. Decide where collection/folder/request variables live in the files (`[vars]`
+   tables) and extend `docs/FORMAT.md` (Environments section is referenced but not written yet).
+   Then P3.3 `{{var}}` interpolation + dynamic variables, P3.4 secrets, P3.5 inheritance (headers/settings
+   merge, paths relative to the file that set them), P3.6 CLI commands.
+
+## Collection format notes (P3.1)
+- Spec: `docs/FORMAT.md`. Crate `snapreq-collection`: `files.rs` (serde types, `deny_unknown_fields`, method validated during parse, `validate()` for content-xor-file etc.), `kv.rs` (KeyValues with hand-written serde: string | list | `{value, enabled}`; numbers/bools accepted), `load.rs` (`Collection::load`, `requests()`, `find("a/b")`, `folders_of`), `save.rs` (toml_edit layout, ADR-013), `error.rs` (file:line:col).
+- Fixture collection: `crates/snapreq-collection/tests/fixtures/basic/`.
+- Paths in files are kept as written (relative); resolving them against the file's directory happens when building core requests (P3.5).
+- First invalid file aborts loading (no partial collections yet); unknown `order` keys are warnings.
 
 ## Snapshot notes (P2.6)
 - `crates/snapreq-cli/src/snapshot_tests.rs` + `src/fixtures.rs` (deterministic redirected HTTPS exchange and a connect failure). Snapshots in `src/snapshots/`; `.gitattributes` keeps `*.snap` LF.
@@ -150,7 +156,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
-| 3 Collections & environments | ⬜ |
+| 3 Collections & environments | 🟨 in progress (P3.1 done) |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
@@ -185,6 +191,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P2.4 — 2026-10-31 — Timing waterfall (per hop, terminal-width aware) in -v and --print t. 168 tests total.
 - P2.5 — 2026-10-31 — `--format json` (schema v1) and `-o FILE`. 173 tests total.
 - P2.6 — 2026-10-31 — insta snapshot tests for all CLI output. Phase 2 complete. 181 tests total.
+- P3.1 — 2026-10-31 — Collection format v1 spec (docs/FORMAT.md), loading with file:line errors, stable saving (toml_edit, ADR-013). 196 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

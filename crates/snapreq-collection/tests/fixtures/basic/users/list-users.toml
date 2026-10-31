@@ -1,0 +1,7 @@
+name = "List users"
+url = "{{base_url}}/users"
+
+[query]
+page = 2
+tag = ["a", "b"]
+draft = { value = "true", enabled = false }

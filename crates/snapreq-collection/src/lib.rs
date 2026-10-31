@@ -1,13 +1,15 @@
-//! SnapRequest collection and environment file format (TOML), variables and interpolation.
+//! SnapRequest collections: the on-disk file format (`docs/FORMAT.md`), loading and saving.
+//! Variables, environments and turning collection items into requests build on this.
 
-/// Errors produced by `snapreq-collection`.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// An error from the core HTTP engine.
-    #[error(transparent)]
-    Core(#[from] snapreq_core::Error),
-}
+pub mod error;
+pub mod files;
+pub mod kv;
+pub mod load;
+pub mod save;
 
-/// Convenience alias for results in `snapreq-collection`.
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+pub use error::{Error, Result, Warning};
+pub use files::{
+    BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, PartSpec, RequestFile, Settings,
+};
+pub use kv::KeyValues;
+pub use load::{Collection, Folder, Item, RequestItem};

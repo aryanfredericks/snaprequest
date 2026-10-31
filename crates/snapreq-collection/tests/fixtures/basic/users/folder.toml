@@ -1,0 +1,5 @@
+name = "Users"
+order = ["list-users", "create-user"]
+
+[headers]
+X-Section = "users"

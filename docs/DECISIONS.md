@@ -89,3 +89,13 @@ later as an opt-in.
 **Decision:** MSRV is now **1.88**. Policy: security fixes always win; otherwise the MSRV may be raised to any
 stable release at least 6 months old, and every raise is noted in the changelog. CI checks the MSRV.
 **Consequences:** End users install release binaries, so this only affects people building from source.
+
+## ADR-013: toml_edit for writing collection files
+**Status:** Accepted (2026-10-31)
+**Context:** The `toml` serializer writes `{ value, enabled = false }` entries as `[headers.X]` sub-tables.
+TOML requires plain keys before sub-tables, so saving would reorder headers and break the format's
+"order is kept" rule. Later, the web UI must edit hand-written files without destroying comments.
+**Decision:** Read with `toml` (good error spans); write with `toml_edit`, laying the document out
+explicitly (sections, `[[arrays]]`, inline entries inside key/value tables, `"""` multi-line strings).
+**Consequences:** Saved files read like hand-written ones and round-trip exactly. In-place edits that
+keep comments will use `toml_edit`'s document model (P6/P7).

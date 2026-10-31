@@ -1,0 +1,14 @@
+method = "PUT"
+url = "{{base_url}}/users/1/avatar"
+
+[body]
+type = "multipart"
+
+[[body.parts]]
+name = "title"
+value = "Me"
+
+[[body.parts]]
+name = "image"
+file = "avatar.png"
+content_type = "image/png"
