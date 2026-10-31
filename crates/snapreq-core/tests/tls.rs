@@ -457,3 +457,34 @@ async fn tls_version_limits() {
     let err = execution_error(client.execute(&tls13_only).await.unwrap_err());
     assert_eq!(err.phase, Phase::Tls);
 }
+
+#[tokio::test]
+async fn a_hanging_address_only_delays_the_next_attempt() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (tcp, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(tcp), service_fn(echo_host))
+                    .await;
+            });
+        }
+    });
+
+    // 192.0.2.1 (TEST-NET-1) never answers: depending on the network the SYN hangs or
+    // fails fast. Either way the second address must win quickly.
+    let mut req = Request::get(format!("http://stagger.test:{port}/"));
+    req.settings.resolve = vec![pin("stagger.test", &["192.0.2.1", "127.0.0.1"])];
+    let started = std::time::Instant::now();
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.remote_addr.unwrap().ip().to_string(), "127.0.0.1");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}

@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.9, benchmarks (last checkpoint of Phase 1)
+- **Phase:** 2 CLI MVP, starting (Phase 1 complete)
+- **Current checkpoint:** P2.1, `snapreq send` command
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,17 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.9: `criterion` benchmarks for `snapreq-core` against a local server (keep-alive GET, POST 1 MiB,
-   fresh-connection GET, HTTPS reused connection, HTTP/2 multiplexed), plus a comparison note vs. curl
-   in docs. Benchmarks must not run in CI tests (only `cargo bench --no-run` to make sure they compile).
-   That completes Phase 1; then Phase 2 (CLI MVP).
+1. P2.1: `snapreq send <METHOD> <URL> [-H 'k: v'] [-q k=v] [-d body | --json body | --form k=v | --file path]`
+   in `crates/snapreq-cli`. Map flags to `snapreq_core::Request` + `RequestSettings` (timeouts, `--insecure`,
+   `--cacert`, `--cert/--key`, `--http1.1/--http2`, `--proxy`, `--resolve`, `--no-follow`, `--max-redirs`,
+   `--no-decompress`, `--capture-wire` for `-vv`). Exit codes: 0 success, distinct codes for request errors
+   vs. execution errors (decide and document). Then P2.2 pretty output, P2.3 verbosity, P2.4 waterfall,
+   P2.5 `--output json` / `-o file`, P2.6 `insta` snapshot tests.
+
+## Benchmark notes (P1.9)
+- `crates/snapreq-core/benches/client.rs` (criterion, `async_tokio`); results and findings in `docs/BENCHMARKS.md`.
+- Found and fixed: Happy Eyeballs used `sleep(0)` for the first attempt (1 ms Tokio timer tick) → fresh connections 1.14 ms → 72 µs.
+- Benchmark/test servers must set `TCP_NODELAY`, otherwise HTTP/2 shows ~40 ms delayed-ACK stalls.
 
 ## Redaction / wire notes (P1.8)
 - `client/redact.rs`: `Redactor` applied by the `Recorder` whenever the trace leaves it (success and failure) — never to sent bytes or to `Response` headers/body.
@@ -111,7 +118,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.8 done) |
+| 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -140,7 +147,8 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.6c — 2026-10-31 — HTTP/2 via ALPN and prior knowledge, shared multiplexed connections. Verified against example.com, google.com, github.com. 108 tests total.
 - P1.6d — 2026-10-31 — Proxies: HTTP forward + CONNECT, SOCKS5/SOCKS5h, env vars with NO_PROXY. P1.6 complete. 122 tests total.
 - P1.7 — 2026-10-31 — Cookie jar (cookie_store), redirect-aware, merged with user Cookie headers. 128 tests total.
-- P1.8 — 2026-10-31 — Wire capture (HTTP/1.1) and trace redaction (sensitive headers, secrets, auto-learned credentials). 141 tests total.
+- P1.8 — 2026-10-31 — Wire capture (HTTP/1.1) and trace redaction (sensitive headers, secrets, auto-learned credentials). 140 tests total.
+- P1.9 — 2026-10-31 — Criterion benchmarks; fixed a 1 ms delay on every new connection. Phase 1 complete. 141 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -151,3 +159,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (6):** P1.2 committed and pushed (CI green). P1.3 done: streaming bodies (added `futures-util`, `tokio-util`, `mime_guess`).
 - **2026-10-31 (7):** Maintainer asked for autonomous flow (commit+push after each passing checkpoint, no asking). P1.3 pushed (CI green). P1.4 done; real HTTPS to example.com verified.
 - **2026-10-31 (8):** P1.4 CI failed only on cargo-deny (unmaintained rustls-pemfile, vulnerable time). Fixed in the P1.5 commit; added `scripts/check.sh`.
+- **2026-10-31 (9):** P1.6a–P1.9 done and pushed (decompression, redirects, HTTP/2, proxies, cookies, wire capture/redaction, benchmarks). Phase 1 complete.

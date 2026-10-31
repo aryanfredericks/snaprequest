@@ -38,6 +38,7 @@ webpki-roots.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 brotli.workspace = true
 rcgen = { workspace = true, features = ["pem"] }
 rustls.workspace = true
@@ -47,3 +48,7 @@ tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "client"
+harness = false

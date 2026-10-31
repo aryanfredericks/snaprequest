@@ -396,10 +396,27 @@ async fn happy_eyeballs(
     let mut in_flight: Vec<SocketAddr> = Vec::new();
     let mut next = 0;
     let mut last_err: Option<std::io::Error> = None;
-    let delay = tokio::time::sleep(Duration::ZERO);
+    // The first attempt starts immediately: even a zero-length Tokio sleep waits for the
+    // next 1 ms timer tick, which would add a millisecond to every new connection.
+    let delay = tokio::time::sleep(ATTEMPT_DELAY);
     tokio::pin!(delay);
 
+    // Each pass starts one attempt: the loop only comes around again when an attempt
+    // failed or the stagger timer fired, and both mean "try the next address now".
     loop {
+        if next < order.len() {
+            let addr = order[next];
+            next += 1;
+            rec.record(TraceEvent::ConnectStart { addr });
+            in_flight.push(addr);
+            attempts.push(async move {
+                let started = Instant::now();
+                (addr, started, TcpStream::connect(addr).await)
+            });
+            delay
+                .as_mut()
+                .reset(tokio::time::Instant::now() + ATTEMPT_DELAY);
+        }
         tokio::select! {
             biased;
             Some((addr, started, result)) = attempts.next(), if !attempts.is_empty() => {
@@ -424,22 +441,11 @@ async fn happy_eyeballs(
                             message: format!("connect to {addr} failed after {} ms: {e}", elapsed.as_millis()),
                         });
                         last_err = Some(e);
-                        // Try the next address right away.
-                        delay.as_mut().reset(tokio::time::Instant::now());
                     }
                 }
             }
-            () = &mut delay, if next < order.len() => {
-                let addr = order[next];
-                next += 1;
-                rec.record(TraceEvent::ConnectStart { addr });
-                in_flight.push(addr);
-                attempts.push(async move {
-                    let started = Instant::now();
-                    (addr, started, TcpStream::connect(addr).await)
-                });
-                delay.as_mut().reset(tokio::time::Instant::now() + ATTEMPT_DELAY);
-            }
+            // Stagger: the pending attempt is slow, start the next one in parallel.
+            () = &mut delay, if next < order.len() => {}
             else => break,
         }
     }
