@@ -43,6 +43,8 @@ impl TestServer {
 /// - `/bytes`: binary body
 /// - `/count`: replies with the number of body bytes received and their sum mod 2^32
 /// - `/gzip`: gzip-encoded text if the request accepts gzip, otherwise plain text
+/// - `/redirect/<n>`: 302 to `/redirect/<n-1>`; `/redirect/0` replies `done`
+/// - `/status-to/<code>?to=<url>`: redirect with that status to `url`
 async fn handle(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
@@ -72,6 +74,25 @@ async fn handle(
     } else if path == "/close" {
         resp = resp.header("connection", "close");
         "bye".into()
+    } else if let Some(n) = path.strip_prefix("/redirect/") {
+        let n: u32 = n.parse().unwrap();
+        if n == 0 {
+            "done".into()
+        } else {
+            resp = resp
+                .status(302)
+                .header("location", format!("/redirect/{}", n - 1));
+            Bytes::new()
+        }
+    } else if let Some(code) = path.strip_prefix("/status-to/") {
+        let to = url::form_urlencoded::parse(query.as_bytes())
+            .find(|(k, _)| k == "to")
+            .map(|(_, v)| v.into_owned())
+            .unwrap();
+        resp = resp
+            .status(code.parse::<u16>().unwrap())
+            .header("location", to);
+        "redirecting".into()
     } else if path == "/gzip" {
         let text = "compressible ".repeat(100);
         let accepts_gzip = req
@@ -635,4 +656,136 @@ async fn decompression_can_be_turned_off() {
     // No Accept-Encoding is sent, so the server answers uncompressed.
     assert_eq!(resp.header("content-encoding"), None);
     assert_eq!(resp.sizes.response_body, resp.sizes.response_body_decoded);
+}
+
+fn redirects(trace: &[snapreq_core::model::TraceEntry]) -> Vec<(u16, String, String)> {
+    trace
+        .iter()
+        .filter_map(|e| match &e.event {
+            TraceEvent::Redirect { status, from, to } => Some((*status, from.clone(), to.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn status_to(server: &TestServer, code: u16, to: &str) -> String {
+    let to: String = url::form_urlencoded::byte_serialize(to.as_bytes()).collect();
+    server.url(&format!("/status-to/{code}?to={to}"))
+}
+
+#[tokio::test]
+async fn redirect_chains_are_followed_on_one_connection() {
+    let server = start_server().await;
+    let resp = Client::default()
+        .execute(&Request::get(server.url("/redirect/3")))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.text(), Some("done"));
+    assert_eq!(resp.url, server.url("/redirect/0"));
+    let hops = redirects(&resp.trace);
+    assert_eq!(hops.len(), 3);
+    assert_eq!(
+        hops[0],
+        (302, server.url("/redirect/3"), server.url("/redirect/2"))
+    );
+    assert_eq!(server.connections(), 1);
+    // Timings describe the final hop; the total covers the whole chain.
+    assert!(resp.timings.connect.is_none());
+    assert_eq!(resp.timings.total, resp.trace.last().unwrap().at);
+}
+
+#[tokio::test]
+async fn see_other_after_post_becomes_get() {
+    let server = start_server().await;
+    let req = Request::new(http::Method::POST, status_to(&server, 303, "/echo")).body(Body::Json {
+        content: "{}".into(),
+    });
+    let resp = Client::default().execute(&req).await.unwrap();
+    let echo = resp.text().unwrap();
+
+    assert!(echo.starts_with("GET /echo\n"), "{echo}");
+    assert!(!echo.contains("content-type"), "{echo}");
+}
+
+#[tokio::test]
+async fn temporary_redirect_resends_method_and_body() {
+    let server = start_server().await;
+    let req = Request::new(http::Method::PUT, status_to(&server, 307, "/echo")).body(Body::Text {
+        content: "payload".into(),
+        content_type: None,
+    });
+    let resp = Client::default().execute(&req).await.unwrap();
+    let echo = resp.text().unwrap();
+
+    assert!(echo.starts_with("PUT /echo\n"), "{echo}");
+    assert!(echo.ends_with("\n\npayload"), "{echo}");
+}
+
+#[tokio::test]
+async fn cross_origin_redirect_drops_credentials() {
+    let a = start_server().await;
+    let b = start_server().await;
+    let req = Request::get(status_to(&a, 302, &b.url("/echo")))
+        .header("Authorization", "Bearer secret")
+        .header("X-Keep", "yes");
+    let resp = Client::default().execute(&req).await.unwrap();
+    let echo = resp.text().unwrap();
+
+    assert!(echo.contains("x-keep: yes"), "{echo}");
+    assert!(
+        !echo.to_ascii_lowercase().contains("authorization"),
+        "{echo}"
+    );
+    assert!(echo.contains(&format!("host: {}", b.addr)), "{echo}");
+
+    // Same origin keeps the header.
+    let same = Request::get(status_to(&a, 302, "/echo")).header("Authorization", "Bearer secret");
+    let echo = Client::default().execute(&same).await.unwrap();
+    assert!(
+        echo.text()
+            .unwrap()
+            .contains("authorization: Bearer secret")
+    );
+}
+
+#[tokio::test]
+async fn too_many_redirects_is_an_error_with_the_trace() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/redirect/5"));
+    req.settings.max_redirects = 2;
+    let err = execution_error(Client::default().execute(&req).await.unwrap_err());
+
+    assert_eq!(err.phase, Phase::Redirect);
+    assert!(
+        err.message.contains("stopped after 2 redirect(s)"),
+        "{}",
+        err.message
+    );
+    assert_eq!(redirects(&err.trace).len(), 2);
+}
+
+#[tokio::test]
+async fn redirects_are_returned_when_following_is_off() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/redirect/1"));
+    req.settings.follow_redirects = false;
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    assert_eq!(resp.status, 302);
+    assert_eq!(resp.header("location"), Some("/redirect/0"));
+    assert!(redirects(&resp.trace).is_empty());
+}
+
+#[tokio::test]
+async fn redirect_to_unsupported_scheme_fails() {
+    let server = start_server().await;
+    let err = execution_error(
+        Client::default()
+            .execute(&Request::get(status_to(&server, 302, "ftp://files.test/x")))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(err.phase, Phase::Redirect);
+    assert!(err.message.contains("`ftp` URL"), "{}", err.message);
 }

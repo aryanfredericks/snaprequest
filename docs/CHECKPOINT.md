@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects, 6c HTTP/2, 6d proxies
+- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects ✅, 6c HTTP/2, 6d proxies
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -32,6 +32,13 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
    303 → GET), proxies (HTTP CONNECT, SOCKS5, `HTTP(S)_PROXY`/`NO_PROXY`).
    Note: h2 connections are multiplexed, so the pool must share one `SendRequest` (cloneable) instead of check-out/in,
    and the socket meter cannot attribute bytes per stream (document: timings for h2 come from hyper events only).
+
+## Redirect notes (P1.6b)
+- `client/redirect.rs::next_hop` (pure, unit-tested) decides the next hop; `Client::follow` loops over hops with one Recorder, so the trace covers the whole chain and `Timings::from_trace` reports the final hop.
+- 303 → GET (except HEAD); 301/302 turn POST into GET; 307/308 keep method + body. Body-less hops drop Content-Type/Length.
+- Cross-origin hops drop Authorization, Cookie, Proxy-Authorization and an explicit Host header; HTTPS→HTTP is flagged. Notes go to `info` events.
+- Exceeding `max_redirects` → `Phase::Redirect` error with trace. `follow_redirects = false` returns the 3xx.
+- Auth helpers (Phase 4) must re-apply per hop and respect the cross-origin rule.
 
 ## Decompression notes (P1.6a)
 - `client/decode.rs`: gzip (multi-member), deflate (zlib, falls back to raw), br, zstd; stacked encodings undone in reverse; pure-Rust decoders (`flate2`, `brotli-decompressor`, `ruzstd`).
@@ -108,6 +115,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.4 — 2026-10-31 — HTTPS via rustls with traced handshake and certificate chain, host pinning, Happy Eyeballs. ADR-011 (OS resolver, ring). 69 tests total.
 - P1.5 — 2026-10-31 — Per-request TLS options: verify off (with verdict in trace), CA file, mTLS, min/max version; pool separation. Fixed cargo-deny (rustls-pemfile unmaintained, time advisory → MSRV 1.88). 79 tests total.
 - P1.6a — 2026-10-31 — Response decompression (gzip, deflate, br, zstd). 86 tests total.
+- P1.6b — 2026-10-31 — Redirect following with browser-compatible method rules and cross-origin credential stripping. 100 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

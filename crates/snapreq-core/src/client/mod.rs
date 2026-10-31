@@ -6,6 +6,7 @@ mod conn;
 mod decode;
 mod meter;
 mod recorder;
+mod redirect;
 mod tls;
 
 pub use self::tls::Certificate;
@@ -76,6 +77,12 @@ impl Default for Client {
     }
 }
 
+/// One hop of a (possibly redirected) execution, ready to send.
+struct Hop {
+    prepared: Prepared,
+    tls: Option<RequestTls>,
+}
+
 // Created once per request and immediately destructured; boxing would only add an allocation.
 #[allow(clippy::large_enum_variant)]
 enum Outcome {
@@ -103,28 +110,22 @@ impl Client {
         &self.inner.config
     }
 
-    /// Sends `req` and reads the whole response.
+    /// Sends `req`, follows redirects if enabled, and reads the whole response.
     ///
-    /// On failure during execution the error is [`Error::Execution`], which carries
-    /// the trace recorded up to the failure.
+    /// Problems with the request itself (bad URL, unreadable file) are returned before
+    /// any network activity. Failures during execution are [`Error::Execution`], which
+    /// carries the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
         if req.settings.http_version == crate::model::HttpVersionPref::Http2 {
             return Err(Error::Unsupported("HTTP/2".into()));
         }
-        let prepared = build::prepare(req, &url, &self.inner.config.user_agent).await?;
-        let tls = match url.scheme() {
-            "https" => Some(self.inner.tls.for_request(&req.settings.tls).await?),
-            _ => None,
-        };
-        let tls = tls.as_ref();
+        let first = self.prepare_hop(req, &url).await?;
 
         let mut rec = Recorder::new();
-        match req.settings.timeout {
+        let result = match req.settings.timeout {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.run(req, &url, &prepared, tls, &mut rec))
-                    .await
-                {
+                match tokio::time::timeout(limit, self.follow(req, url, first, &mut rec)).await {
                     Ok(result) => result,
                     Err(_) => Err(rec.fail(
                         format!("request did not complete within {} ms", limit.as_millis()),
@@ -132,7 +133,71 @@ impl Client {
                     )),
                 }
             }
-            None => self.run(req, &url, &prepared, tls, &mut rec).await,
+            None => self.follow(req, url, first, &mut rec).await,
+        };
+        let mut resp = result?;
+        resp.trace = rec.take_entries();
+        resp.timings = Timings::from_trace(&resp.trace);
+        Ok(resp)
+    }
+
+    /// Encodes the body and picks the TLS configuration for one hop.
+    async fn prepare_hop(&self, req: &Request, url: &url::Url) -> Result<Hop> {
+        let prepared = build::prepare(req, url, &self.inner.config.user_agent).await?;
+        let tls = match url.scheme() {
+            "https" => Some(self.inner.tls.for_request(&req.settings.tls).await?),
+            _ => None,
+        };
+        Ok(Hop { prepared, tls })
+    }
+
+    /// Runs the first hop and then every redirect.
+    async fn follow(
+        &self,
+        req: &Request,
+        mut url: url::Url,
+        mut hop: Hop,
+        rec: &mut Recorder,
+    ) -> Result<Response> {
+        let mut current = req.clone();
+        let mut followed = 0u32;
+        loop {
+            let resp = self
+                .run(&current, &url, &hop.prepared, hop.tls.as_ref(), rec)
+                .await?;
+            if !current.settings.follow_redirects {
+                return Ok(resp);
+            }
+            rec.phase = Phase::Redirect;
+            let next = match redirect::next_hop(&current, &url, &resp) {
+                Ok(Some(next)) => next,
+                Ok(None) => return Ok(resp),
+                Err(e) => return Err(rec.fail(e.to_string(), false)),
+            };
+            if followed >= current.settings.max_redirects {
+                return Err(rec.fail(
+                    format!(
+                        "stopped after {followed} redirect(s); the next one goes to {} (max_redirects = {})",
+                        next.url, current.settings.max_redirects
+                    ),
+                    false,
+                ));
+            }
+            followed += 1;
+            rec.record(TraceEvent::Redirect {
+                status: resp.status,
+                from: url.to_string(),
+                to: next.url.to_string(),
+            });
+            for message in next.notes {
+                rec.record(TraceEvent::Info { message });
+            }
+            hop = match self.prepare_hop(&next.request, &next.url).await {
+                Ok(hop) => hop,
+                Err(e) => return Err(rec.fail(format!("cannot follow redirect: {e}"), false)),
+            };
+            current = next.request;
+            url = next.url;
         }
     }
 
@@ -150,7 +215,7 @@ impl Client {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
             match self.exchange(conn, url, prepared, rec, true, req.settings.decompress).await? {
                 Outcome::Done(resp, conn, reusable) => {
-                    return Ok(self.finish(key, resp, conn, reusable, rec));
+                    return Ok(self.finish(key, resp, conn, reusable));
                 }
                 Outcome::Stale(why) => rec.record(TraceEvent::Info {
                     message: format!(
@@ -165,7 +230,7 @@ impl Client {
             .exchange(conn, url, prepared, rec, false, req.settings.decompress)
             .await?
         {
-            Outcome::Done(resp, conn, reusable) => Ok(self.finish(key, resp, conn, reusable, rec)),
+            Outcome::Done(resp, conn, reusable) => Ok(self.finish(key, resp, conn, reusable)),
             Outcome::Stale(why) => Err(rec.fail(why, false)),
         }
     }
@@ -324,21 +389,12 @@ impl Client {
         ))
     }
 
-    /// Returns the connection to the pool (if reusable) and attaches trace and timings.
-    fn finish(
-        &self,
-        key: PoolKey,
-        mut resp: Response,
-        conn: Conn,
-        reusable: bool,
-        rec: &mut Recorder,
-    ) -> Response {
+    /// Returns the connection to the pool if it can be reused.
+    fn finish(&self, key: PoolKey, resp: Response, conn: Conn, reusable: bool) -> Response {
         if reusable {
             self.inner.pool.checkin(key, conn);
         }
         // Dropping a non-reusable `conn` here lets hyper close the connection.
-        resp.trace = rec.take_entries();
-        resp.timings = Timings::from_trace(&resp.trace);
         resp
     }
 }
