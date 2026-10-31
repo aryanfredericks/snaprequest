@@ -8,10 +8,12 @@ mod decode;
 mod meter;
 mod proxy;
 mod recorder;
+mod redact;
 mod redirect;
 mod tls;
 
 pub use self::cookies::StoredCookie;
+pub use self::redact::DEFAULT_SENSITIVE_HEADERS;
 pub use self::tls::Certificate;
 
 use std::sync::{Arc, Mutex};
@@ -41,6 +43,10 @@ pub struct ClientConfig {
     /// Extra trusted root certificates, added to the OS trust store
     /// (for example a company or local development CA).
     pub extra_root_certificates: Vec<Certificate>,
+    /// Header names whose values are redacted in traces (case-insensitive).
+    pub sensitive_headers: Vec<String>,
+    /// Maximum bytes captured per direction when wire capture is on.
+    pub wire_capture_limit: usize,
 }
 
 impl Default for ClientConfig {
@@ -50,6 +56,11 @@ impl Default for ClientConfig {
             pool_idle_timeout: Duration::from_secs(90),
             pool_max_idle_per_host: 8,
             extra_root_certificates: Vec::new(),
+            sensitive_headers: DEFAULT_SENSITIVE_HEADERS
+                .iter()
+                .map(|h| (*h).to_owned())
+                .collect(),
+            wire_capture_limit: 1024 * 1024,
         }
     }
 }
@@ -141,7 +152,10 @@ impl Client {
         let url = req.effective_url()?;
         let first = self.prepare_hop(req, &url).await?;
 
-        let mut rec = Recorder::new();
+        let mut rec = Recorder::new(redact::Redactor::new(
+            &self.inner.config.sensitive_headers,
+            &req.settings.secrets,
+        ));
         let result = match req.settings.timeout {
             Some(limit) => {
                 match tokio::time::timeout(limit, self.follow(req, url, first, &mut rec)).await {
@@ -208,6 +222,11 @@ impl Client {
                     ),
                 });
             }
+            // Credentials sent on this hop are hidden wherever they show up in the trace.
+            rec.learn_secrets_from_headers(&hop.prepared.trace_headers(false));
+            if let Some((_, password)) = hop.proxy.as_ref().and_then(|p| p.credentials.as_ref()) {
+                rec.add_secret(password);
+            }
             let resp = self.run(&current, &url, &hop, rec).await?;
             if current.settings.cookies {
                 let set_cookie = resp
@@ -267,7 +286,7 @@ impl Client {
 
         if let Some(conn) = self.reusable_conn(&key).await {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
-            match self.exchange(conn, url, prepared, rec, true, req.settings.decompress).await? {
+            match self.exchange(conn, url, prepared, rec, true, &req.settings).await? {
                 Outcome::Done(resp, conn, reusable) => {
                     return Ok(self.finish(key, resp, conn, reusable));
                 }
@@ -285,7 +304,7 @@ impl Client {
         // Concurrent requests can use a new HTTP/2 connection immediately.
         self.inner.pool.share(&key, &conn);
         match self
-            .exchange(conn, url, prepared, rec, false, req.settings.decompress)
+            .exchange(conn, url, prepared, rec, false, &req.settings)
             .await?
         {
             Outcome::Done(resp, conn, reusable) => Ok(self.finish(key, resp, conn, reusable)),
@@ -337,8 +356,12 @@ impl Client {
         prepared: &Prepared,
         rec: &mut Recorder,
         reused: bool,
-        decompress: bool,
+        settings: &crate::model::RequestSettings,
     ) -> Result<Outcome> {
+        let decompress = settings.decompress;
+        let capture = settings
+            .capture_wire
+            .then_some(self.inner.config.wire_capture_limit);
         let h2 = conn.sender.is_h2();
         let mut trace_headers = prepared.trace_headers(h2);
         if let Some(Some(_)) = &conn.forward_proxy {
@@ -354,8 +377,17 @@ impl Client {
             },
             headers: trace_headers,
         });
+        if capture.is_some() {
+            if h2 {
+                rec.record(TraceEvent::Info {
+                    message: "wire capture is not available for HTTP/2".into(),
+                });
+            } else {
+                rec.watch_capture(conn.meter.clone());
+            }
+        }
         let request = if let Some(auth) = &conn.forward_proxy {
-            conn.meter.reset();
+            conn.meter.reset(capture);
             rec.begin_send(SendTiming::Socket(conn.meter.clone()), prepared.body_len);
             prepared
                 .to_http_via_proxy(auth.as_deref())
@@ -366,7 +398,7 @@ impl Client {
             rec.begin_send(SendTiming::Stream(body_done.clone()), prepared.body_len);
             prepared.to_http_with_body(true, body::timed(prepared.body_stream(), body_done))
         } else {
-            conn.meter.reset();
+            conn.meter.reset(capture);
             rec.begin_send(SendTiming::Socket(conn.meter.clone()), prepared.body_len);
             prepared.to_http(false)
         };
@@ -416,6 +448,7 @@ impl Client {
             body_bytes: body_len,
             download: first_byte.elapsed(),
         });
+        rec.emit_capture();
 
         let body = if decompress {
             let encodings: Vec<&str> = parts

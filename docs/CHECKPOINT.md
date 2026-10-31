@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.8, wire capture and secret redaction
+- **Current checkpoint:** P1.9, benchmarks (last checkpoint of Phase 1)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,13 +25,16 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.8: wire capture + redaction. Optional exact request/response bytes as sent/received on the HTTP layer
-   (for HTTP/1.1 the `MeteredIo` can tee bytes into a bounded buffer; for HTTP/2 capture frames is out of scope,
-   record the reconstructed headers instead). Off by default (`RequestSettings::capture_wire`?) with a size cap.
-   Redaction: a client-level list of sensitive header names (Authorization, Cookie, Set-Cookie, Proxy-Authorization,
-   X-Api-Key, ...) and secret values; applied to trace events (`RequestHeaders`, `ResponseHeaders`, wire capture)
-   but never to what is sent. Today `Cookie`/`Authorization` values appear in the trace in clear text.
-   Then P1.9 (criterion benchmarks) closes Phase 1.
+1. P1.9: `criterion` benchmarks for `snapreq-core` against a local server (keep-alive GET, POST 1 MiB,
+   fresh-connection GET, HTTPS reused connection, HTTP/2 multiplexed), plus a comparison note vs. curl
+   in docs. Benchmarks must not run in CI tests (only `cargo bench --no-run` to make sure they compile).
+   That completes Phase 1; then Phase 2 (CLI MVP).
+
+## Redaction / wire notes (P1.8)
+- `client/redact.rs`: `Redactor` applied by the `Recorder` whenever the trace leaves it (success and failure) — never to sent bytes or to `Response` headers/body.
+- `ClientConfig::sensitive_headers` (default `DEFAULT_SENSITIVE_HEADERS`): values redacted with structure kept (`Bearer <redacted>`, `sid=<redacted>`, Set-Cookie attributes kept).
+- `RequestSettings::secrets` (`#[serde(skip)]`) hidden anywhere in trace text and wire bytes. Credential values of sensitive request headers (≥ 6 chars), jar cookies and proxy passwords are learned automatically per hop, so echoes in bodies are hidden too.
+- `RequestSettings::capture_wire` → `TraceEvent::Wire { sent, received, truncated }` per HTTP/1.1 exchange (inside TLS), capped by `ClientConfig::wire_capture_limit` (1 MiB/direction). Emitted on failure too. HTTP/2: `info` "not available".
 
 ## Cookie notes (P1.7)
 - `client/cookies.rs`: per-`Client` `Jar` over `cookie_store` (RFC 6265; `public_suffix` feature off, so a server could set a cookie for a public suffix; acceptable for an API tester, documented). `Client::cookies()` / `clear_cookies()`; `StoredCookie` is serde for later persistence (P3/P6).
@@ -108,7 +111,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.7 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.8 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -137,6 +140,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.6c — 2026-10-31 — HTTP/2 via ALPN and prior knowledge, shared multiplexed connections. Verified against example.com, google.com, github.com. 108 tests total.
 - P1.6d — 2026-10-31 — Proxies: HTTP forward + CONNECT, SOCKS5/SOCKS5h, env vars with NO_PROXY. P1.6 complete. 122 tests total.
 - P1.7 — 2026-10-31 — Cookie jar (cookie_store), redirect-aware, merged with user Cookie headers. 128 tests total.
+- P1.8 — 2026-10-31 — Wire capture (HTTP/1.1) and trace redaction (sensitive headers, secrets, auto-learned credentials). 141 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

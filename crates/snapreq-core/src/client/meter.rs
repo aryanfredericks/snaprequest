@@ -27,6 +27,34 @@ pub(crate) struct MeterSnapshot {
 #[derive(Debug, Default)]
 struct MeterState {
     snap: MeterSnapshot,
+    capture: Option<Capture>,
+}
+
+/// Bytes of the current exchange, each direction capped at `limit`.
+#[derive(Debug, Default)]
+struct Capture {
+    limit: usize,
+    sent: Vec<u8>,
+    received: Vec<u8>,
+    truncated: bool,
+}
+
+impl Capture {
+    fn push(limit: usize, buf: &mut Vec<u8>, truncated: &mut bool, data: &[u8]) {
+        let room = limit.saturating_sub(buf.len());
+        if data.len() > room {
+            *truncated = true;
+        }
+        buf.extend_from_slice(&data[..data.len().min(room)]);
+    }
+}
+
+/// Captured bytes of one exchange.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Captured {
+    pub sent: bytes::Bytes,
+    pub received: bytes::Bytes,
+    pub truncated: bool,
 }
 
 /// Shared handle to a connection's measurements.
@@ -39,28 +67,50 @@ impl Meter {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Clears the counters before a new request is sent on this connection.
-    pub(crate) fn reset(&self) {
-        *self.lock() = MeterState::default();
+    /// Clears the counters before a new request is sent on this connection, and
+    /// starts capturing bytes (up to `capture_limit` per direction) if given.
+    pub(crate) fn reset(&self, capture_limit: Option<usize>) {
+        *self.lock() = MeterState {
+            snap: MeterSnapshot::default(),
+            capture: capture_limit.map(|limit| Capture {
+                limit,
+                ..Capture::default()
+            }),
+        };
+    }
+
+    /// Takes the captured bytes, if capturing was on.
+    pub(crate) fn take_capture(&self) -> Option<Captured> {
+        self.lock().capture.take().map(|c| Captured {
+            sent: c.sent.into(),
+            received: c.received.into(),
+            truncated: c.truncated,
+        })
     }
 
     pub(crate) fn snapshot(&self) -> MeterSnapshot {
         self.lock().snap
     }
 
-    fn on_write(&self, n: usize) {
+    fn on_write(&self, data: &[u8]) {
         let mut s = self.lock();
-        s.snap.bytes_written += n as u64;
+        s.snap.bytes_written += data.len() as u64;
         s.snap.last_write_at = Some(Instant::now());
+        if let Some(c) = &mut s.capture {
+            Capture::push(c.limit, &mut c.sent, &mut c.truncated, data);
+        }
     }
 
-    fn on_read(&self, n: usize) {
+    fn on_read(&self, data: &[u8]) {
         let mut s = self.lock();
         if s.snap.first_read_at.is_none() {
             s.snap.first_read_at = Some(Instant::now());
             s.snap.write_done_at = s.snap.last_write_at;
         }
-        s.snap.bytes_read += n as u64;
+        s.snap.bytes_read += data.len() as u64;
+        if let Some(c) = &mut s.capture {
+            Capture::push(c.limit, &mut c.received, &mut c.truncated, data);
+        }
     }
 }
 
@@ -85,9 +135,9 @@ impl<T: AsyncRead + Unpin> AsyncRead for MeteredIo<T> {
     ) -> Poll<io::Result<()>> {
         let before = buf.filled().len();
         let res = Pin::new(&mut self.inner).poll_read(cx, buf);
-        let n = buf.filled().len() - before;
-        if n > 0 {
-            self.meter.on_read(n);
+        let filled = &buf.filled()[before..];
+        if !filled.is_empty() {
+            self.meter.on_read(filled);
         }
         res
     }
@@ -103,7 +153,7 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for MeteredIo<T> {
         if let Poll::Ready(Ok(n)) = res
             && n > 0
         {
-            self.meter.on_write(n);
+            self.meter.on_write(&buf[..n]);
         }
         res
     }
@@ -117,7 +167,16 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for MeteredIo<T> {
         if let Poll::Ready(Ok(n)) = res
             && n > 0
         {
-            self.meter.on_write(n);
+            // Report exactly the first `n` bytes across the slices.
+            let mut left = n;
+            for b in bufs {
+                if left == 0 {
+                    break;
+                }
+                let take = left.min(b.len());
+                self.meter.on_write(&b[..take]);
+                left -= take;
+            }
         }
         res
     }
@@ -141,6 +200,25 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
+    async fn captures_bytes_up_to_the_limit() {
+        let (client, mut server) = tokio::io::duplex(64);
+        let meter = Meter::default();
+        meter.reset(Some(4));
+        let mut io = MeteredIo::new(client, meter.clone());
+
+        io.write_all(b"abc").await.unwrap();
+        server.write_all(b"xyz123").await.unwrap();
+        let mut buf = [0u8; 6];
+        io.read_exact(&mut buf).await.unwrap();
+
+        let c = meter.take_capture().unwrap();
+        assert_eq!(&c.sent[..], b"abc");
+        assert_eq!(&c.received[..], b"xyz1");
+        assert!(c.truncated);
+        assert!(meter.take_capture().is_none());
+    }
+
+    #[tokio::test]
     async fn counts_bytes_and_marks_first_read() {
         let (client, mut server) = tokio::io::duplex(64);
         let meter = Meter::default();
@@ -161,7 +239,7 @@ mod tests {
         let (done, first) = (snap.write_done_at.unwrap(), snap.first_read_at.unwrap());
         assert!(done <= first);
 
-        meter.reset();
+        meter.reset(None);
         assert_eq!(meter.snapshot().bytes_read, 0);
         assert!(meter.snapshot().first_read_at.is_none());
     }

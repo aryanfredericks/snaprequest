@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::meter::Meter;
+use super::redact::Redactor;
 use crate::error::{Error, ExecutionError};
 use crate::model::{Phase, TraceEntry, TraceEvent};
 
@@ -33,15 +34,49 @@ pub(crate) struct Recorder {
     /// The phase currently running; used to label failures and timeouts.
     pub(crate) phase: Phase,
     pending: Option<PendingSend>,
+    /// Applied to the trace whenever it leaves the recorder.
+    redactor: Redactor,
+    /// Connection whose captured bytes should be emitted as a `Wire` event.
+    capture: Option<Meter>,
 }
 
 impl Recorder {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(redactor: Redactor) -> Self {
         Self {
             start: Instant::now(),
             entries: Vec::new(),
             phase: Phase::Prepare,
             pending: None,
+            redactor,
+            capture: None,
+        }
+    }
+
+    /// Hides the credential values of sensitive request headers in the trace.
+    pub(crate) fn learn_secrets_from_headers(&mut self, headers: &[crate::model::Header]) {
+        for h in headers {
+            self.redactor.learn_from_header(&h.name, &h.value);
+        }
+    }
+
+    /// Hides `secret` in the trace.
+    pub(crate) fn add_secret(&mut self, secret: &str) {
+        self.redactor.add_secret(secret);
+    }
+
+    /// Emits the bytes captured by `meter` when the exchange ends (or fails).
+    pub(crate) fn watch_capture(&mut self, meter: Meter) {
+        self.capture = Some(meter);
+    }
+
+    /// Records the captured bytes of the current exchange, if any.
+    pub(crate) fn emit_capture(&mut self) {
+        if let Some(captured) = self.capture.take().and_then(|m| m.take_capture()) {
+            self.record(TraceEvent::Wire {
+                sent: captured.sent,
+                received: captured.received,
+                truncated: captured.truncated,
+            });
         }
     }
 
@@ -107,15 +142,18 @@ impl Recorder {
         Some(first)
     }
 
-    /// Moves the recorded entries out.
+    /// Moves the recorded entries out, redacted.
     pub(crate) fn take_entries(&mut self) -> Vec<TraceEntry> {
-        std::mem::take(&mut self.entries)
+        let mut entries = std::mem::take(&mut self.entries);
+        self.redactor.trace(&mut entries);
+        entries
     }
 
     /// Records an `Error` event for the current phase and turns the trace into an [`Error`].
     pub(crate) fn fail(&mut self, message: impl Into<String>, timed_out: bool) -> Error {
         self.finish_send(None);
-        let message = message.into();
+        self.emit_capture();
+        let message = self.redactor.text(&message.into());
         self.record(TraceEvent::Error {
             phase: self.phase,
             message: message.clone(),
@@ -124,7 +162,7 @@ impl Recorder {
             phase: self.phase,
             timed_out,
             message,
-            trace: std::mem::take(&mut self.entries),
+            trace: self.take_entries(),
         }))
     }
 }

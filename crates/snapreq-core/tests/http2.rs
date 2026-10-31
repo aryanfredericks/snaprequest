@@ -269,3 +269,23 @@ async fn http2_reports_body_sizes_but_not_header_sizes() {
     assert_eq!(resp.sizes.response_headers, 0);
     assert!(resp.text().unwrap().ends_with(" 1000"));
 }
+
+#[tokio::test]
+async fn wire_capture_explains_it_is_unavailable_for_http2() {
+    let server = h2c_server().await;
+    let mut req = Request::get(format!("http://{}/", server.addr));
+    req.settings.http_version = HttpVersionPref::Http2;
+    req.settings.capture_wire = true;
+    let resp = client_for(&server).execute(&req).await.unwrap();
+
+    assert!(resp.trace.iter().any(|e| matches!(
+        &e.event,
+        TraceEvent::Info { message } if message == "wire capture is not available for HTTP/2"
+    )));
+    assert!(
+        !resp
+            .trace
+            .iter()
+            .any(|e| matches!(e.event, TraceEvent::Wire { .. }))
+    );
+}

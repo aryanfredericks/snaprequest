@@ -35,6 +35,12 @@ pub struct RequestSettings {
     pub proxy: ProxyMode,
     /// Use the client's cookie jar: send matching cookies and store `Set-Cookie`.
     pub cookies: bool,
+    /// Record the exact HTTP/1.1 bytes of each exchange in the trace (`wire` events).
+    pub capture_wire: bool,
+    /// Values hidden wherever they appear in the trace (for example secret variables).
+    /// Never serialized.
+    #[serde(skip)]
+    pub secrets: Vec<String>,
     /// Hosts pinned to fixed addresses instead of DNS, like curl's `--resolve`.
     /// TLS still verifies against the host name from the URL.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -54,6 +60,8 @@ impl Default for RequestSettings {
             resolve: Vec::new(),
             proxy: ProxyMode::Environment,
             cookies: true,
+            capture_wire: false,
+            secrets: Vec::new(),
         }
     }
 }

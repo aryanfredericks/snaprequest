@@ -889,3 +889,130 @@ async fn cookies_can_be_disabled_per_request_and_cleared() {
         .unwrap();
     assert!(!resp.text().unwrap().contains("cookie:"));
 }
+
+fn wire(trace: &[snapreq_core::model::TraceEntry]) -> (String, String, bool) {
+    trace
+        .iter()
+        .find_map(|e| match &e.event {
+            TraceEvent::Wire {
+                sent,
+                received,
+                truncated,
+            } => Some((
+                String::from_utf8_lossy(sent).into_owned(),
+                String::from_utf8_lossy(received).into_owned(),
+                *truncated,
+            )),
+            _ => None,
+        })
+        .expect("no wire event in trace")
+}
+
+#[tokio::test]
+async fn wire_capture_records_the_exact_exchange() {
+    let server = start_server().await;
+    let mut req = Request::new(http::Method::POST, server.url("/echo")).body(Body::Text {
+        content: "ping".into(),
+        content_type: None,
+    });
+    req.settings.capture_wire = true;
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    let (sent, received, truncated) = wire(&resp.trace);
+    assert!(
+        sent.starts_with(&format!("POST /echo HTTP/1.1\r\nHost: {}\r\n", server.addr)),
+        "{sent}"
+    );
+    assert!(sent.ends_with("\r\n\r\nping"), "{sent}");
+    assert!(received.starts_with("HTTP/1.1 200 OK\r\n"), "{received}");
+    assert!(received.ends_with(resp.text().unwrap()), "{received}");
+    assert!(!truncated);
+    assert_eq!(
+        sent.len() as u64,
+        resp.sizes.request_headers + resp.sizes.request_body
+    );
+}
+
+#[tokio::test]
+async fn secrets_and_sensitive_headers_are_redacted_only_in_the_trace() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/echo?key=topsecret"))
+        .header("Authorization", "Bearer abc.def.ghi")
+        .header("X-Note", "contains topsecret too");
+    req.settings.capture_wire = true;
+    req.settings.secrets = vec!["topsecret".into()];
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    // What was sent (echoed back by the server) is untouched.
+    let echo = resp.text().unwrap();
+    assert!(echo.contains("authorization: Bearer abc.def.ghi"), "{echo}");
+    assert!(echo.starts_with("GET /echo?key=topsecret"), "{echo}");
+
+    // The trace is redacted everywhere, including the wire capture.
+    let trace = serde_json::to_string(&resp.trace).unwrap();
+    assert!(!trace.contains("topsecret"), "{trace}");
+    assert!(!trace.contains("abc.def.ghi"), "{trace}");
+    assert!(trace.contains("Bearer <redacted>"));
+    assert!(trace.contains("key=<redacted>"));
+    let (sent, _, _) = wire(&resp.trace);
+    assert!(
+        sent.contains("Authorization: Bearer <redacted>\r\n"),
+        "{sent}"
+    );
+}
+
+#[tokio::test]
+async fn set_cookie_is_redacted_in_the_trace_but_not_in_the_response() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/login"));
+    req.settings.follow_redirects = false;
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    assert_eq!(
+        resp.header("set-cookie"),
+        Some("sid=s3cr3t; Path=/; HttpOnly")
+    );
+    let traced = resp
+        .trace
+        .iter()
+        .find_map(|e| match &e.event {
+            TraceEvent::ResponseHeaders { headers, .. } => headers
+                .iter()
+                .find(|h| h.name == "set-cookie")
+                .map(|h| h.value.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(traced, "sid=<redacted>; Path=/; HttpOnly");
+}
+
+#[tokio::test]
+async fn wire_capture_is_capped() {
+    let server = start_server().await;
+    let client = Client::new(snapreq_core::ClientConfig {
+        wire_capture_limit: 16,
+        ..snapreq_core::ClientConfig::default()
+    })
+    .unwrap();
+    let mut req = Request::get(server.url("/echo"));
+    req.settings.capture_wire = true;
+    let resp = client.execute(&req).await.unwrap();
+
+    let (sent, received, truncated) = wire(&resp.trace);
+    assert!(truncated);
+    assert_eq!(sent.len(), 16);
+    assert_eq!(received.len(), 16);
+}
+
+#[tokio::test]
+async fn failed_requests_keep_their_wire_capture() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/slow?ms=3000"));
+    req.settings.capture_wire = true;
+    req.settings.timeout = Some(Duration::from_millis(200));
+    let err = execution_error(Client::default().execute(&req).await.unwrap_err());
+
+    let (sent, received, _) = wire(&err.trace);
+    assert!(sent.starts_with("GET /slow?ms=3000 HTTP/1.1\r\n"), "{sent}");
+    assert!(received.is_empty());
+}

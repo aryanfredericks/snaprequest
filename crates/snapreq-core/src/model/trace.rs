@@ -89,6 +89,15 @@ pub enum TraceEvent {
         #[serde(with = "crate::serde_util::duration_ms", rename = "download_ms")]
         download: Duration,
     },
+    /// Exact HTTP/1.1 bytes of one exchange (inside TLS), when wire capture is on.
+    /// Each direction is capped; `truncated` says whether anything was cut.
+    Wire {
+        #[serde(with = "crate::serde_util::raw_bytes")]
+        sent: bytes::Bytes,
+        #[serde(with = "crate::serde_util::raw_bytes")]
+        received: bytes::Bytes,
+        truncated: bool,
+    },
     /// A redirect is being followed. Events after this one belong to the next hop.
     Redirect {
         status: u16,
