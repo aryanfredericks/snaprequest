@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 2 CLI MVP, starting (Phase 1 complete)
-- **Current checkpoint:** P2.1, `snapreq send` command
+- **Current checkpoint:** P2.2, pretty output
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P2.1: `snapreq send <METHOD> <URL> [-H 'k: v'] [-q k=v] [-d body | --json body | --form k=v | --file path]`
-   in `crates/snapreq-cli`. Map flags to `snapreq_core::Request` + `RequestSettings` (timeouts, `--insecure`,
-   `--cacert`, `--cert/--key`, `--http1.1/--http2`, `--proxy`, `--resolve`, `--no-follow`, `--max-redirs`,
-   `--no-decompress`, `--capture-wire` for `-vv`). Exit codes: 0 success, distinct codes for request errors
-   vs. execution errors (decide and document). Then P2.2 pretty output, P2.3 verbosity, P2.4 waterfall,
-   P2.5 `--output json` / `-o file`, P2.6 `insta` snapshot tests.
+1. P2.2: pretty output. Colored status line (2xx green, 3xx cyan, 4xx yellow, 5xx red), headers, and
+   body formatting: JSON pretty-printed and colored, XML/HTML indented (keep it simple), binary bodies
+   summarized instead of dumped to a terminal. Auto-detect TTY: when stdout is not a terminal print the
+   body only, uncolored (so `| jq` works); `--print`/`-p` flags to choose parts (like HTTPie: `H` request
+   headers, `h` response headers, `b` body, `s` status); `--color always|never|auto`, honour `NO_COLOR`.
+   Pager for long output (`--pager`/`less -R` when TTY) can be a follow-up in P2.2 or later.
+
+## CLI notes (P2.1)
+- `crates/snapreq-cli/src/`: `cli.rs` (clap definitions), `send.rs` (`build_request`, pure, unit-tested), `main.rs` (exit codes in `mod exit`, printing).
+- Exit codes documented in `docs/CLI.md` (0 ok, 1 internal, 2 usage, 3 invalid request, 4 `--fail` HTTP ≥ 400, 5 network, 6 timeout). Keep `mod exit` and the doc in sync.
+- `-d` does not imply a form content type (deliberate difference from curl). URL without scheme → `http://`.
+- `-vv` turns on `capture_wire`; `-v` output itself arrives in P2.3.
+- End-to-end tests run the real binary (`CARGO_BIN_EXE_snapreq`) against a local hyper server.
 
 ## Benchmark notes (P1.9)
 - `crates/snapreq-core/benches/client.rs` (criterion, `async_tokio`); results and findings in `docs/BENCHMARKS.md`.
@@ -119,7 +126,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 |---|---|
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
-| 2 CLI MVP | ⬜ |
+| 2 CLI MVP | 🟨 in progress (P2.1 done) |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
@@ -149,6 +156,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.7 — 2026-10-31 — Cookie jar (cookie_store), redirect-aware, merged with user Cookie headers. 128 tests total.
 - P1.8 — 2026-10-31 — Wire capture (HTTP/1.1) and trace redaction (sensitive headers, secrets, auto-learned credentials). 140 tests total.
 - P1.9 — 2026-10-31 — Criterion benchmarks; fixed a 1 ms delay on every new connection. Phase 1 complete. 141 tests total.
+- P2.1 — 2026-10-31 — `snapreq send` with request, connection, TLS and output options; exit codes; docs/CLI.md. 153 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
