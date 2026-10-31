@@ -1,0 +1,239 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: "serde_json::to_string_pretty(&doc).unwrap()"
+---
+{
+  "format": 1,
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.test/v1/items?page=2"
+  },
+  "response": {
+    "status": 200,
+    "version": "HTTP/1.1",
+    "url": "https://api.example.test/v2/items?page=2",
+    "headers": [
+      {
+        "name": "content-type",
+        "value": "application/json"
+      },
+      {
+        "name": "set-cookie",
+        "value": "sid=abc123; Path=/; HttpOnly"
+      }
+    ],
+    "body": {
+      "encoding": "utf8",
+      "data": "{\"items\":[{\"id\":1,\"name\":\"snap\",\"tags\":[]}],\"next\":null}"
+    },
+    "remote_addr": "203.0.113.10:443",
+    "timings": {
+      "dns_ms": null,
+      "connect_ms": null,
+      "tls_ms": null,
+      "send_ms": 0.3,
+      "wait_ms": 30.0,
+      "download_ms": 2.0,
+      "total_ms": 72.35
+    },
+    "sizes": {
+      "request_headers": 96,
+      "request_body": 0,
+      "response_headers": 88,
+      "response_body": 56,
+      "response_body_decoded": 56
+    },
+    "trace": [
+      {
+        "at_ms": 0.01,
+        "event": "dns_start",
+        "host": "api.example.test"
+      },
+      {
+        "at_ms": 4.01,
+        "event": "dns_end",
+        "host": "api.example.test",
+        "addrs": [
+          "203.0.113.10"
+        ],
+        "duration_ms": 4.0
+      },
+      {
+        "at_ms": 4.02,
+        "event": "connect_start",
+        "addr": "203.0.113.10:443"
+      },
+      {
+        "at_ms": 9.02,
+        "event": "connect_end",
+        "addr": "203.0.113.10:443",
+        "local_addr": "192.0.2.7:50123",
+        "duration_ms": 5.0
+      },
+      {
+        "at_ms": 9.03,
+        "event": "tls_start",
+        "server_name": "api.example.test"
+      },
+      {
+        "at_ms": 19.03,
+        "event": "tls_end",
+        "info": {
+          "version": "TLSv1.3",
+          "cipher": "TLS13_AES_128_GCM_SHA256",
+          "alpn": "http/1.1",
+          "peer_certificates": [
+            {
+              "subject": "CN=api.example.test",
+              "issuer": "C=US, O=Example CA, CN=Example Issuing CA",
+              "not_before": "2026-01-01T00:00:00Z",
+              "not_after": "2027-01-01T00:00:00Z",
+              "serial": "0a:1b:2c",
+              "subject_alt_names": [
+                "api.example.test",
+                "*.example.test"
+              ],
+              "sha256_fingerprint": "AB:CD:EF"
+            }
+          ]
+        },
+        "duration_ms": 10.0
+      },
+      {
+        "at_ms": 19.04,
+        "event": "request_headers",
+        "method": "GET",
+        "url": "https://api.example.test/v1/items?page=2",
+        "version": "HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "api.example.test"
+          },
+          {
+            "name": "Authorization",
+            "value": "Bearer <redacted>"
+          },
+          {
+            "name": "User-Agent",
+            "value": "snapreq/0.1.0"
+          }
+        ]
+      },
+      {
+        "at_ms": 19.54,
+        "event": "request_sent",
+        "body_bytes": 0,
+        "duration_ms": 0.5
+      },
+      {
+        "at_ms": 39.54,
+        "event": "response_first_byte",
+        "wait_ms": 20.0
+      },
+      {
+        "at_ms": 39.6,
+        "event": "response_headers",
+        "status": 301,
+        "version": "HTTP/1.1",
+        "headers": [
+          {
+            "name": "location",
+            "value": "/v2/items?page=2"
+          }
+        ]
+      },
+      {
+        "at_ms": 40.0,
+        "event": "response_complete",
+        "body_bytes": 0,
+        "download_ms": 0.4
+      },
+      {
+        "at_ms": 40.01,
+        "event": "redirect",
+        "status": 301,
+        "from": "https://api.example.test/v1/items?page=2",
+        "to": "https://api.example.test/v2/items?page=2"
+      },
+      {
+        "at_ms": 40.02,
+        "event": "connection_reused",
+        "addr": "203.0.113.10:443"
+      },
+      {
+        "at_ms": 40.03,
+        "event": "request_headers",
+        "method": "GET",
+        "url": "https://api.example.test/v2/items?page=2",
+        "version": "HTTP/1.1",
+        "headers": [
+          {
+            "name": "Host",
+            "value": "api.example.test"
+          },
+          {
+            "name": "Authorization",
+            "value": "Bearer <redacted>"
+          },
+          {
+            "name": "User-Agent",
+            "value": "snapreq/0.1.0"
+          }
+        ]
+      },
+      {
+        "at_ms": 40.33,
+        "event": "request_sent",
+        "body_bytes": 0,
+        "duration_ms": 0.3
+      },
+      {
+        "at_ms": 70.33,
+        "event": "response_first_byte",
+        "wait_ms": 30.0
+      },
+      {
+        "at_ms": 70.4,
+        "event": "response_headers",
+        "status": 200,
+        "version": "HTTP/1.1",
+        "headers": [
+          {
+            "name": "content-type",
+            "value": "application/json"
+          },
+          {
+            "name": "set-cookie",
+            "value": "sid=<redacted>; Path=/; HttpOnly"
+          }
+        ]
+      },
+      {
+        "at_ms": 72.33,
+        "event": "response_complete",
+        "body_bytes": 56,
+        "download_ms": 2.0
+      },
+      {
+        "at_ms": 72.34,
+        "event": "info",
+        "message": "stored cookie `sid`"
+      },
+      {
+        "at_ms": 72.35,
+        "event": "wire",
+        "sent": {
+          "encoding": "utf8",
+          "data": "GET /v2/items?page=2 HTTP/1.1\r\nHost: api.example.test\r\nAuthorization: Bearer <redacted>\r\n\r\n"
+        },
+        "received": {
+          "encoding": "utf8",
+          "data": "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 56\r\n\r\n{\"items\":[{\"id\":1,\"name\":\"snap\",\"tags\":[]}],\"next\":null}"
+        },
+        "truncated": false
+      }
+    ]
+  },
+  "error": null
+}

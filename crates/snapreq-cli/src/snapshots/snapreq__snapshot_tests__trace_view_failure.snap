@@ -1,0 +1,8 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+* resolved api.example.test → 203.0.113.10 (4.00 ms)
+* connect to 203.0.113.10:443 failed after 0 ms: Connection refused
+! TCP connect failed: could not connect to api.example.test:443: Connection refused
+* total 4.13 ms

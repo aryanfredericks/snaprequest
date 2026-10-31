@@ -1,0 +1,2 @@
+# Snapshot files must keep LF line endings on every platform.
+*.snap text eol=lf

@@ -30,6 +30,18 @@ cargo +1.88 check --workspace --all-targets       # minimum supported Rust versi
 
 The last two are skipped with a hint if `cargo-deny` or the MSRV toolchain is not installed.
 
+## Snapshot tests
+
+CLI output is covered by [`insta`](https://insta.rs) snapshots in `crates/snapreq-cli/src/snapshots/`.
+When you change output on purpose, update and review them:
+
+```sh
+cargo install cargo-insta --locked   # once
+cargo insta test -p snapreq-cli --review
+```
+
+Snapshots render fixed sample data (`src/fixtures.rs`), so they never depend on ports, dates or timing.
+
 ## Guidelines
 
 - **Tests ship with features.** New behaviour needs tests; bug fixes need a regression test.

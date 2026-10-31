@@ -1,0 +1,18 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+HTTP/1.1 200 OK
+content-type: application/json
+set-cookie: sid=abc123; Path=/; HttpOnly
+
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "snap",
+      "tags": []
+    }
+  ],
+  "next": null
+}

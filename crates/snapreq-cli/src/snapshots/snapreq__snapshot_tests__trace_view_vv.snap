@@ -1,0 +1,50 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+[    0.010] * resolving api.example.test
+[    4.010] * resolved api.example.test → 203.0.113.10 (4.00 ms)
+[    4.020] * connecting to 203.0.113.10:443
+[    9.020] * connected to 203.0.113.10:443 from 192.0.2.7:50123 (5.00 ms)
+[    9.030] * TLS handshake with api.example.test
+[   19.030] * TLSv1.3 TLS13_AES_128_GCM_SHA256, ALPN http/1.1 (10.0 ms)
+[   19.030] *   server certificate: CN=api.example.test
+[   19.030] *     issued by: C=US, O=Example CA, CN=Example Issuing CA
+[   19.030] *     valid: 2026-01-01T00:00:00Z → 2027-01-01T00:00:00Z
+[   19.030] *     names: api.example.test, *.example.test
+[   19.030] *     serial: 0a:1b:2c
+[   19.030] *     sha256: AB:CD:EF
+[   19.040] > GET https://api.example.test/v1/items?page=2 HTTP/1.1
+[   19.040] > Host: api.example.test
+[   19.040] > Authorization: Bearer <redacted>
+[   19.040] > User-Agent: snapreq/0.1.0
+[   19.540] * request sent (0.50 ms)
+[   39.540] * first response byte after 20.0 ms
+[   39.600] < HTTP/1.1 301 Moved Permanently
+[   39.600] < location: /v2/items?page=2
+[   40.000] * 0 B body received (0.40 ms)
+[   40.010] * 301 redirect to https://api.example.test/v2/items?page=2
+[   40.020] * reusing connection to 203.0.113.10:443
+[   40.030] > GET https://api.example.test/v2/items?page=2 HTTP/1.1
+[   40.030] > Host: api.example.test
+[   40.030] > Authorization: Bearer <redacted>
+[   40.030] > User-Agent: snapreq/0.1.0
+[   40.330] * request sent (0.30 ms)
+[   70.330] * first response byte after 30.0 ms
+[   70.400] < HTTP/1.1 200 OK
+[   70.400] < content-type: application/json
+[   70.400] < set-cookie: sid=<redacted>; Path=/; HttpOnly
+[   72.330] * 56 B body received (2.00 ms)
+[   72.340] * stored cookie `sid`
+[   72.350] * wire: sent (91 B)
+[   72.350] > GET /v2/items?page=2 HTTP/1.1
+[   72.350] > Host: api.example.test
+[   72.350] > Authorization: Bearer <redacted>
+[   72.350] > 
+[   72.350] * wire: received (127 B)
+[   72.350] < HTTP/1.1 200 OK
+[   72.350] < content-type: application/json
+[   72.350] < content-length: 56
+[   72.350] < 
+[   72.350] < {"items":[{"id":1,"name":"snap","tags":[]}],"next":null}
+[   72.350] * total 72.3 ms

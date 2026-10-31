@@ -1,0 +1,27 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+GET https://api.example.test/v2/items?page=2 HTTP/1.1
+Host: api.example.test
+Authorization: Bearer <redacted>
+User-Agent: snapreq/0.1.0
+
+HTTP/1.1 200 OK
+content-type: application/json
+set-cookie: sid=abc123; Path=/; HttpOnly
+
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "snap",
+      "tags": []
+    }
+  ],
+  "next": null
+}
+
+redirects 1 (phase timings are for the final hop)
+total 72.3 ms  dns -  connect -  tls -  wait 30.0 ms  download 2.0 ms
+received 144 B (56 B decoded)  sent 96 B

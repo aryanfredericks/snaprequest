@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 2 CLI MVP, starting (Phase 1 complete)
-- **Current checkpoint:** P2.6, snapshot tests (last checkpoint of Phase 2)
+- **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
+- **Current checkpoint:** P3.1, collection file format v1
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,17 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P2.6: `insta` snapshot tests for CLI output: pretty output (`-p Hhbm` minus volatile values), `-v`/`-vv` trace
-   view, waterfall, `--format json`, error messages. Volatile data (ports, dates, durations, addresses) must be
-   normalised with `insta` filters or by rendering synthetic traces. Then Phase 2 is complete → Phase 3
-   (collections, environments, variables).
+1. P3.1: collection file format v1 in `crates/snapreq-collection`. Write the spec first in `docs/FORMAT.md`
+   (collection = directory with `snapreq.toml`; one `<name>.toml` per request; folders = subdirectories with
+   optional `folder.toml`; explicit ordering; `format = 1` version key; body as inline TOML strings or
+   `body_file`), then serde types, loading (with precise error locations: file + line via `toml` spans),
+   saving (stable, diff-friendly ordering), and round-trip tests with fixtures in `tests/fixtures/`.
+   Variables/environments are P3.2–P3.3; keep `{{var}}` placeholders as plain strings in P3.1.
+
+## Snapshot notes (P2.6)
+- `crates/snapreq-cli/src/snapshot_tests.rs` + `src/fixtures.rs` (deterministic redirected HTTPS exchange and a connect failure). Snapshots in `src/snapshots/`; `.gitattributes` keeps `*.snap` LF.
+- Update with `cargo insta test -p snapreq-cli --review` (documented in CONTRIBUTING). CI runs with `CI=true`, so missing/changed snapshots fail.
+- Found during review: the `m` summary now says `redirects N (phase timings are for the final hop)`.
 
 ## JSON / -o notes (P2.5)
 - Naming: `--format pretty|json` and `-o/--output FILE` (curl meaning). PLAN updated.
@@ -142,7 +149,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 |---|---|
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
-| 2 CLI MVP | 🟨 in progress (P2.1–P2.5 done) |
+| 2 CLI MVP | ✅ done |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
@@ -177,6 +184,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P2.3 — 2026-10-31 — Verbose trace on stderr (-v compact, -vv timestamps, cert chain, wire bytes). 165 tests total.
 - P2.4 — 2026-10-31 — Timing waterfall (per hop, terminal-width aware) in -v and --print t. 168 tests total.
 - P2.5 — 2026-10-31 — `--format json` (schema v1) and `-o FILE`. 173 tests total.
+- P2.6 — 2026-10-31 — insta snapshot tests for all CLI output. Phase 2 complete. 181 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -188,3 +196,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (7):** Maintainer asked for autonomous flow (commit+push after each passing checkpoint, no asking). P1.3 pushed (CI green). P1.4 done; real HTTPS to example.com verified.
 - **2026-10-31 (8):** P1.4 CI failed only on cargo-deny (unmaintained rustls-pemfile, vulnerable time). Fixed in the P1.5 commit; added `scripts/check.sh`.
 - **2026-10-31 (9):** P1.6a–P1.9 done and pushed (decompression, redirects, HTTP/2, proxies, cookies, wire capture/redaction, benchmarks). Phase 1 complete.
+- **2026-10-31 (10):** Phase 2 (CLI MVP) complete: send command, pretty output, verbose trace, waterfall, JSON output, snapshots. CI watcher now polls once a minute (GitHub's 60 requests/hour unauthenticated limit).

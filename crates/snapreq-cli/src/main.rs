@@ -1,9 +1,13 @@
 //! `snapreq`: fast, self-hosted HTTP API testing and debugging.
 
 mod cli;
+#[cfg(test)]
+mod fixtures;
 mod json_out;
 mod output;
 mod send;
+#[cfg(test)]
+mod snapshot_tests;
 mod trace_view;
 mod waterfall;
 

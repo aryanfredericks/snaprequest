@@ -1,0 +1,16 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+                     0                                                   72.3 ms
+hop 1/2: 301 → https://api.example.test/v2/items?page=2
+DNS          4.00 ms ███
+connect      5.00 ms    ████
+TLS          10.0 ms        █████████
+send         0.50 ms                 █
+wait         20.0 ms                 ████████████████
+download     0.40 ms                                 █
+hop 2/2: final response
+send         0.30 ms                                  █
+wait         30.0 ms                                  ████████████████████████
+download     2.00 ms                                                          ██

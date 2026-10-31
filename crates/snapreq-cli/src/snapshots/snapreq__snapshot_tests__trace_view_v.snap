@@ -1,0 +1,32 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: text
+---
+* resolved api.example.test → 203.0.113.10 (4.00 ms)
+* connected to 203.0.113.10:443 from 192.0.2.7:50123 (5.00 ms)
+* TLSv1.3 TLS13_AES_128_GCM_SHA256, ALPN http/1.1 (10.0 ms)
+*   server certificate: CN=api.example.test
+*     valid until 2027-01-01T00:00:00Z
+> GET https://api.example.test/v1/items?page=2 HTTP/1.1
+> Host: api.example.test
+> Authorization: Bearer <redacted>
+> User-Agent: snapreq/0.1.0
+* request sent (0.50 ms)
+* first response byte after 20.0 ms
+< HTTP/1.1 301 Moved Permanently
+< location: /v2/items?page=2
+* 0 B body received (0.40 ms)
+* 301 redirect to https://api.example.test/v2/items?page=2
+* reusing connection to 203.0.113.10:443
+> GET https://api.example.test/v2/items?page=2 HTTP/1.1
+> Host: api.example.test
+> Authorization: Bearer <redacted>
+> User-Agent: snapreq/0.1.0
+* request sent (0.30 ms)
+* first response byte after 30.0 ms
+< HTTP/1.1 200 OK
+< content-type: application/json
+< set-cookie: sid=<redacted>; Path=/; HttpOnly
+* 56 B body received (2.00 ms)
+* stored cookie `sid`
+* total 72.3 ms

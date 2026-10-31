@@ -12,7 +12,8 @@ SnapRequest is a single Rust binary that gives you:
 
 No cloud account. No telemetry.
 
-> **Status:** early development. The HTTP engine (`snapreq-core`) is complete; the CLI is next. See [`docs/PLAN.md`](docs/PLAN.md)
+> **Status:** early development. The HTTP engine and the `snapreq send` CLI work; collections and
+> the self-hosted server are next. See [`docs/CLI.md`](docs/CLI.md) for usage. See [`docs/PLAN.md`](docs/PLAN.md)
 > for the roadmap and [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) for current progress.
 
 ## Building from source

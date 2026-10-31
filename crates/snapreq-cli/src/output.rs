@@ -293,6 +293,17 @@ fn write_meta(out: &mut dyn Write, resp: &Response) -> io::Result<()> {
         )
     };
     let t = &resp.timings;
+    let redirects = resp
+        .trace
+        .iter()
+        .filter(|e| matches!(e.event, TraceEvent::Redirect { .. }))
+        .count();
+    if redirects > 0 {
+        writeln!(
+            out,
+            "{DIM}redirects{DIM:#} {redirects} {DIM}(phase timings are for the final hop){DIM:#}"
+        )?;
+    }
     writeln!(
         out,
         "{DIM}total{DIM:#} {}  {DIM}dns{DIM:#} {}  {DIM}connect{DIM:#} {}  {DIM}tls{DIM:#} {}  {DIM}wait{DIM:#} {}  {DIM}download{DIM:#} {}",

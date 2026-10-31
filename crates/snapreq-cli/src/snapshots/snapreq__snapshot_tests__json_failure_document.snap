@@ -1,0 +1,50 @@
+---
+source: crates/snapreq-cli/src/snapshot_tests.rs
+expression: "serde_json::to_string_pretty(&doc).unwrap()"
+---
+{
+  "format": 1,
+  "request": {
+    "method": "GET",
+    "url": "https://api.example.test/v1/items?page=2"
+  },
+  "response": null,
+  "error": {
+    "kind": "execution",
+    "message": "could not connect to api.example.test:443: Connection refused",
+    "phase": "connect",
+    "timed_out": false,
+    "trace": [
+      {
+        "at_ms": 0.01,
+        "event": "dns_start",
+        "host": "api.example.test"
+      },
+      {
+        "at_ms": 4.01,
+        "event": "dns_end",
+        "host": "api.example.test",
+        "addrs": [
+          "203.0.113.10"
+        ],
+        "duration_ms": 4.0
+      },
+      {
+        "at_ms": 4.02,
+        "event": "connect_start",
+        "addr": "203.0.113.10:443"
+      },
+      {
+        "at_ms": 4.12,
+        "event": "info",
+        "message": "connect to 203.0.113.10:443 failed after 0 ms: Connection refused"
+      },
+      {
+        "at_ms": 4.13,
+        "event": "error",
+        "phase": "connect",
+        "message": "could not connect to api.example.test:443: Connection refused"
+      }
+    ]
+  }
+}
