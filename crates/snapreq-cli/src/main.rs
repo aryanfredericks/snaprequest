@@ -1,16 +1,18 @@
 //! `snapreq`: fast, self-hosted HTTP API testing and debugging.
 
 mod cli;
+mod output;
 mod send;
 
-use std::io::Write;
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use clap::Parser;
-use snapreq_core::{Client, Error, Response};
+use snapreq_core::{Client, Error};
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, Command, SendArgs};
+use crate::cli::{Cli, ColorArg, Command, SendArgs};
+use crate::output::Parts;
 
 /// Process exit codes. Documented in `docs/CLI.md`; keep both in sync.
 pub(crate) mod exit {
@@ -61,10 +63,27 @@ async fn run_send(args: &SendArgs) -> u8 {
             return exit::INVALID_REQUEST;
         }
     };
+    let terminal = std::io::stdout().is_terminal();
+    let parts = match &args.print {
+        Some(spec) => match Parts::parse(spec) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return exit::INVALID_REQUEST;
+            }
+        },
+        None => Parts::default_for(terminal),
+    };
+    let color = match args.color {
+        ColorArg::Auto => anstream::ColorChoice::Auto,
+        ColorArg::Always => anstream::ColorChoice::Always,
+        ColorArg::Never => anstream::ColorChoice::Never,
+    };
 
     match Client::default().execute(&request).await {
         Ok(response) => {
-            if let Err(e) = print_response(&response) {
+            let mut out = anstream::AutoStream::new(std::io::stdout().lock(), color);
+            if let Err(e) = output::print(&mut out, &request, &response, parts, terminal) {
                 // A closed pipe (`| head`) is not an error worth reporting.
                 if e.kind() != std::io::ErrorKind::BrokenPipe {
                     eprintln!("error: {e}");
@@ -86,26 +105,6 @@ async fn run_send(args: &SendArgs) -> u8 {
             }
         }
     }
-}
-
-fn print_response(resp: &Response) -> std::io::Result<()> {
-    let mut out = std::io::stdout().lock();
-    writeln!(
-        out,
-        "{} {} {}",
-        resp.version,
-        resp.status,
-        resp.status_text().unwrap_or("")
-    )?;
-    for h in &resp.headers {
-        writeln!(out, "{}: {}", h.name, h.value)?;
-    }
-    writeln!(out)?;
-    out.write_all(&resp.body)?;
-    if !resp.body.is_empty() && !resp.body.ends_with(b"\n") {
-        writeln!(out)?;
-    }
-    out.flush()
 }
 
 #[cfg(test)]

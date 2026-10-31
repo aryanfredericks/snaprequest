@@ -19,6 +19,8 @@ snapreq-test = { path = "crates/snapreq-test", version = "0.1.0" }
 snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
 
 # Shared external dependencies (add new ones here, then use `dep.workspace = true`)
+anstream = "1"
+anstyle = "1"
 anyhow = "1"
 base64 = "0.22"
 brotli = "9"

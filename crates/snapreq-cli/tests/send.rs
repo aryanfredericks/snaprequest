@@ -74,14 +74,56 @@ fn stderr(o: &Output) -> String {
 }
 
 #[tokio::test]
-async fn get_prints_status_headers_and_body() {
+async fn piped_output_is_the_body_only() {
     let addr = server().await;
     let out = snapreq(&["send", &format!("http://{addr}/hello"), "-q", "a=1"]).await;
 
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "GET /hello?a=1 \n");
+}
+
+#[tokio::test]
+async fn print_selects_parts() {
+    let addr = server().await;
+    let url = format!("http://{addr}/hello");
+    let out = snapreq(&[
+        "send",
+        &url,
+        "-p",
+        "Hhb",
+        "-H",
+        "Authorization: Bearer abcdef123",
+    ])
+    .await;
     let text = stdout(&out);
-    assert!(text.starts_with("HTTP/1.1 200 OK\n"), "{text}");
-    assert!(text.contains("\nGET /hello?a=1 \n"), "{text}");
+
+    assert!(
+        text.starts_with(&format!("GET {url} HTTP/1.1\nHost: {addr}\n")),
+        "{text}"
+    );
+    // Request headers come from the trace, so credentials are redacted.
+    assert!(
+        text.contains("Authorization: Bearer <redacted>\n"),
+        "{text}"
+    );
+    assert!(text.contains("\n\nHTTP/1.1 200 OK\n"), "{text}");
+    assert!(text.ends_with("\n\nGET /hello \n"), "{text}");
+    // No color codes when not on a terminal.
+    assert!(!text.contains('\u{1b}'), "{text:?}");
+
+    let colored = stdout(&snapreq(&["send", &url, "-p", "h", "--color", "always"]).await);
+    assert!(colored.contains("\u{1b}["), "{colored:?}");
+
+    let out = snapreq(&["send", &url, "-p", "x"]).await;
+    assert_eq!(out.status.code(), Some(3));
+}
+
+#[tokio::test]
+async fn json_bodies_are_pretty_printed() {
+    let addr = server().await;
+    let out = snapreq(&["send", &format!("http://{addr}/j"), "-d", r#"{"a":[1]}"#]).await;
+    // The echo server replies as text/plain starting with the request line, so it is not JSON.
+    assert!(stdout(&out).ends_with("{\"a\":[1]}\n"), "{}", stdout(&out));
 }
 
 #[tokio::test]

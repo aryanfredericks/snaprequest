@@ -177,6 +177,25 @@ pub(crate) struct SendArgs {
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count, help_heading = "Output")]
     pub verbose: u8,
 
+    /// What to print: `H` request headers, `B` request body, `h` response status and headers,
+    /// `b` response body, `m` timings and sizes. Default `hb` on a terminal, `b` when piped.
+    #[arg(
+        short = 'p',
+        long = "print",
+        value_name = "PARTS",
+        help_heading = "Output"
+    )]
+    pub print: Option<String>,
+
+    /// When to use colors.
+    #[arg(
+        long,
+        value_name = "WHEN",
+        default_value = "auto",
+        help_heading = "Output"
+    )]
+    pub color: ColorArg,
+
     /// Exit with code 4 when the response status is 400 or higher.
     #[arg(short = 'f', long, help_heading = "Output")]
     pub fail: bool,
@@ -192,4 +211,12 @@ pub(crate) enum TlsVersionArg {
     Tls12,
     #[value(name = "1.3")]
     Tls13,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ColorArg {
+    /// Colors on a terminal, unless `NO_COLOR` is set.
+    Auto,
+    Always,
+    Never,
 }

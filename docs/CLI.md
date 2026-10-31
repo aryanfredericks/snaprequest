@@ -19,6 +19,12 @@ snapreq send https://internal.test/health --cacert company-ca.pem
 snapreq send https://staging.example.com/ --resolve staging.example.com:443:10.0.0.5
 ```
 
+## Output
+
+JSON responses (`application/json`, `*+json`, or JSON-looking text) are pretty-printed with
+colors, keeping the server's key order. Binary bodies are summarized on a terminal instead of
+being dumped into it; when stdout is redirected they are written byte for byte.
+
 ## Request options
 
 | Option | Meaning |
@@ -59,6 +65,8 @@ Only one kind of body can be given per request.
 
 | Option | Meaning |
 |---|---|
+| `-p, --print PARTS` | What to print: `H` request headers (as sent, credentials redacted), `B` request body, `h` status line and response headers, `b` response body, `m` timings and sizes. Default: `hb` on a terminal, `b` when piped, so `snapreq send URL \| jq` works. |
+| `--color auto\|always\|never` | Colors (default `auto`: only on a terminal, and never when `NO_COLOR` is set). |
 | `-v` / `-vv` | More detail (`-vv` also captures raw HTTP/1.1 bytes). |
 | `-f, --fail` | Exit with code 4 when the status is 400 or higher. |
 | `--secret VALUE` | Hide this value everywhere in the output (repeatable). Credentials in `Authorization`, `Cookie` and similar headers are hidden automatically. |

@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 2 CLI MVP, starting (Phase 1 complete)
-- **Current checkpoint:** P2.2, pretty output
+- **Current checkpoint:** P2.3, verbosity levels
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,17 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P2.2: pretty output. Colored status line (2xx green, 3xx cyan, 4xx yellow, 5xx red), headers, and
-   body formatting: JSON pretty-printed and colored, XML/HTML indented (keep it simple), binary bodies
-   summarized instead of dumped to a terminal. Auto-detect TTY: when stdout is not a terminal print the
-   body only, uncolored (so `| jq` works); `--print`/`-p` flags to choose parts (like HTTPie: `H` request
-   headers, `h` response headers, `b` body, `s` status); `--color always|never|auto`, honour `NO_COLOR`.
-   Pager for long output (`--pager`/`less -R` when TTY) can be a follow-up in P2.2 or later.
+1. P2.3: verbosity. `-v`: print request line/headers (`H`), response (`hb`) and the timing summary (`m`)
+   plus key trace notes (redirects, cookies, TLS version/cipher, `info` events) to **stderr** so stdout stays
+   pipe-friendly? Decide: HTTPie prints everything to stdout with -v. Proposal: with `-v`/`-vv` the trace goes to
+   stderr, the selected parts stay on stdout. `-vv`: the full trace (every event with timestamps, TLS certificate
+   chain) and the wire capture (already captured when `-vv`). On failure (`Error::Execution`) print the partial
+   trace at `-v`. Then P2.4 waterfall, P2.5 `--output json` / `-o file`, P2.6 snapshot tests.
+
+## Output notes (P2.2)
+- `crates/snapreq-cli/src/output.rs`: `Parts` (`--print` letters H B h b m), `print()`, JSON pretty printer (serde_json `preserve_order` enabled in the CLI crate), binary summary on TTY, `human_bytes`.
+- Colors via `anstream::AutoStream` (`--color auto|always|never`, `NO_COLOR` honoured). Request headers printed from the trace (already redacted).
+- Default parts: `hb` on a TTY, `b` when piped.
 
 ## CLI notes (P2.1)
 - `crates/snapreq-cli/src/`: `cli.rs` (clap definitions), `send.rs` (`build_request`, pure, unit-tested), `main.rs` (exit codes in `mod exit`, printing).
@@ -126,7 +131,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 |---|---|
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
-| 2 CLI MVP | 🟨 in progress (P2.1 done) |
+| 2 CLI MVP | 🟨 in progress (P2.1–P2.2 done) |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
@@ -156,7 +161,8 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.7 — 2026-10-31 — Cookie jar (cookie_store), redirect-aware, merged with user Cookie headers. 128 tests total.
 - P1.8 — 2026-10-31 — Wire capture (HTTP/1.1) and trace redaction (sensitive headers, secrets, auto-learned credentials). 140 tests total.
 - P1.9 — 2026-10-31 — Criterion benchmarks; fixed a 1 ms delay on every new connection. Phase 1 complete. 141 tests total.
-- P2.1 — 2026-10-31 — `snapreq send` with request, connection, TLS and output options; exit codes; docs/CLI.md. 153 tests total.
+- P2.1 — 2026-10-31 — `snapreq send` with request, connection, TLS and output options; exit codes; docs/CLI.md. 152 tests total.
+- P2.2 — 2026-10-31 — Pretty output: --print parts, colors, JSON formatting, binary summaries. 160 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
