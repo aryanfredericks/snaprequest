@@ -7,9 +7,11 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::task::{Context, Poll};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
@@ -24,6 +26,40 @@ use crate::{Error, Result};
 
 /// The body type sent through hyper.
 pub(crate) type ReqBody = UnsyncBoxBody<Bytes, io::Error>;
+
+/// Wraps a body to record the instant it has been fully handed to the connection.
+pub(crate) fn timed(inner: ReqBody, done: Arc<std::sync::Mutex<Option<Instant>>>) -> ReqBody {
+    TimedBody { inner, done }.boxed_unsync()
+}
+
+struct TimedBody {
+    inner: ReqBody,
+    done: Arc<std::sync::Mutex<Option<Instant>>>,
+}
+
+impl hyper::body::Body for TimedBody {
+    type Data = Bytes;
+    type Error = io::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<std::result::Result<Frame<Bytes>, io::Error>>> {
+        let polled = Pin::new(&mut self.inner).poll_frame(cx);
+        if let Poll::Ready(None) = polled {
+            *self.done.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        }
+        polled
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
+    }
+}
 
 /// Read size for streaming files.
 const FILE_CHUNK: usize = 64 * 1024;

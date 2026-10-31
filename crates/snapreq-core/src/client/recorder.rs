@@ -1,15 +1,27 @@
 //! Collects trace events for one execution.
 
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::meter::Meter;
 use crate::error::{Error, ExecutionError};
 use crate::model::{Phase, TraceEntry, TraceEvent};
 
-/// A request that is being written; its timings are read from the socket meter.
+/// Where the send/wait timings of a request come from.
+#[derive(Debug)]
+pub(crate) enum SendTiming {
+    /// HTTP/1.1: the socket carries one exchange at a time, so its meter is exact.
+    Socket(Meter),
+    /// HTTP/2: the socket is shared, so use the instant the request body was fully
+    /// handed to the stream; the first response byte is approximated by the arrival
+    /// of the response headers.
+    Stream(Arc<Mutex<Option<Instant>>>),
+}
+
+/// A request that is being written.
 #[derive(Debug)]
 struct PendingSend {
-    meter: Meter,
+    timing: SendTiming,
     started: Instant,
     body_len: u64,
 }
@@ -45,22 +57,38 @@ impl Recorder {
         self.entries.push(TraceEntry { at, event });
     }
 
-    /// Marks the start of writing a request on a connection measured by `meter`.
-    pub(crate) fn begin_send(&mut self, meter: Meter, body_len: u64) {
+    /// Marks the start of writing a request.
+    pub(crate) fn begin_send(&mut self, timing: SendTiming, body_len: u64) {
         self.phase = Phase::Send;
         self.pending = Some(PendingSend {
-            meter,
+            timing,
             started: Instant::now(),
             body_len,
         });
     }
 
-    /// Emits `RequestSent` and `ResponseFirstByte` from the socket measurements,
-    /// as far as they got. Returns the instant of the first response byte.
-    pub(crate) fn finish_send(&mut self) -> Option<Instant> {
+    /// Emits `RequestSent` and `ResponseFirstByte` as far as they got.
+    /// `headers_at` is when the response headers arrived, if they did.
+    /// Returns the instant of the first response byte.
+    pub(crate) fn finish_send(&mut self, headers_at: Option<Instant>) -> Option<Instant> {
         let p = self.pending.take()?;
-        let snap = p.meter.snapshot();
-        let done = snap.write_done_at.or(snap.last_write_at)?;
+        let (done, first) = match &p.timing {
+            SendTiming::Socket(meter) => {
+                let snap = meter.snapshot();
+                (
+                    snap.write_done_at.or(snap.last_write_at)?,
+                    snap.first_read_at,
+                )
+            }
+            SendTiming::Stream(body_done) => {
+                let done = body_done
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    // An empty body is never polled; it is "sent" with the headers.
+                    .unwrap_or(p.started);
+                (done, headers_at)
+            }
+        };
         self.record_at(
             done,
             TraceEvent::RequestSent {
@@ -69,7 +97,7 @@ impl Recorder {
             },
         );
         self.phase = Phase::Wait;
-        let first = snap.first_read_at?;
+        let first = first?;
         self.record_at(
             first,
             TraceEvent::ResponseFirstByte {
@@ -86,7 +114,7 @@ impl Recorder {
 
     /// Records an `Error` event for the current phase and turns the trace into an [`Error`].
     pub(crate) fn fail(&mut self, message: impl Into<String>, timed_out: bool) -> Error {
-        self.finish_send();
+        self.finish_send(None);
         let message = message.into();
         self.record(TraceEvent::Error {
             phase: self.phase,

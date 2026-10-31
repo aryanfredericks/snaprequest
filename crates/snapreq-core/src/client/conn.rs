@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 
-use hyper::client::conn::http1;
-use hyper_util::rt::TokioIo;
+use hyper::client::conn::{http1, http2};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
@@ -23,36 +23,90 @@ use super::meter::{Meter, MeteredIo};
 use super::recorder::Recorder;
 use super::tls::{self, RequestTls};
 use crate::Result;
-use crate::model::{Phase, RequestSettings, TlsSettings, TraceEvent};
+use crate::model::{HttpVersionPref, Phase, RequestSettings, TlsSettings, TraceEvent};
 
-/// Connections are shared only between requests to the same scheme, host and port,
-/// and (for HTTPS) the same TLS settings, so a connection opened with verification
-/// off is never handed to a request that verifies.
+/// Connections are shared only between requests to the same scheme, host, port and
+/// HTTP version preference, and (for HTTPS) the same TLS settings, so a connection
+/// opened with verification off is never handed to a request that verifies.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PoolKey {
     scheme: String,
     host: String,
     port: u16,
+    version: HttpVersionPref,
     tls: Option<TlsSettings>,
 }
 
 impl PoolKey {
-    pub(crate) fn new(url: &Url, tls: &TlsSettings) -> Self {
+    pub(crate) fn new(url: &Url, settings: &RequestSettings) -> Self {
         Self {
             scheme: url.scheme().to_owned(),
             host: url.host_str().unwrap_or_default().to_ascii_lowercase(),
             port: url.port_or_known_default().unwrap_or(80),
-            tls: (url.scheme() == "https").then(|| tls.clone()),
+            version: settings.http_version,
+            tls: (url.scheme() == "https").then(|| settings.tls.clone()),
         }
     }
 }
 
-/// An open HTTP/1.1 connection.
+/// The request side of an HTTP/1.1 or HTTP/2 connection.
+#[derive(Debug)]
+pub(crate) enum Sender {
+    H1(http1::SendRequest<ReqBody>),
+    /// Cloneable: every clone opens new streams on the same connection.
+    H2(http2::SendRequest<ReqBody>),
+}
+
+impl Sender {
+    pub(crate) fn is_h2(&self) -> bool {
+        matches!(self, Self::H2(_))
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        match self {
+            Self::H1(s) => s.is_closed(),
+            Self::H2(s) => s.is_closed(),
+        }
+    }
+
+    pub(crate) async fn ready(&mut self) -> std::result::Result<(), hyper::Error> {
+        match self {
+            Self::H1(s) => s.ready().await,
+            Self::H2(s) => s.ready().await,
+        }
+    }
+
+    pub(crate) async fn send(
+        &mut self,
+        req: http::Request<ReqBody>,
+    ) -> std::result::Result<http::Response<hyper::body::Incoming>, hyper::Error> {
+        match self {
+            Self::H1(s) => s.send_request(req).await,
+            Self::H2(s) => s.send_request(req).await,
+        }
+    }
+}
+
+/// An open connection.
 #[derive(Debug)]
 pub(crate) struct Conn {
-    pub sender: http1::SendRequest<ReqBody>,
+    pub sender: Sender,
     pub meter: Meter,
     pub remote: SocketAddr,
+}
+
+impl Conn {
+    /// Another handle to the same HTTP/2 connection.
+    fn share(&self) -> Option<Self> {
+        match &self.sender {
+            Sender::H2(s) => Some(Self {
+                sender: Sender::H2(s.clone()),
+                meter: self.meter.clone(),
+                remote: self.remote,
+            }),
+            Sender::H1(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -61,9 +115,12 @@ struct Idle {
     since: Instant,
 }
 
+/// Idle HTTP/1.1 connections are checked out exclusively; HTTP/2 connections are
+/// shared by every request with the same key.
 #[derive(Debug)]
 pub(crate) struct Pool {
     idle: Mutex<HashMap<PoolKey, Vec<Idle>>>,
+    shared: Mutex<HashMap<PoolKey, Idle>>,
     idle_timeout: Duration,
     max_idle_per_host: usize,
 }
@@ -72,13 +129,28 @@ impl Pool {
     pub(crate) fn new(idle_timeout: Duration, max_idle_per_host: usize) -> Self {
         Self {
             idle: Mutex::new(HashMap::new()),
+            shared: Mutex::new(HashMap::new()),
             idle_timeout,
             max_idle_per_host,
         }
     }
 
-    /// Takes the most recently used idle connection that still looks alive.
+    /// A shared HTTP/2 connection, or the most recently used idle HTTP/1.1 connection
+    /// that still looks alive.
     pub(crate) fn checkout(&self, key: &PoolKey) -> Option<Conn> {
+        if self.max_idle_per_host == 0 {
+            return None;
+        }
+        {
+            let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(entry) = shared.get_mut(key) {
+                if entry.since.elapsed() < self.idle_timeout && !entry.conn.sender.is_closed() {
+                    entry.since = Instant::now();
+                    return entry.conn.share();
+                }
+                shared.remove(key);
+            }
+        }
         let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
         let list = idle.get_mut(key)?;
         while let Some(entry) = list.pop() {
@@ -89,9 +161,34 @@ impl Pool {
         None
     }
 
-    /// Returns a connection for later reuse.
+    /// Makes a new HTTP/2 connection available to concurrent requests right away.
+    pub(crate) fn share(&self, key: &PoolKey, conn: &Conn) {
+        if self.max_idle_per_host == 0 {
+            return;
+        }
+        if let Some(handle) = conn.share() {
+            let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            shared.insert(
+                key.clone(),
+                Idle {
+                    conn: handle,
+                    since: Instant::now(),
+                },
+            );
+        }
+    }
+
+    /// Returns a connection for later reuse. HTTP/2 handles are already shared, so
+    /// only their idle timer is refreshed.
     pub(crate) fn checkin(&self, key: PoolKey, conn: Conn) {
         if conn.sender.is_closed() || self.max_idle_per_host == 0 {
+            return;
+        }
+        if conn.sender.is_h2() {
+            let mut shared = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(entry) = shared.get_mut(&key) {
+                entry.since = Instant::now();
+            }
             return;
         }
         let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
@@ -110,8 +207,11 @@ impl Pool {
 /// (RFC 8305 recommends 250 ms).
 const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 
-/// Resolves, connects, does TLS for `https`, and performs the HTTP/1.1 handshake,
-/// recording each step.
+/// Resolves, connects, does TLS for `https`, and performs the HTTP/1.1 or HTTP/2
+/// handshake, recording each step.
+///
+/// HTTP/2 is used when TLS negotiates `h2` through ALPN, or over plain TCP when the
+/// request asks for HTTP/2 (prior knowledge).
 pub(crate) async fn connect(
     url: &Url,
     settings: &RequestSettings,
@@ -151,23 +251,51 @@ pub(crate) async fn connect(
     // Disabling Nagle avoids an artificial delay between headers and a small body.
     let _ = tcp.set_nodelay(true);
 
-    let stream = match tls {
-        Some(tls) => MaybeTls::Tls(Box::new(tls::handshake(tls, tcp, url, rec).await?)),
-        None => MaybeTls::Plain(tcp),
+    let (stream, use_h2) = match tls {
+        Some(tls) => {
+            let stream = tls::handshake(tls, tcp, url, rec).await?;
+            let h2 = stream.get_ref().1.alpn_protocol() == Some(b"h2");
+            if settings.http_version == HttpVersionPref::Http2 && !h2 {
+                return Err(rec.fail(
+                    "the server does not support HTTP/2 (ALPN did not select `h2`)",
+                    false,
+                ));
+            }
+            (MaybeTls::Tls(Box::new(stream)), h2)
+        }
+        None => (
+            MaybeTls::Plain(tcp),
+            settings.http_version == HttpVersionPref::Http2,
+        ),
     };
 
     let meter = Meter::default();
     let io = TokioIo::new(MeteredIo::new(stream, meter.clone()));
-    let (sender, connection) = http1::Builder::new()
-        .title_case_headers(true)
-        .handshake(io)
-        .await
-        .map_err(|e| rec.fail(format!("HTTP handshake failed: {}", error_chain(&e)), false))?;
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            tracing::debug!(error = %e, %remote, "connection closed with error");
-        }
-    });
+    let handshake_failed = |e: hyper::Error| format!("HTTP handshake failed: {}", error_chain(&e));
+    let sender = if use_h2 {
+        let (sender, connection) = http2::Builder::new(TokioExecutor::new())
+            .handshake(io)
+            .await
+            .map_err(|e| rec.fail(handshake_failed(e), false))?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                tracing::debug!(error = %e, %remote, "HTTP/2 connection closed with error");
+            }
+        });
+        Sender::H2(sender)
+    } else {
+        let (sender, connection) = http1::Builder::new()
+            .title_case_headers(true)
+            .handshake(io)
+            .await
+            .map_err(|e| rec.fail(handshake_failed(e), false))?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                tracing::debug!(error = %e, %remote, "connection closed with error");
+            }
+        });
+        Sender::H1(sender)
+    };
 
     Ok(Conn {
         sender,

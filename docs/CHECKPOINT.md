@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects ✅, 6c HTTP/2, 6d proxies
+- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects ✅, 6c HTTP/2 ✅, 6d proxies
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -32,6 +32,12 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
    303 → GET), proxies (HTTP CONNECT, SOCKS5, `HTTP(S)_PROXY`/`NO_PROXY`).
    Note: h2 connections are multiplexed, so the pool must share one `SendRequest` (cloneable) instead of check-out/in,
    and the socket meter cannot attribute bytes per stream (document: timings for h2 come from hyper events only).
+
+## HTTP/2 notes (P1.6c)
+- ALPN per `http_version`: Auto → `h2, http/1.1`; Http1 → `http/1.1`; Http2 → `h2` (TLS fails in `Phase::Tls` if not selected); plain-TCP Http2 = prior knowledge. Auto over plain HTTP stays HTTP/1.1 (no h2c upgrade).
+- `conn::Sender { H1, H2 }`. Pool: HTTP/1.1 idle list (exclusive checkout) + `shared` map of HTTP/2 handles (cloned per request, registered right after connect so concurrent requests share). `PoolKey` includes `http_version`.
+- HTTP/2 timing: `SendTiming::Stream` — send = until the request body is fully handed to the stream (`body::timed`), wait = until response headers. Header sizes reported as 0 (HPACK on shared socket).
+- HTTP/2 requests use the absolute URI (`:authority`), drop Host and connection-specific headers (rebuilt, not `remove`d, to keep order). Trace shows lowercase HTTP/2 headers.
 
 ## Redirect notes (P1.6b)
 - `client/redirect.rs::next_hop` (pure, unit-tested) decides the next hop; `Client::follow` loops over hops with one Recorder, so the trace covers the whole chain and `Timings::from_trace` reports the final hop.
@@ -116,6 +122,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.5 — 2026-10-31 — Per-request TLS options: verify off (with verdict in trace), CA file, mTLS, min/max version; pool separation. Fixed cargo-deny (rustls-pemfile unmaintained, time advisory → MSRV 1.88). 79 tests total.
 - P1.6a — 2026-10-31 — Response decompression (gzip, deflate, br, zstd). 86 tests total.
 - P1.6b — 2026-10-31 — Redirect following with browser-compatible method rules and cross-origin credential stripping. 100 tests total.
+- P1.6c — 2026-10-31 — HTTP/2 via ALPN and prior knowledge, shared multiplexed connections. Verified against example.com, google.com, github.com. 108 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

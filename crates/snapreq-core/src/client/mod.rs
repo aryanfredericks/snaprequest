@@ -11,7 +11,7 @@ mod tls;
 
 pub use self::tls::Certificate;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::BytesMut;
@@ -20,10 +20,10 @@ use http_body_util::BodyExt;
 
 use self::build::Prepared;
 use self::conn::{Conn, Pool, PoolKey};
-use self::recorder::Recorder;
+use self::recorder::{Recorder, SendTiming};
 use self::tls::{RequestTls, TlsContext};
+use crate::Result;
 use crate::model::{Header, HttpVersion, Phase, Request, Response, Sizes, Timings, TraceEvent};
-use crate::{Error, Result};
 
 /// Client-wide configuration. Per-request options live in
 /// [`RequestSettings`](crate::model::RequestSettings).
@@ -117,9 +117,6 @@ impl Client {
     /// carries the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
-        if req.settings.http_version == crate::model::HttpVersionPref::Http2 {
-            return Err(Error::Unsupported("HTTP/2".into()));
-        }
         let first = self.prepare_hop(req, &url).await?;
 
         let mut rec = Recorder::new();
@@ -145,7 +142,12 @@ impl Client {
     async fn prepare_hop(&self, req: &Request, url: &url::Url) -> Result<Hop> {
         let prepared = build::prepare(req, url, &self.inner.config.user_agent).await?;
         let tls = match url.scheme() {
-            "https" => Some(self.inner.tls.for_request(&req.settings.tls).await?),
+            "https" => Some(
+                self.inner
+                    .tls
+                    .for_request(&req.settings.tls, req.settings.http_version)
+                    .await?,
+            ),
             _ => None,
         };
         Ok(Hop { prepared, tls })
@@ -209,7 +211,7 @@ impl Client {
         tls: Option<&RequestTls>,
         rec: &mut Recorder,
     ) -> Result<Response> {
-        let key = PoolKey::new(url, &req.settings.tls);
+        let key = PoolKey::new(url, &req.settings);
 
         if let Some(conn) = self.reusable_conn(&key).await {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
@@ -226,6 +228,8 @@ impl Client {
         }
 
         let conn = self.connect(url, req, tls, rec).await?;
+        // Concurrent requests can use a new HTTP/2 connection immediately.
+        self.inner.pool.share(&key, &conn);
         match self
             .exchange(conn, url, prepared, rec, false, req.settings.decompress)
             .await?
@@ -276,31 +280,47 @@ impl Client {
         reused: bool,
         decompress: bool,
     ) -> Result<Outcome> {
-        conn.meter.reset();
+        let h2 = conn.sender.is_h2();
         rec.record(TraceEvent::RequestHeaders {
-            method: prepared.to_http().method().to_string(),
+            method: prepared.method().to_string(),
             url: url.to_string(),
-            version: HttpVersion::Http11,
-            headers: prepared.sent_headers.clone(),
+            version: if h2 {
+                HttpVersion::Http2
+            } else {
+                HttpVersion::Http11
+            },
+            headers: prepared.trace_headers(h2),
         });
-        rec.begin_send(conn.meter.clone(), prepared.body_len);
+        let request = if h2 {
+            // The socket is shared by other streams, so time the body instead.
+            let body_done = Arc::new(Mutex::new(None));
+            rec.begin_send(SendTiming::Stream(body_done.clone()), prepared.body_len);
+            prepared.to_http_with_body(true, body::timed(prepared.body_stream(), body_done))
+        } else {
+            conn.meter.reset();
+            rec.begin_send(SendTiming::Socket(conn.meter.clone()), prepared.body_len);
+            prepared.to_http(false)
+        };
 
-        let response = match conn.sender.send_request(prepared.to_http()).await {
+        let response = match conn.sender.send(request).await {
             Ok(r) => r,
             Err(e) => {
-                let nothing_received = conn.meter.snapshot().bytes_read == 0;
+                // HTTP/2 "canceled"/"closed" means the stream was never processed.
+                let nothing_received = h2 || conn.meter.snapshot().bytes_read == 0;
                 if reused
                     && nothing_received
                     && (e.is_canceled() || e.is_closed() || e.is_incomplete_message())
                 {
-                    rec.finish_send();
+                    rec.finish_send(None);
                     return Ok(Outcome::Stale(error_chain(&e)));
                 }
                 return Err(rec.fail(error_chain(&e), false));
             }
         };
 
-        let first_byte = rec.finish_send().unwrap_or_else(Instant::now);
+        let first_byte = rec
+            .finish_send(Some(Instant::now()))
+            .unwrap_or_else(Instant::now);
         let (parts, mut body) = response.into_parts();
         let version = HttpVersion::try_from(parts.version)?;
         let headers: Vec<Header> = parts
@@ -360,11 +380,12 @@ impl Client {
 
         let decoded_len = body.len() as u64;
         let snap = conn.meter.snapshot();
-        let reusable = !parts
-            .headers
-            .get_all(header::CONNECTION)
-            .iter()
-            .any(|v| v.as_bytes().eq_ignore_ascii_case(b"close"));
+        let reusable = h2
+            || !parts
+                .headers
+                .get_all(header::CONNECTION)
+                .iter()
+                .any(|v| v.as_bytes().eq_ignore_ascii_case(b"close"));
 
         Ok(Outcome::Done(
             Response {
@@ -376,9 +397,18 @@ impl Client {
                 remote_addr: Some(conn.remote),
                 timings: Timings::default(),
                 sizes: Sizes {
-                    request_headers: snap.bytes_written.saturating_sub(prepared.body_len),
+                    // HTTP/2 headers are HPACK-compressed on a shared socket: not measurable per request.
+                    request_headers: if h2 {
+                        0
+                    } else {
+                        snap.bytes_written.saturating_sub(prepared.body_len)
+                    },
                     request_body: prepared.body_len,
-                    response_headers: snap.bytes_read.saturating_sub(body_len),
+                    response_headers: if h2 {
+                        0
+                    } else {
+                        snap.bytes_read.saturating_sub(body_len)
+                    },
                     response_body: body_len,
                     response_body_decoded: decoded_len,
                 },

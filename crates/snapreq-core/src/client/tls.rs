@@ -22,7 +22,8 @@ use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 use super::error_chain;
 use super::recorder::Recorder;
 use crate::model::{
-    CertificateInfo, ClientCertificate, Phase, TlsInfo, TlsSettings, TlsVersion, TraceEvent,
+    CertificateInfo, ClientCertificate, HttpVersionPref, Phase, TlsInfo, TlsSettings, TlsVersion,
+    TraceEvent,
 };
 use crate::{Error, Result};
 
@@ -60,7 +61,25 @@ impl Certificate {
 #[derive(Debug)]
 pub(crate) struct TlsContext {
     roots: Arc<RootCertStore>,
-    default: Arc<RustlsConfig>,
+    /// Default-settings configs for `Auto`, `Http1` and `Http2` (they differ only in ALPN).
+    defaults: [Arc<RustlsConfig>; 3],
+}
+
+fn pref_index(pref: HttpVersionPref) -> usize {
+    match pref {
+        HttpVersionPref::Auto => 0,
+        HttpVersionPref::Http1 => 1,
+        HttpVersionPref::Http2 => 2,
+    }
+}
+
+/// ALPN protocols to offer for a version preference.
+fn alpn(pref: HttpVersionPref) -> Vec<Vec<u8>> {
+    match pref {
+        HttpVersionPref::Auto => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+        HttpVersionPref::Http1 => vec![b"http/1.1".to_vec()],
+        HttpVersionPref::Http2 => vec![b"h2".to_vec()],
+    }
 }
 
 /// The TLS configuration for one request.
@@ -95,16 +114,29 @@ impl TlsContext {
         }
 
         let roots = Arc::new(roots);
-        let default = build(&roots, &TlsSettings::default(), None, None)?;
-        Ok(Self { roots, default })
+        let defaults = [
+            HttpVersionPref::Auto,
+            HttpVersionPref::Http1,
+            HttpVersionPref::Http2,
+        ]
+        .map(|pref| build(&roots, &TlsSettings::default(), None, None, pref));
+        let [auto, h1, h2] = defaults;
+        Ok(Self {
+            roots,
+            defaults: [auto?, h1?, h2?],
+        })
     }
 
     /// Configuration for `settings`. Reads CA and client certificate files, so file
     /// problems surface here, before any connection is made.
-    pub(crate) async fn for_request(&self, settings: &TlsSettings) -> Result<RequestTls> {
+    pub(crate) async fn for_request(
+        &self,
+        settings: &TlsSettings,
+        pref: HttpVersionPref,
+    ) -> Result<RequestTls> {
         if settings.is_default() {
             return Ok(RequestTls {
-                config: self.default.clone(),
+                config: self.defaults[pref_index(pref)].clone(),
                 verdict: None,
                 client_cert_subject: None,
             });
@@ -138,7 +170,7 @@ impl TlsContext {
             .map(|leaf| certificate_info(leaf).subject);
 
         let verdict = (!settings.verify).then(|| Arc::new(Mutex::new(None)));
-        let config = build(&roots, settings, client_auth, verdict.clone())?;
+        let config = build(&roots, settings, client_auth, verdict.clone(), pref)?;
         Ok(RequestTls {
             config,
             verdict,
@@ -154,6 +186,7 @@ fn build(
     settings: &TlsSettings,
     client_auth: Option<ClientAuth>,
     verdict: Option<Arc<Mutex<Option<String>>>>,
+    pref: HttpVersionPref,
 ) -> Result<Arc<RustlsConfig>> {
     let min = settings.min_version.unwrap_or(TlsVersion::Tls12);
     let max = settings.max_version.unwrap_or(TlsVersion::Tls13);
@@ -194,8 +227,7 @@ fn build(
             .with_client_auth_cert(chain, key)
             .map_err(|e| Error::InvalidRequest(format!("client certificate: {e}")))?,
     };
-    // HTTP/2 negotiation arrives with the HTTP/2 transport.
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    config.alpn_protocols = alpn(pref);
     Ok(Arc::new(config))
 }
 
@@ -464,11 +496,14 @@ mod settings_tests {
     async fn version_range_must_not_be_empty() {
         let ctx = TlsContext::new(&[]).unwrap();
         let err = ctx
-            .for_request(&TlsSettings {
-                min_version: Some(TlsVersion::Tls13),
-                max_version: Some(TlsVersion::Tls12),
-                ..TlsSettings::default()
-            })
+            .for_request(
+                &TlsSettings {
+                    min_version: Some(TlsVersion::Tls13),
+                    max_version: Some(TlsVersion::Tls12),
+                    ..TlsSettings::default()
+                },
+                HttpVersionPref::Auto,
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("min_version is higher"), "{err}");
@@ -478,10 +513,13 @@ mod settings_tests {
     async fn missing_files_are_reported_with_their_path() {
         let ctx = TlsContext::new(&[]).unwrap();
         let err = ctx
-            .for_request(&TlsSettings {
-                ca_cert: Some("missing/ca.pem".into()),
-                ..TlsSettings::default()
-            })
+            .for_request(
+                &TlsSettings {
+                    ca_cert: Some("missing/ca.pem".into()),
+                    ..TlsSettings::default()
+                },
+                HttpVersionPref::Auto,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -491,13 +529,16 @@ mod settings_tests {
         );
 
         let err = ctx
-            .for_request(&TlsSettings {
-                client_cert: Some(ClientCertificate {
-                    cert: "missing/me.crt".into(),
-                    key: "missing/me.key".into(),
-                }),
-                ..TlsSettings::default()
-            })
+            .for_request(
+                &TlsSettings {
+                    client_cert: Some(ClientCertificate {
+                        cert: "missing/me.crt".into(),
+                        key: "missing/me.key".into(),
+                    }),
+                    ..TlsSettings::default()
+                },
+                HttpVersionPref::Auto,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -509,8 +550,14 @@ mod settings_tests {
     #[tokio::test]
     async fn default_settings_reuse_the_shared_config() {
         let ctx = TlsContext::new(&[]).unwrap();
-        let a = ctx.for_request(&TlsSettings::default()).await.unwrap();
-        let b = ctx.for_request(&TlsSettings::default()).await.unwrap();
+        let a = ctx
+            .for_request(&TlsSettings::default(), HttpVersionPref::Auto)
+            .await
+            .unwrap();
+        let b = ctx
+            .for_request(&TlsSettings::default(), HttpVersionPref::Auto)
+            .await
+            .unwrap();
         assert!(Arc::ptr_eq(&a.config, &b.config));
     }
 }

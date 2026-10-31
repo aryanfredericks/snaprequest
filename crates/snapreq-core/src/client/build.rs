@@ -11,7 +11,10 @@ use crate::{Error, Result};
 /// Can be turned into an `http::Request` more than once (for a retry).
 pub(crate) struct Prepared {
     method: http::Method,
+    /// Origin-form target (`/path?query`) for HTTP/1.1.
     pub uri: http::Uri,
+    /// Absolute URI for HTTP/2, which carries scheme and authority as pseudo-headers.
+    absolute_uri: http::Uri,
     headers: HeaderMap,
     body: EncodedBody,
     /// Headers in the order and casing they go on the wire.
@@ -19,14 +22,70 @@ pub(crate) struct Prepared {
     pub body_len: u64,
 }
 
+/// Headers that only make sense for one HTTP/1.1 connection; HTTP/2 forbids them.
+const CONNECTION_SPECIFIC: [&str; 5] = [
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "transfer-encoding",
+    "upgrade",
+];
+
 impl Prepared {
-    pub(crate) fn to_http(&self) -> http::Request<ReqBody> {
-        let mut r = http::Request::new(self.body.to_body());
+    pub(crate) fn method(&self) -> &http::Method {
+        &self.method
+    }
+
+    /// A fresh body stream.
+    pub(crate) fn body_stream(&self) -> ReqBody {
+        self.body.to_body()
+    }
+
+    /// Builds the request for HTTP/1.1 or HTTP/2.
+    pub(crate) fn to_http(&self, h2: bool) -> http::Request<ReqBody> {
+        self.to_http_with_body(h2, self.body.to_body())
+    }
+
+    pub(crate) fn to_http_with_body(&self, h2: bool, body: ReqBody) -> http::Request<ReqBody> {
+        let mut r = http::Request::new(body);
         *r.method_mut() = self.method.clone();
-        *r.uri_mut() = self.uri.clone();
-        *r.version_mut() = http::Version::HTTP_11;
-        *r.headers_mut() = self.headers.clone();
+        if h2 {
+            *r.uri_mut() = self.absolute_uri.clone();
+            *r.version_mut() = http::Version::HTTP_2;
+            *r.headers_mut() = self.h2_headers();
+        } else {
+            *r.uri_mut() = self.uri.clone();
+            *r.version_mut() = http::Version::HTTP_11;
+            *r.headers_mut() = self.headers.clone();
+        }
         r
+    }
+
+    /// Headers as they go out over HTTP/2: `Host` becomes the `:authority`
+    /// pseudo-header and connection-specific headers are removed.
+    fn h2_headers(&self) -> HeaderMap {
+        // Rebuilt rather than `remove`d: removal swaps entries and would reorder headers.
+        let mut headers = HeaderMap::with_capacity(self.headers.len());
+        for (name, value) in &self.headers {
+            let forbidden = *name == header::HOST
+                || CONNECTION_SPECIFIC.contains(&name.as_str())
+                || (*name == header::TE && !value.as_bytes().eq_ignore_ascii_case(b"trailers"));
+            if !forbidden {
+                headers.append(name.clone(), value.clone());
+            }
+        }
+        headers
+    }
+
+    /// Headers for the trace, in the casing used on the wire.
+    pub(crate) fn trace_headers(&self, h2: bool) -> Vec<Header> {
+        if !h2 {
+            return self.sent_headers.clone();
+        }
+        self.h2_headers()
+            .iter()
+            .map(|(n, v)| Header::new(n.as_str(), String::from_utf8_lossy(v.as_bytes())))
+            .collect()
     }
 }
 
@@ -92,10 +151,17 @@ pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Resul
     let uri = path_and_query
         .parse::<http::Uri>()
         .map_err(|e| Error::InvalidRequest(format!("invalid request target: {e}")))?;
+    let mut without_fragment = url.clone();
+    without_fragment.set_fragment(None);
+    let absolute_uri = without_fragment
+        .as_str()
+        .parse::<http::Uri>()
+        .map_err(|e| Error::InvalidRequest(format!("invalid request URL: {e}")))?;
 
     Ok(Prepared {
         method: req.method.clone(),
         uri,
+        absolute_uri,
         headers,
         body_len: body.len,
         body,
@@ -153,7 +219,11 @@ mod tests {
         );
         assert_eq!(p.sent_headers[0].value, "example.com:8080");
         assert_eq!(p.uri, "/a?b=1");
-        assert_eq!(p.to_http().headers().len(), 5);
+        assert_eq!(p.to_http(false).headers().len(), 5);
+        let h2 = p.to_http(true);
+        assert_eq!(h2.uri(), "http://example.com:8080/a?b=1");
+        assert!(h2.headers().get("host").is_none());
+        assert_eq!(p.trace_headers(true)[0].name, "x-trace");
     }
 
     #[tokio::test]
@@ -191,6 +261,23 @@ mod tests {
         assert_eq!(ct.value, "application/json");
         assert_eq!(cl.value, "7");
         assert_eq!(p.body_len, 7);
+    }
+
+    #[tokio::test]
+    async fn connection_specific_headers_are_dropped_for_http2() {
+        let req = Request::get("https://x.test/#frag")
+            .header("Connection", "keep-alive")
+            .header("TE", "gzip")
+            .header("X-Ok", "1");
+        let url = req.effective_url().unwrap();
+        let p = prepare(&req, &url, "ua").await.unwrap();
+        let h2 = p.to_http(true);
+        assert_eq!(h2.uri(), "https://x.test/");
+        assert!(h2.headers().get("connection").is_none());
+        assert!(h2.headers().get("te").is_none());
+        assert_eq!(h2.headers()["x-ok"], "1");
+        // HTTP/1.1 keeps what the user asked for.
+        assert_eq!(p.to_http(false).headers()["connection"], "keep-alive");
     }
 
     #[tokio::test]

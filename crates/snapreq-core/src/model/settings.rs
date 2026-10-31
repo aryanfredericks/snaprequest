@@ -166,7 +166,7 @@ impl FromStr for ResolveOverride {
 }
 
 /// Requested HTTP version.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HttpVersionPref {
     /// HTTP/2 when the server offers it through ALPN, otherwise HTTP/1.1.
