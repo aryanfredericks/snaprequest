@@ -35,6 +35,24 @@ sent, `<` for what came back, `!` for the failure. Credentials are always redact
 - `-vv`: everything, with a millisecond timestamp on each line, the full certificate chain (issuer,
   validity, names, serial, SHA-256 fingerprint) and the raw bytes of each HTTP/1.1 exchange.
 
+`-v` ends with a timing waterfall: each phase drawn as a bar on one timeline, one block per
+redirect hop (also available on stdout with `--print t`):
+
+```
+                     0                                                  662.1 ms
+hop 1/2: 301 → https://github.com/
+DNS         169.5 ms ███████████████
+connect     199.6 ms                ██████████████████
+send         0.13 ms                                  █
+wait        204.3 ms                                  ██████████████████
+download     0.13 ms                                                    █
+hop 2/2: final response
+DNS          0.49 ms                                                    █
+connect      13.4 ms                                                    █
+TLS          19.2 ms                                                     ██
+…
+```
+
 When a request fails, `-v` shows the trace up to the failure. Without `-v` the error message
 suggests rerunning with it.
 
@@ -96,7 +114,7 @@ Only one kind of body can be given per request.
 
 | Option | Meaning |
 |---|---|
-| `-p, --print PARTS` | What to print: `H` request headers (as sent, credentials redacted), `B` request body, `h` status line and response headers, `b` response body, `m` timings and sizes. Default: `hb` on a terminal, `b` when piped, so `snapreq send URL \| jq` works. |
+| `-p, --print PARTS` | What to print: `H` request headers (as sent, credentials redacted), `B` request body, `h` status line and response headers, `b` response body, `m` timings and sizes, `t` timing waterfall. Default: `hb` on a terminal, `b` when piped, so `snapreq send URL \| jq` works. |
 | `--color auto\|always\|never` | Colors (default `auto`: only on a terminal, and never when `NO_COLOR` is set). |
 | `-v` / `-vv` | Show the trace on **stderr** (stdout keeps only the `--print` parts). See below. |
 | `-f, --fail` | Exit with code 4 when the status is 400 or higher. |

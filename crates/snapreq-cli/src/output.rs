@@ -20,6 +20,8 @@ pub(crate) struct Parts {
     pub response_body: bool,
     /// `m`: timing and size summary.
     pub meta: bool,
+    /// `t`: timing waterfall.
+    pub waterfall: bool,
 }
 
 impl Parts {
@@ -33,9 +35,10 @@ impl Parts {
                 'h' => p.response_headers = true,
                 'b' => p.response_body = true,
                 'm' => p.meta = true,
+                't' => p.waterfall = true,
                 other => {
                     return Err(format!(
-                        "invalid --print letter `{other}` (use H, B, h, b, m)"
+                        "invalid --print letter `{other}` (use H, B, h, b, m, t)"
                     ));
                 }
             }
@@ -122,6 +125,14 @@ pub(crate) fn print(
     if parts.meta {
         separate(out)?;
         write_meta(out, resp)?;
+    }
+    if parts.waterfall {
+        separate(out)?;
+        crate::waterfall::render(
+            out,
+            &resp.trace,
+            crate::waterfall::terminal_width(crate::waterfall::Stream::Stdout),
+        )?;
     }
     out.flush()
 }

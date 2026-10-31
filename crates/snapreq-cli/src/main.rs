@@ -4,6 +4,7 @@ mod cli;
 mod output;
 mod send;
 mod trace_view;
+mod waterfall;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -86,6 +87,12 @@ async fn run_send(args: &SendArgs) -> u8 {
             let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);
             // Losing the debug view is not worth failing the command over.
             let _ = trace_view::render(&mut err, trace, args.verbose);
+            let _ = std::io::Write::write_all(&mut err, b"\n");
+            let _ = waterfall::render(
+                &mut err,
+                trace,
+                waterfall::terminal_width(waterfall::Stream::Stderr),
+            );
         }
     };
 

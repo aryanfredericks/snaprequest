@@ -178,7 +178,8 @@ pub(crate) struct SendArgs {
     pub verbose: u8,
 
     /// What to print: `H` request headers, `B` request body, `h` response status and headers,
-    /// `b` response body, `m` timings and sizes. Default `hb` on a terminal, `b` when piped.
+    /// `b` response body, `m` timings and sizes, `t` timing waterfall.
+    /// Default `hb` on a terminal, `b` when piped.
     #[arg(
         short = 'p',
         long = "print",
