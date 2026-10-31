@@ -1,6 +1,7 @@
 //! `snapreq`: fast, self-hosted HTTP API testing and debugging.
 
 mod cli;
+mod json_out;
 mod output;
 mod send;
 mod trace_view;
@@ -13,7 +14,7 @@ use clap::Parser;
 use snapreq_core::{Client, Error};
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, ColorArg, Command, SendArgs};
+use crate::cli::{Cli, ColorArg, Command, FormatArg, SendArgs};
 use crate::output::Parts;
 
 /// Process exit codes. Documented in `docs/CLI.md`; keep both in sync.
@@ -58,29 +59,47 @@ async fn main() -> ExitCode {
 }
 
 async fn run_send(args: &SendArgs) -> u8 {
-    let request = match send::build_request(args) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return exit::INVALID_REQUEST;
-        }
-    };
-    let terminal = std::io::stdout().is_terminal();
-    let parts = match &args.print {
-        Some(spec) => match Parts::parse(spec) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return exit::INVALID_REQUEST;
-            }
-        },
-        None => Parts::default_for(terminal),
-    };
+    let json = args.format == FormatArg::Json;
     let color = match args.color {
         ColorArg::Auto => anstream::ColorChoice::Auto,
         ColorArg::Always => anstream::ColorChoice::Always,
         ColorArg::Never => anstream::ColorChoice::Never,
     };
+    // Reports a problem found before anything was sent.
+    let invalid = |message: String| {
+        if json {
+            emit_json(&json_out::invalid_arguments(&message));
+        } else {
+            eprintln!("error: {message}");
+        }
+        exit::INVALID_REQUEST
+    };
+
+    let request = match send::build_request(args) {
+        Ok(r) => r,
+        Err(e) => return invalid(e.to_string()),
+    };
+    let terminal = std::io::stdout().is_terminal();
+    let mut parts = match &args.print {
+        Some(spec) => match Parts::parse(spec) {
+            Ok(p) => p,
+            Err(e) => return invalid(e),
+        },
+        None => Parts::default_for(terminal),
+    };
+    if let Some(path) = &args.output {
+        // Check before sending, so a request is not made only to lose its result.
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
+            && !dir.is_dir()
+        {
+            return invalid(format!(
+                "cannot save to `{}`: directory `{}` does not exist",
+                path.display(),
+                dir.display()
+            ));
+        }
+        parts.response_body = false;
+    }
 
     let show_trace = |trace: &[snapreq_core::model::TraceEntry]| {
         if args.verbose > 0 {
@@ -99,12 +118,33 @@ async fn run_send(args: &SendArgs) -> u8 {
     match Client::default().execute(&request).await {
         Ok(response) => {
             show_trace(&response.trace);
-            let mut out = anstream::AutoStream::new(std::io::stdout().lock(), color);
-            if let Err(e) = output::print(&mut out, &request, &response, parts, terminal) {
-                // A closed pipe (`| head`) is not an error worth reporting.
-                if e.kind() != std::io::ErrorKind::BrokenPipe {
-                    eprintln!("error: {e}");
+            if let Some(path) = &args.output {
+                if let Err(e) = std::fs::write(path, &response.body) {
+                    eprintln!("error: cannot write `{}`: {e}", path.display());
                     return exit::INTERNAL;
+                }
+                if !json && std::io::stderr().is_terminal() {
+                    eprintln!(
+                        "saved {} to {}",
+                        output::human_bytes(response.body.len() as u64),
+                        path.display()
+                    );
+                }
+            }
+            if json {
+                emit_json(&json_out::success(
+                    &request,
+                    &response,
+                    args.output.as_deref(),
+                ));
+            } else {
+                let mut out = anstream::AutoStream::new(std::io::stdout().lock(), color);
+                if let Err(e) = output::print(&mut out, &request, &response, parts, terminal) {
+                    // A closed pipe (`| head`) is not an error worth reporting.
+                    if e.kind() != std::io::ErrorKind::BrokenPipe {
+                        eprintln!("error: {e}");
+                        return exit::INTERNAL;
+                    }
                 }
             }
             if args.fail && response.status >= 400 {
@@ -117,12 +157,16 @@ async fn run_send(args: &SendArgs) -> u8 {
             if let Some(trace) = e.trace() {
                 show_trace(trace);
             }
-            let hint = if args.verbose == 0 && e.trace().is_some() {
-                " (run with -v to see what happened)"
+            if json {
+                emit_json(&json_out::failure(Some(&request), &e));
             } else {
-                ""
-            };
-            eprintln!("error: {e}{hint}");
+                let hint = if args.verbose == 0 && e.trace().is_some() {
+                    " (run with -v to see what happened)"
+                } else {
+                    ""
+                };
+                eprintln!("error: {e}{hint}");
+            }
             match e {
                 Error::Execution(ex) if ex.timed_out => exit::TIMEOUT,
                 Error::Execution(_) => exit::NETWORK,
@@ -130,6 +174,14 @@ async fn run_send(args: &SendArgs) -> u8 {
             }
         }
     }
+}
+
+/// Writes one JSON document to stdout.
+fn emit_json(doc: &serde_json::Value) {
+    let mut out = std::io::stdout().lock();
+    // Serializing a `Value` cannot fail; a closed pipe is not worth reporting.
+    let _ = serde_json::to_writer_pretty(&mut out, doc);
+    let _ = std::io::Write::write_all(&mut out, b"\n");
 }
 
 #[cfg(test)]

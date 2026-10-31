@@ -230,3 +230,114 @@ async fn failures_show_the_trace_with_v_and_a_hint_without() {
     assert!(err.contains("! TCP connect failed"), "{err}");
     assert!(!err.contains("run with -v"), "{err}");
 }
+
+fn json_doc(o: &Output) -> serde_json::Value {
+    serde_json::from_slice(&o.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {}", stdout(o)))
+}
+
+#[tokio::test]
+async fn json_format_describes_the_whole_exchange() {
+    let addr = server().await;
+    let out = snapreq(&[
+        "send",
+        &format!("http://{addr}/j?key=hidden-key-1"),
+        "--format",
+        "json",
+        "--secret",
+        "hidden-key-1",
+    ])
+    .await;
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json_doc(&out);
+
+    assert_eq!(doc["format"], 1);
+    assert_eq!(doc["request"]["method"], "GET");
+    assert_eq!(
+        doc["request"]["url"],
+        format!("http://{addr}/j?key=<redacted>")
+    );
+    assert_eq!(doc["response"]["status"], 200);
+    assert_eq!(doc["response"]["body"]["encoding"], "utf8");
+    assert!(doc["response"]["timings"]["total_ms"].as_f64().unwrap() > 0.0);
+    assert!(doc["error"].is_null());
+    // The server echoes the URL into the body, which is returned untouched; the secret
+    // must not appear anywhere else in the document.
+    let mut without_body = doc.clone();
+    without_body["response"]["body"] = serde_json::Value::Null;
+    assert!(
+        !without_body.to_string().contains("hidden-key-1"),
+        "{without_body}"
+    );
+    let trace = doc["response"]["trace"].to_string();
+    assert!(!trace.contains("hidden-key-1"), "{trace}");
+}
+
+#[tokio::test]
+async fn json_format_reports_failures_as_json() {
+    let free = TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let out = snapreq(&["send", &format!("http://{free}/"), "--format", "json"]).await;
+    assert_eq!(out.status.code(), Some(5));
+    let doc = json_doc(&out);
+    assert!(doc["response"].is_null());
+    assert_eq!(doc["error"]["kind"], "execution");
+    assert_eq!(doc["error"]["phase"], "connect");
+    assert_eq!(doc["error"]["timed_out"], false);
+    assert!(doc["error"]["trace"].as_array().unwrap().len() >= 2);
+
+    let out = snapreq(&["send", "http://a.test/", "-H", "bad", "--format", "json"]).await;
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(json_doc(&out)["error"]["kind"], "invalid_request");
+}
+
+#[tokio::test]
+async fn output_file_receives_the_body() {
+    let addr = server().await;
+    let dir = std::env::temp_dir().join(format!("snapreq-cli-o-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("body.txt");
+
+    let out = snapreq(&[
+        "send",
+        &format!("http://{addr}/saved"),
+        "-o",
+        file.to_str().unwrap(),
+        "-p",
+        "hb",
+    ])
+    .await;
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "GET /saved \n");
+    // The body is not printed; the status and headers still are.
+    assert!(stdout(&out).starts_with("HTTP/1.1 200 OK\n"));
+    assert!(!stdout(&out).contains("GET /saved"));
+
+    let json = json_doc(
+        &snapreq(&[
+            "send",
+            &format!("http://{addr}/s"),
+            "-o",
+            file.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .await,
+    );
+    assert_eq!(json["body_file"], file.to_str().unwrap());
+    assert_eq!(json["response"]["body"]["data"], "");
+
+    let missing = dir.join("no-such-dir").join("x.txt");
+    let out = snapreq(&[
+        "send",
+        &format!("http://{addr}/"),
+        "-o",
+        missing.to_str().unwrap(),
+    ])
+    .await;
+    assert_eq!(out.status.code(), Some(3));
+    assert!(stderr(&out).contains("does not exist"), "{}", stderr(&out));
+}

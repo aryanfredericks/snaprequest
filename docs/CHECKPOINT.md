@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 2 CLI MVP, starting (Phase 1 complete)
-- **Current checkpoint:** P2.5, machine-readable output
+- **Current checkpoint:** P2.6, snapshot tests (last checkpoint of Phase 2)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,11 +25,15 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P2.5: `--output json` writes one JSON document to stdout: `{ "request": …, "response": … }` (core model types,
-   body utf8/base64, redacted trace) or `{ "request": …, "error": { phase, timed_out, message, trace } }` on
-   failure; stable and documented (version field `"format": 1`). `--body-only`? Already `-p b`; skip. `-o FILE`:
-   write the decoded response body to a file (stream when possible; core still buffers, note it) and print
-   headers/summary as usual; refuse to overwrite unless `--force`? Decide. Then P2.6 snapshot tests (insta).
+1. P2.6: `insta` snapshot tests for CLI output: pretty output (`-p Hhbm` minus volatile values), `-v`/`-vv` trace
+   view, waterfall, `--format json`, error messages. Volatile data (ports, dates, durations, addresses) must be
+   normalised with `insta` filters or by rendering synthetic traces. Then Phase 2 is complete → Phase 3
+   (collections, environments, variables).
+
+## JSON / -o notes (P2.5)
+- Naming: `--format pretty|json` and `-o/--output FILE` (curl meaning). PLAN updated.
+- `crates/snapreq-cli/src/json_out.rs`: schema v1 (`format`, `request {method,url}`, `response`, `error`, optional `body_file`); documented in `docs/CLI.md`. Secrets scrubbed from request/response URLs; body untouched.
+- `-o`: parent dir checked before sending (exit 3); body written after the response (core buffers bodies; streaming to disk is a later improvement); `saved … to …` on stderr when it is a terminal.
 
 ## Waterfall notes (P2.4)
 - `crates/snapreq-cli/src/waterfall.rs`: `hops()` splits the trace at `Redirect` events; segment start = event time − duration; `render(out, trace, width)` (min width 40); `terminal_width(Stream)` via `terminal_size_of` → `COLUMNS` → 80.
@@ -138,7 +142,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 |---|---|
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
-| 2 CLI MVP | 🟨 in progress (P2.1–P2.4 done) |
+| 2 CLI MVP | 🟨 in progress (P2.1–P2.5 done) |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
@@ -172,6 +176,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P2.2 — 2026-10-31 — Pretty output: --print parts, colors, JSON formatting, binary summaries. 160 tests total.
 - P2.3 — 2026-10-31 — Verbose trace on stderr (-v compact, -vv timestamps, cert chain, wire bytes). 165 tests total.
 - P2.4 — 2026-10-31 — Timing waterfall (per hop, terminal-width aware) in -v and --print t. 168 tests total.
+- P2.5 — 2026-10-31 — `--format json` (schema v1) and `-o FILE`. 173 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

@@ -152,10 +152,10 @@ The first thing people can actually use.
 - **P2.2** Pretty output: status line, headers, body with JSON/XML/HTML formatting and syntax colors; automatic pager.
 - **P2.3** Verbosity levels: `-v` shows the request and timings, `-vv` shows the full trace, TLS details and raw wire bytes.
 - **P2.4** Timing waterfall printed in the terminal (DNS | connect | TLS | TTFB | download).
-- **P2.5** Output modes: `--output json` (machine-readable response and trace), `--body-only`, `-o file`.
+- **P2.5** Output modes: `--format json` (machine-readable response and trace) and `-o/--output FILE` (curl-compatible name; `--print b` covers body-only).
 - **P2.6** Snapshot tests of CLI output (`insta`).
 
-**Acceptance:** `snapreq send GET https://httpbin.org/get -vv` shows a complete, readable trace; `--output json` is stable and documented.
+**Acceptance:** `snapreq send GET https://httpbin.org/get -vv` shows a complete, readable trace; `--format json` is stable and documented.
 
 ---
 

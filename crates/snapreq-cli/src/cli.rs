@@ -188,6 +188,24 @@ pub(crate) struct SendArgs {
     )]
     pub print: Option<String>,
 
+    /// Output format: `pretty` for people, `json` for one machine-readable document on stdout.
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        default_value = "pretty",
+        help_heading = "Output"
+    )]
+    pub format: FormatArg,
+
+    /// Save the (decoded) response body to FILE instead of printing it. Overwrites FILE.
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "FILE",
+        help_heading = "Output"
+    )]
+    pub output: Option<PathBuf>,
+
     /// When to use colors.
     #[arg(
         long,
@@ -220,4 +238,10 @@ pub(crate) enum ColorArg {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FormatArg {
+    Pretty,
+    Json,
 }

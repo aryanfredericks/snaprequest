@@ -115,10 +115,44 @@ Only one kind of body can be given per request.
 | Option | Meaning |
 |---|---|
 | `-p, --print PARTS` | What to print: `H` request headers (as sent, credentials redacted), `B` request body, `h` status line and response headers, `b` response body, `m` timings and sizes, `t` timing waterfall. Default: `hb` on a terminal, `b` when piped, so `snapreq send URL \| jq` works. |
+| `--format pretty\|json` | `json` prints one machine-readable document on stdout (see below). |
+| `-o, --output FILE` | Save the decoded response body to FILE (overwritten) instead of printing it. The directory must exist; this is checked before the request is sent. |
 | `--color auto\|always\|never` | Colors (default `auto`: only on a terminal, and never when `NO_COLOR` is set). |
 | `-v` / `-vv` | Show the trace on **stderr** (stdout keeps only the `--print` parts). See below. |
 | `-f, --fail` | Exit with code 4 when the status is 400 or higher. |
 | `--secret VALUE` | Hide this value everywhere in the output (repeatable). Credentials in `Authorization`, `Cookie` and similar headers are hidden automatically. |
+
+## JSON output (`--format json`)
+
+One JSON document is written to stdout, for success and failure alike. Exit codes stay the same.
+
+```json
+{
+  "format": 1,
+  "request":  { "method": "GET", "url": "https://api.example.com/items?key=<redacted>" },
+  "response": {
+    "status": 200, "version": "HTTP/2", "url": "…",
+    "headers": [{ "name": "content-type", "value": "application/json" }],
+    "body": { "encoding": "utf8", "data": "{…}" },
+    "remote_addr": "93.184.216.34:443",
+    "timings": { "dns_ms": 11.6, "connect_ms": 7.9, "tls_ms": 11.7, "send_ms": 0.04,
+                 "wait_ms": 17.8, "download_ms": 0.85, "total_ms": 50.6 },
+    "sizes": { "request_headers": 77, "request_body": 0, "response_headers": 359,
+               "response_body": 334, "response_body_decoded": 577 },
+    "trace": [{ "at_ms": 0.01, "event": "dns_start", "host": "api.example.com" }, …]
+  },
+  "error": null
+}
+```
+
+- `body.encoding` is `utf8` or `base64` (binary bodies).
+- With `-o FILE`, `body_file` holds the path and `response.body` is empty.
+- On failure `response` is `null` and `error` is
+  `{ "kind": "execution", "phase": "connect", "timed_out": false, "message": "…", "trace": […] }`, or
+  `{ "kind": "invalid_request", "message": "…" }` when nothing was sent.
+- Durations are milliseconds. The trace is redacted (credentials and `--secret` values); `--secret`
+  values are also removed from `request.url` and `response.url`. The body is returned exactly as received.
+- `format` changes only on incompatible changes; new fields may be added at any time.
 
 ## Exit codes
 
