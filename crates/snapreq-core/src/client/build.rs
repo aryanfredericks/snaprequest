@@ -1,11 +1,10 @@
 //! Turns a model [`Request`] into the `http::Request` hyper sends.
 
-use bytes::Bytes;
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
-use http_body_util::Full;
 use url::Url;
 
-use crate::model::{Body, Header, Request};
+use super::body::{self, EncodedBody, ReqBody};
+use crate::model::{Header, Request};
 use crate::{Error, Result};
 
 /// A request ready for hyper, plus what we report in the trace.
@@ -14,15 +13,15 @@ pub(crate) struct Prepared {
     method: http::Method,
     pub uri: http::Uri,
     headers: HeaderMap,
-    body: Bytes,
+    body: EncodedBody,
     /// Headers in the order and casing they go on the wire.
     pub sent_headers: Vec<Header>,
     pub body_len: u64,
 }
 
 impl Prepared {
-    pub(crate) fn to_http(&self) -> http::Request<Full<Bytes>> {
-        let mut r = http::Request::new(Full::new(self.body.clone()));
+    pub(crate) fn to_http(&self) -> http::Request<ReqBody> {
+        let mut r = http::Request::new(self.body.to_body());
         *r.method_mut() = self.method.clone();
         *r.uri_mut() = self.uri.clone();
         *r.version_mut() = http::Version::HTTP_11;
@@ -31,8 +30,8 @@ impl Prepared {
     }
 }
 
-pub(crate) fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prepared> {
-    let body = encode_body(&req.body)?;
+pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prepared> {
+    let body = body::encode(&req.body).await?;
     let mut headers = HeaderMap::new();
 
     // Host goes first, like every mainstream client, unless the user overrides it.
@@ -42,7 +41,18 @@ pub(crate) fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prep
     for h in req.enabled_headers() {
         let name = HeaderName::from_bytes(h.name.trim().as_bytes())
             .map_err(|_| Error::InvalidRequest(format!("invalid header name `{}`", h.name)))?;
-        headers.append(name, header_value(&h.value)?);
+        let value = match &body.boundary {
+            // A hand-written `multipart/form-data` type without the boundary would make the
+            // body unparseable, so complete it with the boundary we actually use.
+            Some(b) if name == header::CONTENT_TYPE && !h.value.contains("boundary=") => {
+                header_value(&format!(
+                    "{}; boundary={b}",
+                    h.value.trim_end_matches([';', ' '])
+                ))?
+            }
+            _ => header_value(&h.value)?,
+        };
+        headers.append(name, value);
     }
     if !has_header(req, "user-agent") {
         headers.insert(header::USER_AGENT, header_value(user_agent)?);
@@ -50,13 +60,13 @@ pub(crate) fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prep
     if !has_header(req, "accept") {
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
     }
-    if let Some(ct) = req.body.default_content_type() {
+    if let Some(ct) = &body.content_type {
         if !has_header(req, "content-type") {
             headers.insert(header::CONTENT_TYPE, header_value(ct)?);
         }
     }
     if !req.body.is_none() && !has_header(req, "content-length") {
-        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len()));
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len));
     }
 
     let sent_headers = headers
@@ -81,27 +91,9 @@ pub(crate) fn prepare(req: &Request, url: &Url, user_agent: &str) -> Result<Prep
         method: req.method.clone(),
         uri,
         headers,
-        body_len: body.len() as u64,
+        body_len: body.len,
         body,
         sent_headers,
-    })
-}
-
-fn encode_body(body: &Body) -> Result<Bytes> {
-    Ok(match body {
-        Body::None => Bytes::new(),
-        Body::Text { content, .. } | Body::Json { content } => Bytes::from(content.clone()),
-        Body::Form { fields } => {
-            let mut ser = url::form_urlencoded::Serializer::new(String::new());
-            for f in fields.iter().filter(|f| f.enabled) {
-                ser.append_pair(&f.name, &f.value);
-            }
-            Bytes::from(ser.finish())
-        }
-        Body::Multipart { .. } => {
-            return Err(Error::Unsupported("multipart bodies".into()));
-        }
-        Body::File { .. } => return Err(Error::Unsupported("file bodies".into())),
     })
 }
 
@@ -138,42 +130,42 @@ pub(crate) fn title_case(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::KeyValue;
+    use crate::model::{Body, KeyValue};
 
     fn names(p: &Prepared) -> Vec<&str> {
         p.sent_headers.iter().map(|h| h.name.as_str()).collect()
     }
 
-    #[test]
-    fn default_headers_in_order() {
+    #[tokio::test]
+    async fn default_headers_in_order() {
         let req = Request::get("http://example.com:8080/a?b=1").header("x-trace", "1");
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test").unwrap();
+        let p = prepare(&req, &url, "snapreq/test").await.unwrap();
         assert_eq!(names(&p), ["Host", "X-Trace", "User-Agent", "Accept"]);
         assert_eq!(p.sent_headers[0].value, "example.com:8080");
         assert_eq!(p.uri, "/a?b=1");
         assert_eq!(p.to_http().headers().len(), 4);
     }
 
-    #[test]
-    fn user_headers_override_defaults_and_disabled_are_skipped() {
+    #[tokio::test]
+    async fn user_headers_override_defaults_and_disabled_are_skipped() {
         let mut req = Request::get("http://example.com/")
             .header("user-agent", "custom")
             .header("Accept", "application/json");
         req.headers.push(KeyValue::new("X-Off", "1").disabled());
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test").unwrap();
+        let p = prepare(&req, &url, "snapreq/test").await.unwrap();
         assert_eq!(names(&p), ["Host", "User-Agent", "Accept"]);
         assert_eq!(p.sent_headers[1].value, "custom");
     }
 
-    #[test]
-    fn json_body_sets_type_and_length() {
+    #[tokio::test]
+    async fn json_body_sets_type_and_length() {
         let req = Request::new(http::Method::POST, "http://x.test/").body(Body::Json {
             content: r#"{"a":1}"#.into(),
         });
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua").unwrap();
+        let p = prepare(&req, &url, "ua").await.unwrap();
         let ct = p
             .sent_headers
             .iter()
@@ -189,28 +181,42 @@ mod tests {
         assert_eq!(p.body_len, 7);
     }
 
-    #[test]
-    fn form_body_is_url_encoded() {
-        let body = encode_body(&Body::Form {
-            fields: vec![
-                KeyValue::new("q", "a b&c"),
-                KeyValue::new("off", "x").disabled(),
-                KeyValue::new("n", "1"),
-            ],
-        })
-        .unwrap();
-        assert_eq!(&body[..], b"q=a+b%26c&n=1");
+    #[tokio::test]
+    async fn incomplete_multipart_content_type_gets_the_boundary() {
+        let req = Request::new(http::Method::POST, "http://x.test/")
+            .header("Content-Type", "multipart/form-data")
+            .body(Body::Multipart { parts: vec![] });
+        let url = req.effective_url().unwrap();
+        let p = prepare(&req, &url, "ua").await.unwrap();
+        let ct = p
+            .sent_headers
+            .iter()
+            .find(|h| h.name == "Content-Type")
+            .unwrap();
+        assert!(
+            ct.value
+                .starts_with("multipart/form-data; boundary=----snapreq-"),
+            "{}",
+            ct.value
+        );
+        assert_eq!(
+            p.sent_headers
+                .iter()
+                .filter(|h| h.name == "Content-Type")
+                .count(),
+            1
+        );
     }
 
-    #[test]
-    fn invalid_headers_are_rejected() {
+    #[tokio::test]
+    async fn invalid_headers_are_rejected() {
         let req = Request::get("http://x.test/").header("bad header", "v");
         let url = req.effective_url().unwrap();
-        let err = prepare(&req, &url, "ua").err().unwrap();
+        let err = prepare(&req, &url, "ua").await.err().unwrap();
         assert!(err.to_string().contains("invalid header name"), "{err}");
 
         let req = Request::get("http://x.test/").header("x", "line\nbreak");
-        let err = prepare(&req, &url, "ua").err().unwrap();
+        let err = prepare(&req, &url, "ua").await.err().unwrap();
         assert!(err.to_string().contains("invalid header value"), "{err}");
     }
 

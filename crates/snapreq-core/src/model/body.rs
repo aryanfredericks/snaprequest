@@ -79,8 +79,8 @@ impl Body {
     /// The `Content-Type` this body sends unless the user sets one explicitly.
     ///
     /// Multipart returns `None` because its header needs the boundary, which is
-    /// chosen when the body is encoded. A file with no explicit type is sent as
-    /// `application/octet-stream`.
+    /// chosen when the body is encoded. A file with no explicit type gets one
+    /// guessed from its extension, falling back to `application/octet-stream`.
     pub fn default_content_type(&self) -> Option<&str> {
         match self {
             Self::None | Self::Multipart { .. } => None,
@@ -91,13 +91,20 @@ impl Body {
             ),
             Self::Json { .. } => Some("application/json"),
             Self::Form { .. } => Some("application/x-www-form-urlencoded"),
-            Self::File { content_type, .. } => Some(
+            Self::File { path, content_type } => Some(
                 content_type
                     .as_deref()
-                    .unwrap_or("application/octet-stream"),
+                    .unwrap_or_else(|| guess_content_type(path)),
             ),
         }
     }
+}
+
+/// Content type for a file, guessed from its extension.
+pub(crate) fn guess_content_type(path: &std::path::Path) -> &'static str {
+    mime_guess::from_path(path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
 }
 
 /// One part of a `multipart/form-data` body.
@@ -215,6 +222,14 @@ mod tests {
             }
             .default_content_type(),
             Some("application/octet-stream")
+        );
+        assert_eq!(
+            Body::File {
+                path: "data/users.json".into(),
+                content_type: None
+            }
+            .default_content_type(),
+            Some("application/json")
         );
         assert_eq!(
             Body::Multipart { parts: vec![] }.default_content_type(),

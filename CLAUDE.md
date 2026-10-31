@@ -17,3 +17,8 @@ Open-source, self-hosted HTTP API testing and debugging tool in Rust (CLI + self
 
 ## End of every session
 Update `docs/CHECKPOINT.md`: current checkpoint, completed checkpoints with dates, next steps, and a session log line.
+
+## Workflow agreed with the maintainer
+When a checkpoint passes all its checks, commit and push to `origin main` without asking, update
+`docs/CHECKPOINT.md`, and continue with the next checkpoint. Only stop to ask when genuinely blocked or
+when a real product decision is needed. Commits carry no AI co-author or attribution lines.

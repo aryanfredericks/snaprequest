@@ -1,5 +1,6 @@
 //! The HTTP engine: executes a [`Request`] and returns a [`Response`] with a full trace.
 
+mod body;
 mod build;
 mod conn;
 mod meter;
@@ -90,7 +91,7 @@ impl Client {
         if url.scheme() == "https" {
             return Err(Error::Unsupported("HTTPS".into()));
         }
-        let prepared = build::prepare(req, &url, &self.inner.config.user_agent)?;
+        let prepared = build::prepare(req, &url, &self.inner.config.user_agent).await?;
 
         let mut rec = Recorder::new();
         match req.settings.timeout {

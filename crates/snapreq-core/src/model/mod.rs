@@ -10,6 +10,7 @@ mod response;
 mod settings;
 mod trace;
 
+pub(crate) use body::guess_content_type;
 pub use body::{Body, KeyValue, MultipartPart, PartValue};
 pub use request::Request;
 pub use response::{Header, HttpVersion, Response, Sizes, Timings};

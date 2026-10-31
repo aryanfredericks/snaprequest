@@ -12,13 +12,16 @@ authors.workspace = true
 [dependencies]
 base64.workspace = true
 bytes.workspace = true
+futures-util.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util.workspace = true
+mime_guess.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["net", "time", "rt"] }
+tokio = { workspace = true, features = ["fs", "io-util", "net", "time", "rt"] }
+tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 

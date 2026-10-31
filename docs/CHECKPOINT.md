@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.3, body types
+- **Current checkpoint:** P1.4, instrumented connector
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.3: multipart (with file upload) and file bodies, streamed from disk instead of buffered.
-   Currently `build::encode_body` returns `Error::Unsupported` for `Body::Multipart` and `Body::File`.
-   The request body type is `Full<Bytes>`; switch to a boxed/streaming body (`http_body_util::combinators::BoxBody` or `StreamBody`).
-   Content-Length for multipart should be computed up front when all file sizes are known.
+1. P1.4: instrumented connector. Replace `tokio::net::lookup_host` with `hickory-resolver` (timed DNS,
+   per-request host overrides like curl `--resolve`), Happy Eyeballs (RFC 8305) for IPv6/IPv4,
+   and the TLS step with `rustls`/`tokio-rustls` emitting `TlsStart`/`TlsEnd` (version, cipher, ALPN,
+   certificate chain via `x509-parser`). Remove the `Error::Unsupported("HTTPS")` guard in `Client::execute`.
+   TLS *options* (custom CA, mTLS, verify off, min/max version) stay in P1.5.
+   Integration tests need a local TLS server with a self-signed cert generated in the test (`rcgen`).
+
+## Body notes (P1.3)
+- `client/body.rs`: a body is encoded once into segments (bytes or file ranges) with an exact length; `to_body()` builds a fresh streaming body each time (retries reopen files). Files stream in 64 KiB chunks.
+- `Content-Length` is always exact (file sizes read at prepare time). If a file shrinks before sending, the request fails with "shrank while being sent"; if it grows, only the announced length is sent.
+- Multipart: random boundary `----snapreq-…`; names/filenames escaped per WHATWG; part content type guessed from extension (`mime_guess`). A user `Content-Type: multipart/form-data` without boundary gets the boundary appended.
+- File paths are used as given (relative to the process CWD). Collections (P3) must resolve paths relative to the collection directory before calling core.
+- Response bodies are still fully buffered in memory. Streaming responses to disk and a max-size limit are left for P2.5 (`-o file`).
 
 ## Engine notes (P1.2)
 - `crates/snapreq-core/src/client/`: `mod.rs` (Client, execute, exchange, retry), `conn.rs` (connect + pool), `meter.rs` (MeteredIo socket wrapper), `recorder.rs` (trace + failure), `build.rs` (model → http::Request).
@@ -51,7 +60,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1, P1.2 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.3 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -72,6 +81,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P0.3 — 2026-10-31 — GitHub Actions CI (fmt, clippy, tests on Linux/macOS/Windows, MSRV 1.85, cargo-deny). First run all green.
 - P1.1 — 2026-10-31 — Request/response/trace data model with serde, 22 unit tests.
 - P1.2 — 2026-10-31 — `Client::execute` over HTTP/1.1 with own connection pool, socket metering, timeouts, stale-connection retry. 47 tests total (16 integration tests against local servers).
+- P1.3 — 2026-10-31 — Streaming request bodies: text, JSON, form, file, multipart with file uploads; exact Content-Length. 58 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -79,3 +89,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (3):** `LICENSE` and `authors` set to Aryan Fredericks; repo URLs in `Cargo.toml` point to github.com/aryanfredericks/snaprequest; added `origin` remote; renamed the local folder to `snap-request`.
 - **2026-10-31 (4):** First commit pushed to GitHub (authored by Aryan Fredericks only; no Claude attribution). CI all green, Phase 0 done. P1.1 done: data model in `snapreq-core` (added `http`, `url`, `bytes`, `base64` deps; `clippy.toml` allows unwrap in tests).
 - **2026-10-31 (5):** P1.1 committed and pushed (CI green). P1.2 done: HTTP/1.1 engine (ADR-010: own pool on hyper's low-level conn API). Verified against http://example.com.
+- **2026-10-31 (6):** P1.2 committed and pushed (CI green). P1.3 done: streaming bodies (added `futures-util`, `tokio-util`, `mime_guess`).

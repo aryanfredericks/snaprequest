@@ -5,13 +5,12 @@ use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
-use http_body_util::Full;
 use hyper::client::conn::http1;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use url::{Host, Url};
 
+use super::body::ReqBody;
 use super::error_chain;
 use super::meter::{Meter, MeteredIo};
 use super::recorder::Recorder;
@@ -39,7 +38,7 @@ impl PoolKey {
 /// An open HTTP/1.1 connection.
 #[derive(Debug)]
 pub(crate) struct Conn {
-    pub sender: http1::SendRequest<Full<Bytes>>,
+    pub sender: http1::SendRequest<ReqBody>,
     pub meter: Meter,
     pub remote: SocketAddr,
 }
