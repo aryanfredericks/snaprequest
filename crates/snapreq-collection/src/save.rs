@@ -27,7 +27,7 @@ pub fn to_toml<T: Serialize>(value: &T) -> Result<String> {
 fn layout(table: &mut toml_edit::Table) {
     use toml_edit::{ArrayOfTables, Item, Value};
     for (key, item) in table.iter_mut() {
-        let key_value_table = matches!(key.get(), "headers" | "query" | "fields");
+        let key_value_table = matches!(key.get(), "headers" | "query" | "fields" | "vars");
         if let Item::Value(Value::InlineTable(t)) = item {
             *item = Item::Table(std::mem::take(t).into_table());
         }
@@ -78,6 +78,24 @@ pub fn save_request(path: &Path, file: &RequestFile) -> Result<()> {
 /// Writes `snapreq.toml`.
 pub fn save_collection(path: &Path, file: &CollectionFile) -> Result<()> {
     write(path, &to_toml(file)?)
+}
+
+/// Writes an environment file (`environments/<name>.toml`): a top-level variable table.
+/// Secret values are never written, only their `{ secret = true }` markers.
+pub fn save_environment(path: &Path, vars: &crate::vars::Variables) -> Result<()> {
+    let mut doc = toml_edit::ser::to_document(vars).map_err(|e| Error::Invalid {
+        path: path.to_owned(),
+        location: None,
+        message: format!("cannot serialize: {e}"),
+    })?;
+    // Entries stay inline at the top level, like in `[vars]` tables.
+    for (_, item) in doc.as_table_mut().iter_mut() {
+        if let toml_edit::Item::Table(t) = item {
+            let inline = std::mem::take(t).into_inline_table();
+            *item = toml_edit::Item::Value(toml_edit::Value::InlineTable(inline));
+        }
+    }
+    write(path, &doc.to_string())
 }
 
 /// Writes `folder.toml`.

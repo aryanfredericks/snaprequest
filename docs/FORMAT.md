@@ -37,6 +37,9 @@ name = "My API"                    # required
 description = "Optional text"
 order = ["health", "users"]        # optional; see "Ordering"
 
+[vars]                             # optional; default variable values (see "Variables")
+base_url = "http://localhost:3000"
+
 [headers]                          # optional; sent with every request in the collection
 Accept = "application/json"
 
@@ -51,6 +54,9 @@ name = "Create user"               # optional; defaults to the key
 description = "Creates a user."    # optional
 method = "POST"                    # optional; defaults to GET
 url = "{{base_url}}/users"         # required
+
+[vars]                             # optional; variables only this request sees
+role = "admin"
 
 [query]
 notify = "true"
@@ -133,7 +139,49 @@ tls_max_version = "1.3"
 
 ## `folder.toml`
 
-Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[headers]`, `[settings]`.
+Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,
+`[headers]`, `[settings]`.
+
+## Variables
+
+`[vars]` tables (in `snapreq.toml`, `folder.toml` and request files) and environment files hold
+variables. Values are strings; numbers and booleans are accepted and turned into strings.
+
+```toml
+[vars]
+base_url = "http://localhost:3000"
+page_size = 50
+token = { secret = true }                       # a secret: the value is never stored here
+```
+
+Names may contain letters, digits, `_`, `-` and `.` (quote names with dots: `"api.key" = "…"`).
+Names starting with `$` are reserved for built-in dynamic variables.
+
+When a request runs, a `{{name}}` placeholder takes the value from the first of these scopes that
+defines `name`:
+
+1. **runtime**: `--var name=value` on the command line, and values captured from earlier responses
+2. **request**: the request file's `[vars]`
+3. **folders**: each enclosing folder's `[vars]`, innermost first
+4. **environment**: the selected environment
+5. **collection**: `snapreq.toml`'s `[vars]`
+6. **global**: user-wide variables
+
+Collection variables are defaults; the selected environment overrides them; folder and request
+variables are deliberate local overrides.
+
+## Environments
+
+Each file in `environments/` is one environment, named after the file (`environments/prod.toml`
+is `prod`). It is a flat table of variables in the same form as `[vars]`:
+
+```toml
+base_url = "https://api.example.com"
+token = { secret = true }
+```
+
+Secret values are never written into collection files; they are supplied separately (see the CLI
+documentation) so the collection can be committed safely.
 
 ## Ordering
 

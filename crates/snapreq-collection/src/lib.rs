@@ -6,6 +6,7 @@ pub mod files;
 pub mod kv;
 pub mod load;
 pub mod save;
+pub mod vars;
 
 pub use error::{Error, Result, Warning};
 pub use files::{
@@ -13,3 +14,4 @@ pub use files::{
 };
 pub use kv::KeyValues;
 pub use load::{Collection, Folder, Item, RequestItem};
+pub use vars::{Environment, Scope, Scopes, Variable, Variables};

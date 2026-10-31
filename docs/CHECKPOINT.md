@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
-- **Current checkpoint:** P3.2, environments and variable scopes
+- **Current checkpoint:** P3.3, `{{var}}` interpolation and dynamic variables
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P3.2: environments (`environments/<name>.toml`: flat `name = "value"` variables, optional secret
-   markers) and variable scopes with precedence: runtime > request > folder (innermost first) > collection
-   > environment > global. Decide where collection/folder/request variables live in the files (`[vars]`
-   tables) and extend `docs/FORMAT.md` (Environments section is referenced but not written yet).
-   Then P3.3 `{{var}}` interpolation + dynamic variables, P3.4 secrets, P3.5 inheritance (headers/settings
-   merge, paths relative to the file that set them), P3.6 CLI commands.
+1. P3.3: interpolation in `snapreq-collection`: `{{name}}` in URL, query, headers, body content, form/multipart
+   values, file paths and string settings (proxy). Dynamic variables: `{{$uuid}}`, `{{$timestamp}}` (unix s),
+   `{{$isoTimestamp}}`, `{{$randomInt}}`, maybe `{{$randomInt 1 100}}`? keep simple. Undefined variables → clear
+   error listing name, where it was used (field) and the scopes searched; nested `{{a}}` inside values resolve
+   recursively with a depth limit (cycles → error). Escaping literal `{{`: decide (`\{{`?) and document in FORMAT.md.
+   Collect the secret values used → `RequestSettings::secrets` so they are redacted.
+   Output: a function building a core `snapreq_core::Request` from collection + key path + scopes, resolving
+   relative paths against the request file's directory (P3.5 adds header/settings inheritance).
+
+## Variable notes (P3.2)
+- `crates/snapreq-collection/src/vars.rs`: `Variables` (ordered; scalar or `{ value, secret }`; secret values never serialized), `Environment::{load, list}`, `Scopes::for_request` (runtime > request > folders innermost-first > environment > collection > global; Bruno-like), `lookup` → (Variable, Scope), `visible()`, `set_runtime`.
+- `[vars]` in `snapreq.toml`, `folder.toml`, request files; `save_environment` keeps entries inline.
+- Secret variables without value (`{ secret = true }`) get their values in P3.4.
 
 ## Collection format notes (P3.1)
 - Spec: `docs/FORMAT.md`. Crate `snapreq-collection`: `files.rs` (serde types, `deny_unknown_fields`, method validated during parse, `validate()` for content-xor-file etc.), `kv.rs` (KeyValues with hand-written serde: string | list | `{value, enabled}`; numbers/bools accepted), `load.rs` (`Collection::load`, `requests()`, `find("a/b")`, `folders_of`), `save.rs` (toml_edit layout, ADR-013), `error.rs` (file:line:col).
@@ -156,7 +163,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
-| 3 Collections & environments | 🟨 in progress (P3.1 done) |
+| 3 Collections & environments | 🟨 in progress (P3.1–P3.2 done) |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
@@ -192,6 +199,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P2.5 — 2026-10-31 — `--format json` (schema v1) and `-o FILE`. 173 tests total.
 - P2.6 — 2026-10-31 — insta snapshot tests for all CLI output. Phase 2 complete. 181 tests total.
 - P3.1 — 2026-10-31 — Collection format v1 spec (docs/FORMAT.md), loading with file:line errors, stable saving (toml_edit, ADR-013). 196 tests total.
+- P3.2 — 2026-10-31 — Environments, `[vars]` tables and scope precedence. 203 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

@@ -1,5 +1,9 @@
 name = "Users"
 order = ["list-users", "create-user"]
 
+[vars]
+level = "folder"
+section = "users"
+
 [headers]
 X-Section = "users"

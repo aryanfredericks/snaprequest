@@ -3,6 +3,11 @@ name = "Basic API"
 description = "Fixture used by the collection tests."
 order = ["health", "users", "missing-item"]
 
+[vars]
+base_url = "http://localhost:3000"
+api_version = "v1"
+level = "collection"
+
 [headers]
 Accept = "application/json"
 

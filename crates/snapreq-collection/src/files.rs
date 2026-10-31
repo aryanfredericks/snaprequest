@@ -6,6 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use snapreq_core::model::{HttpVersionPref, ProxyMode, TlsVersion};
 
 use crate::kv::KeyValues;
+use crate::vars::Variables;
 
 /// The collection format version this crate reads and writes.
 pub const FORMAT_VERSION: u32 = 1;
@@ -20,6 +21,8 @@ pub struct CollectionFile {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<String>,
+    #[serde(default, skip_serializing_if = "Variables::is_empty")]
+    pub vars: Variables,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub headers: KeyValues,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
@@ -33,6 +36,7 @@ impl CollectionFile {
             name: name.into(),
             description: None,
             order: Vec::new(),
+            vars: Variables::default(),
             headers: KeyValues::default(),
             settings: Settings::default(),
         }
@@ -49,6 +53,8 @@ pub struct FolderFile {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<String>,
+    #[serde(default, skip_serializing_if = "Variables::is_empty")]
+    pub vars: Variables,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub headers: KeyValues,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
@@ -71,6 +77,8 @@ pub struct RequestFile {
     )]
     pub method: Option<String>,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Variables::is_empty")]
+    pub vars: Variables,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub query: KeyValues,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
@@ -89,6 +97,7 @@ impl RequestFile {
             description: None,
             method: (!method.eq_ignore_ascii_case("GET")).then(|| method.to_ascii_uppercase()),
             url: url.into(),
+            vars: Variables::default(),
             query: KeyValues::default(),
             headers: KeyValues::default(),
             body: None,

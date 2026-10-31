@@ -2,6 +2,9 @@ name = "Create user"
 method = "POST"
 url = "{{base_url}}/users"
 
+[vars]
+level = "request"
+
 [headers]
 Authorization = "Bearer {{token}}"
 
