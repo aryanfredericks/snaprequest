@@ -7,6 +7,10 @@ pub enum Error {
     /// The request URL could not be parsed or is not supported.
     #[error("invalid URL `{url}`: {reason}")]
     InvalidUrl { url: String, reason: String },
+
+    /// The server used an HTTP version SnapRequest does not know.
+    #[error("unsupported HTTP version {0}")]
+    UnsupportedVersion(String),
 }
 
 /// Convenience alias for results in `snapreq-core`.

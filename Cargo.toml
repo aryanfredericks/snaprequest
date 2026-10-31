@@ -20,13 +20,17 @@ snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
 
 # Shared external dependencies (add new ones here, then use `dep.workspace = true`)
 anyhow = "1"
+base64 = "0.22"
+bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2", features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
