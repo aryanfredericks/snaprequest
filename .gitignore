@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Web UI
+/web/node_modules
+/web/dist
+/web/.svelte-kit
+
+# Local data and secrets
+/data
+.env
+*.secret.toml
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

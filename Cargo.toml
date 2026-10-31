@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/aryanfredericks/snaprequest"
+homepage = "https://github.com/aryanfredericks/snaprequest"
+authors = ["Aryan Fredericks"]
+
+[workspace.dependencies]
+# Internal crates
+snapreq-core = { path = "crates/snapreq-core", version = "0.1.0" }
+snapreq-collection = { path = "crates/snapreq-collection", version = "0.1.0" }
+snapreq-test = { path = "crates/snapreq-test", version = "0.1.0" }
+snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
+
+# Shared external dependencies (add new ones here, then use `dep.workspace = true`)
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
