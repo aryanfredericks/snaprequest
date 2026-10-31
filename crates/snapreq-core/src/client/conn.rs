@@ -20,6 +20,7 @@ use url::{Host, Url};
 use super::body::ReqBody;
 use super::error_chain;
 use super::meter::{Meter, MeteredIo};
+use super::proxy::{self, Proxy, ProxyKind};
 use super::recorder::Recorder;
 use super::tls::{self, RequestTls};
 use crate::Result;
@@ -35,16 +36,18 @@ pub(crate) struct PoolKey {
     port: u16,
     version: HttpVersionPref,
     tls: Option<TlsSettings>,
+    proxy: Option<Proxy>,
 }
 
 impl PoolKey {
-    pub(crate) fn new(url: &Url, settings: &RequestSettings) -> Self {
+    pub(crate) fn new(url: &Url, settings: &RequestSettings, proxy: Option<&Proxy>) -> Self {
         Self {
             scheme: url.scheme().to_owned(),
             host: url.host_str().unwrap_or_default().to_ascii_lowercase(),
             port: url.port_or_known_default().unwrap_or(80),
             version: settings.http_version,
             tls: (url.scheme() == "https").then(|| settings.tls.clone()),
+            proxy: proxy.cloned(),
         }
     }
 }
@@ -93,6 +96,9 @@ pub(crate) struct Conn {
     pub sender: Sender,
     pub meter: Meter,
     pub remote: SocketAddr,
+    /// Set when requests go to an HTTP proxy in absolute form (plain-HTTP targets):
+    /// the `Proxy-Authorization` value to add, if any.
+    pub forward_proxy: Option<Option<String>>,
 }
 
 impl Conn {
@@ -103,6 +109,7 @@ impl Conn {
                 sender: Sender::H2(s.clone()),
                 meter: self.meter.clone(),
                 remote: self.remote,
+                forward_proxy: self.forward_proxy.clone(),
             }),
             Sender::H1(_) => None,
         }
@@ -216,40 +223,74 @@ pub(crate) async fn connect(
     url: &Url,
     settings: &RequestSettings,
     tls: Option<&RequestTls>,
+    proxy: Option<&Proxy>,
     rec: &mut Recorder,
 ) -> Result<Conn> {
     let port = url.port_or_known_default().unwrap_or(80);
+    let target = url
+        .host()
+        .ok_or_else(|| rec.fail("URL has no host", false))?;
 
-    let addrs: Vec<SocketAddr> = match url.host() {
-        Some(Host::Domain(domain)) => {
-            match settings.resolve.iter().find(|o| o.matches(domain, port)) {
-                Some(pinned) => {
-                    rec.record(TraceEvent::Info {
-                        message: format!(
-                            "{domain}:{port} pinned to {} (DNS skipped)",
-                            join(&pinned.addrs)
-                        ),
-                    });
-                    pinned
-                        .addrs
-                        .iter()
-                        .map(|ip| SocketAddr::new(*ip, port))
-                        .collect()
-                }
-                None => resolve(domain, port, rec).await?,
-            }
+    let mut forward_proxy = None;
+    let (mut tcp, remote) = match proxy {
+        None => {
+            let addrs = addresses(target.clone(), port, settings, rec).await?;
+            happy_eyeballs(&addrs, url.host_str().unwrap_or_default(), port, rec).await?
         }
-        Some(Host::Ipv4(ip)) => vec![SocketAddr::new(ip.into(), port)],
-        Some(Host::Ipv6(ip)) => vec![SocketAddr::new(ip.into(), port)],
-        None => return Err(rec.fail("URL has no host", false)),
+        Some(proxy) => {
+            rec.record(TraceEvent::Info {
+                message: format!("using proxy {} (from {})", proxy.display(), proxy.source),
+            });
+            let addrs = addresses(proxy.host(), proxy.port, settings, rec).await?;
+            happy_eyeballs(&addrs, &proxy.host, proxy.port, rec).await?
+        }
     };
-    if addrs.is_empty() {
-        return Err(rec.fail("no addresses to connect to", false));
-    }
-
-    let (tcp, remote) = happy_eyeballs(&addrs, url, port, rec).await?;
     // Disabling Nagle avoids an artificial delay between headers and a small body.
     let _ = tcp.set_nodelay(true);
+
+    if let Some(proxy) = proxy {
+        let authority = format!("{}:{port}", url.host_str().unwrap_or_default());
+        let started = Instant::now();
+        match proxy.kind {
+            ProxyKind::Http if url.scheme() == "http" => {
+                forward_proxy = Some(proxy.basic_authorization());
+            }
+            ProxyKind::Http => {
+                proxy::http_connect(&mut tcp, &authority, proxy)
+                    .await
+                    .map_err(|e| rec.fail(e, false))?;
+                rec.record(TraceEvent::Info {
+                    message: format!(
+                        "CONNECT tunnel to {authority} established in {} ms",
+                        started.elapsed().as_millis()
+                    ),
+                });
+            }
+            ProxyKind::Socks5 | ProxyKind::Socks5h => {
+                let ip;
+                let socks_target = match (proxy.kind, target.clone()) {
+                    (ProxyKind::Socks5h, Host::Domain(d)) => proxy::SocksTarget::Domain(d),
+                    (_, Host::Domain(_)) => {
+                        // socks5://: resolve locally, like curl.
+                        ip = addresses(target.clone(), port, settings, rec).await?[0].ip();
+                        rec.phase = Phase::Connect;
+                        proxy::SocksTarget::Ip(ip)
+                    }
+                    (_, Host::Ipv4(v4)) => proxy::SocksTarget::Ip(v4.into()),
+                    (_, Host::Ipv6(v6)) => proxy::SocksTarget::Ip(v6.into()),
+                };
+                proxy::socks5_connect(&mut tcp, socks_target, port, proxy.credentials.as_ref())
+                    .await
+                    .map_err(|e| rec.fail(e, false))?;
+                rec.record(TraceEvent::Info {
+                    message: format!(
+                        "SOCKS5 tunnel to {authority} established in {} ms",
+                        started.elapsed().as_millis()
+                    ),
+                });
+            }
+        }
+    }
 
     let (stream, use_h2) = match tls {
         Some(tls) => {
@@ -263,9 +304,10 @@ pub(crate) async fn connect(
             }
             (MaybeTls::Tls(Box::new(stream)), h2)
         }
+        // Prior-knowledge HTTP/2 is not forwarded through HTTP proxies.
         None => (
             MaybeTls::Plain(tcp),
-            settings.http_version == HttpVersionPref::Http2,
+            settings.http_version == HttpVersionPref::Http2 && forward_proxy.is_none(),
         ),
     };
 
@@ -301,7 +343,41 @@ pub(crate) async fn connect(
         sender,
         meter,
         remote,
+        forward_proxy,
     })
+}
+
+/// Addresses for `host`: pinned addresses, a DNS lookup, or the literal IP.
+async fn addresses(
+    host: Host<&str>,
+    port: u16,
+    settings: &RequestSettings,
+    rec: &mut Recorder,
+) -> Result<Vec<SocketAddr>> {
+    let addrs: Vec<SocketAddr> = match host {
+        Host::Domain(domain) => match settings.resolve.iter().find(|o| o.matches(domain, port)) {
+            Some(pinned) => {
+                rec.record(TraceEvent::Info {
+                    message: format!(
+                        "{domain}:{port} pinned to {} (DNS skipped)",
+                        join(&pinned.addrs)
+                    ),
+                });
+                pinned
+                    .addrs
+                    .iter()
+                    .map(|ip| SocketAddr::new(*ip, port))
+                    .collect()
+            }
+            None => resolve(domain, port, rec).await?,
+        },
+        Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
+        Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
+    };
+    if addrs.is_empty() {
+        return Err(rec.fail("no addresses to connect to", false));
+    }
+    Ok(addrs)
 }
 
 /// Connects to the first address that answers. Address families are interleaved and
@@ -310,7 +386,7 @@ pub(crate) async fn connect(
 /// costs 250 ms instead of a full connect timeout.
 async fn happy_eyeballs(
     addrs: &[SocketAddr],
-    url: &Url,
+    host: &str,
     port: u16,
     rec: &mut Recorder,
 ) -> Result<(TcpStream, SocketAddr)> {
@@ -369,13 +445,7 @@ async fn happy_eyeballs(
     }
 
     let why = last_err.map_or_else(|| "no addresses".to_owned(), |e| e.to_string());
-    Err(rec.fail(
-        format!(
-            "could not connect to {}:{port}: {why}",
-            url.host_str().unwrap_or_default()
-        ),
-        false,
-    ))
+    Err(rec.fail(format!("could not connect to {host}:{port}: {why}"), false))
 }
 
 /// Reorders addresses to alternate families, starting with the family of the

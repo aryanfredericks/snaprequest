@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects ✅, 6c HTTP/2 ✅, 6d proxies
+- **Current checkpoint:** P1.7, cookie jar (P1.6 done: decompression, redirects, HTTP/2, proxies)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,13 +25,17 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P1.6 (large; may be split into commits): HTTP/2 via ALPN (`h2` + `http/1.1` offered when `http_version` is
-   Auto; currently ALPN is `http/1.1` only and `Http2` returns `Error::Unsupported`), prior-knowledge h2 over plain TCP,
-   response decompression (gzip, br, zstd, deflate; send `Accept-Encoding` when `decompress` is on), redirect following
-   (`follow_redirects`/`max_redirects`, `Redirect` trace events, auth headers dropped on cross-origin redirects,
-   303 → GET), proxies (HTTP CONNECT, SOCKS5, `HTTP(S)_PROXY`/`NO_PROXY`).
-   Note: h2 connections are multiplexed, so the pool must share one `SendRequest` (cloneable) instead of check-out/in,
-   and the socket meter cannot attribute bytes per stream (document: timings for h2 come from hyper events only).
+1. P1.7: cookie jar. Per-`Client` session jar (opt-in per request via `RequestSettings`, default on?) that stores
+   `Set-Cookie` from responses (including redirect hops) and sends matching `Cookie` headers (RFC 6265: domain,
+   path, secure, expiry, host-only). Trace: `info` events for stored/sent cookies. Persistable (serde) for P3 sessions.
+   Consider the `cookie_store` crate (MIT/Apache) vs. own implementation. User-set `Cookie` headers must be merged, not replaced.
+
+## Proxy notes (P1.6d)
+- `RequestSettings::proxy: ProxyMode` = `"env"` (default) | `"direct"` | proxy URL (`http://`, `socks5://`, `socks5h://`, credentials in URL).
+- `client/proxy.rs`: `select()` takes an env-lookup closure (tests never set env vars). Env keys: `http(s)_proxy`, `HTTP(S)_PROXY`, `all_proxy`, `ALL_PROXY`; `no_proxy`/`NO_PROXY` (`*`, domain suffix, exact IP, optional port). Loopback targets bypass *environment* proxies (deliberate difference from curl); explicit proxies always apply. Scheme-less env values get `http://`.
+- HTTP proxy: plain-HTTP targets sent in absolute form with `Proxy-Authorization` (trace shows `Basic <redacted>`); HTTPS targets use `CONNECT` then TLS inside the tunnel. SOCKS5 implemented in-house (RFC 1928/1929); `socks5` resolves locally, `socks5h` sends the name.
+- Pool key includes the proxy. No HTTPS-to-proxy (`https://` proxy URLs) yet; no h2 prior knowledge through HTTP proxies.
+- Timings: `connect` is the TCP connect to the proxy; tunnel setup time is in an `info` event.
 
 ## HTTP/2 notes (P1.6c)
 - ALPN per `http_version`: Auto → `h2, http/1.1`; Http1 → `http/1.1`; Http2 → `h2` (TLS fails in `Phase::Tls` if not selected); plain-TCP Http2 = prior knowledge. Auto over plain HTTP stays HTTP/1.1 (no h2c upgrade).
@@ -96,7 +100,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | Phase | Status |
 |---|---|
 | 0 Foundation | ✅ done |
-| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.5 done) |
+| 1 Core HTTP engine | 🟨 in progress (P1.1–P1.6 done) |
 | 2 CLI MVP | ⬜ |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
@@ -123,6 +127,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.6a — 2026-10-31 — Response decompression (gzip, deflate, br, zstd). 86 tests total.
 - P1.6b — 2026-10-31 — Redirect following with browser-compatible method rules and cross-origin credential stripping. 100 tests total.
 - P1.6c — 2026-10-31 — HTTP/2 via ALPN and prior knowledge, shared multiplexed connections. Verified against example.com, google.com, github.com. 108 tests total.
+- P1.6d — 2026-10-31 — Proxies: HTTP forward + CONNECT, SOCKS5/SOCKS5h, env vars with NO_PROXY. P1.6 complete. 122 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

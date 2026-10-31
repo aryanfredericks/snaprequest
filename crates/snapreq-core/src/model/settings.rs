@@ -31,6 +31,8 @@ pub struct RequestSettings {
     pub http_version: HttpVersionPref,
     /// Transparently decompress gzip/br/zstd/deflate responses.
     pub decompress: bool,
+    /// Which proxy to use.
+    pub proxy: ProxyMode,
     /// Hosts pinned to fixed addresses instead of DNS, like curl's `--resolve`.
     /// TLS still verifies against the host name from the URL.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -48,6 +50,59 @@ impl Default for RequestSettings {
             http_version: HttpVersionPref::Auto,
             decompress: true,
             resolve: Vec::new(),
+            proxy: ProxyMode::Environment,
+        }
+    }
+}
+
+/// How to reach the server: directly, through a proxy from the environment,
+/// or through an explicit proxy.
+///
+/// Serialized as a string: `"env"`, `"direct"`, or a proxy URL such as
+/// `http://user:pass@proxy:3128`, `socks5://proxy:1080` (local DNS) or
+/// `socks5h://proxy:1080` (the proxy resolves names).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum ProxyMode {
+    /// Use `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` and `NO_PROXY` (either case).
+    /// Loopback targets always bypass environment proxies.
+    #[default]
+    Environment,
+    /// Never use a proxy.
+    Direct,
+    /// Always use this proxy.
+    Url(String),
+}
+
+impl TryFrom<String> for ProxyMode {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.trim() {
+            "env" | "" => Ok(Self::Environment),
+            "direct" | "none" => Ok(Self::Direct),
+            url => {
+                let scheme = url.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
+                match scheme.as_deref() {
+                    Some("http" | "socks5" | "socks5h") => Ok(Self::Url(url.to_owned())),
+                    Some(other) => Err(format!(
+                        "unsupported proxy scheme `{other}` (use http, socks5 or socks5h)"
+                    )),
+                    None => Err(format!(
+                        "invalid proxy `{url}`: expected `env`, `direct` or a URL like http://host:port"
+                    )),
+                }
+            }
+        }
+    }
+}
+
+impl From<ProxyMode> for String {
+    fn from(p: ProxyMode) -> Self {
+        match p {
+            ProxyMode::Environment => "env".into(),
+            ProxyMode::Direct => "direct".into(),
+            ProxyMode::Url(u) => u,
         }
     }
 }
@@ -255,6 +310,29 @@ mod tests {
         assert!(!tls.is_default());
         assert!(TlsSettings::default().is_default());
         assert!(serde_json::from_value::<TlsSettings>(json!({ "min_version": "1.1" })).is_err());
+    }
+
+    #[test]
+    fn proxy_mode_strings() {
+        let parse = |v: &str| serde_json::from_value::<ProxyMode>(json!(v));
+        assert_eq!(parse("env").unwrap(), ProxyMode::Environment);
+        assert_eq!(parse("direct").unwrap(), ProxyMode::Direct);
+        assert_eq!(
+            parse("socks5h://p:1080").unwrap(),
+            ProxyMode::Url("socks5h://p:1080".into())
+        );
+        assert!(
+            parse("ftp://p")
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported proxy scheme")
+        );
+        assert!(parse("p:3128").is_err());
+        assert_eq!(
+            serde_json::to_value(ProxyMode::Direct).unwrap(),
+            json!("direct")
+        );
+        assert_eq!(RequestSettings::default().proxy, ProxyMode::Environment);
     }
 
     #[test]

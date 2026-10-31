@@ -32,6 +32,7 @@ http-body-util = "0.1"
 hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 mime_guess = "2"
+percent-encoding = "2"
 rcgen = "0.14"
 ring = "0.17"
 ruzstd = "0.9"

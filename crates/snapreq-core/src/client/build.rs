@@ -77,6 +77,21 @@ impl Prepared {
         headers
     }
 
+    /// HTTP/1.1 request in absolute form for an HTTP proxy, with `Proxy-Authorization`
+    /// if the proxy has credentials.
+    pub(crate) fn to_http_via_proxy(
+        &self,
+        authorization: Option<&str>,
+    ) -> Result<http::Request<ReqBody>> {
+        let mut r = self.to_http(false);
+        *r.uri_mut() = self.absolute_uri.clone();
+        if let Some(auth) = authorization {
+            r.headers_mut()
+                .append(header::PROXY_AUTHORIZATION, header_value(auth)?);
+        }
+        Ok(r)
+    }
+
     /// Headers for the trace, in the casing used on the wire.
     pub(crate) fn trace_headers(&self, h2: bool) -> Vec<Header> {
         if !h2 {

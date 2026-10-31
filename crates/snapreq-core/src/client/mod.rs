@@ -5,6 +5,7 @@ mod build;
 mod conn;
 mod decode;
 mod meter;
+mod proxy;
 mod recorder;
 mod redirect;
 mod tls;
@@ -22,8 +23,8 @@ use self::build::Prepared;
 use self::conn::{Conn, Pool, PoolKey};
 use self::recorder::{Recorder, SendTiming};
 use self::tls::{RequestTls, TlsContext};
-use crate::Result;
 use crate::model::{Header, HttpVersion, Phase, Request, Response, Sizes, Timings, TraceEvent};
+use crate::{Error, Result};
 
 /// Client-wide configuration. Per-request options live in
 /// [`RequestSettings`](crate::model::RequestSettings).
@@ -81,6 +82,7 @@ impl Default for Client {
 struct Hop {
     prepared: Prepared,
     tls: Option<RequestTls>,
+    proxy: Option<proxy::Proxy>,
 }
 
 // Created once per request and immediately destructured; boxing would only add an allocation.
@@ -150,7 +152,13 @@ impl Client {
             ),
             _ => None,
         };
-        Ok(Hop { prepared, tls })
+        let proxy = proxy::select(url, &req.settings.proxy, |k| std::env::var(k).ok())
+            .map_err(Error::InvalidRequest)?;
+        Ok(Hop {
+            prepared,
+            tls,
+            proxy,
+        })
     }
 
     /// Runs the first hop and then every redirect.
@@ -164,9 +172,7 @@ impl Client {
         let mut current = req.clone();
         let mut followed = 0u32;
         loop {
-            let resp = self
-                .run(&current, &url, &hop.prepared, hop.tls.as_ref(), rec)
-                .await?;
+            let resp = self.run(&current, &url, &hop, rec).await?;
             if !current.settings.follow_redirects {
                 return Ok(resp);
             }
@@ -207,11 +213,11 @@ impl Client {
         &self,
         req: &Request,
         url: &url::Url,
-        prepared: &Prepared,
-        tls: Option<&RequestTls>,
+        hop: &Hop,
         rec: &mut Recorder,
     ) -> Result<Response> {
-        let key = PoolKey::new(url, &req.settings);
+        let prepared = &hop.prepared;
+        let key = PoolKey::new(url, &req.settings, hop.proxy.as_ref());
 
         if let Some(conn) = self.reusable_conn(&key).await {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
@@ -227,7 +233,9 @@ impl Client {
             }
         }
 
-        let conn = self.connect(url, req, tls, rec).await?;
+        let conn = self
+            .connect(url, req, hop.tls.as_ref(), hop.proxy.as_ref(), rec)
+            .await?;
         // Concurrent requests can use a new HTTP/2 connection immediately.
         self.inner.pool.share(&key, &conn);
         match self
@@ -253,11 +261,16 @@ impl Client {
         url: &url::Url,
         req: &Request,
         tls: Option<&RequestTls>,
+        proxy: Option<&proxy::Proxy>,
         rec: &mut Recorder,
     ) -> Result<Conn> {
         match req.settings.connect_timeout {
             Some(limit) => {
-                match tokio::time::timeout(limit, conn::connect(url, &req.settings, tls, rec)).await
+                match tokio::time::timeout(
+                    limit,
+                    conn::connect(url, &req.settings, tls, proxy, rec),
+                )
+                .await
                 {
                     Ok(result) => result,
                     Err(_) => Err(rec.fail(
@@ -266,7 +279,7 @@ impl Client {
                     )),
                 }
             }
-            None => conn::connect(url, &req.settings, tls, rec).await,
+            None => conn::connect(url, &req.settings, tls, proxy, rec).await,
         }
     }
 
@@ -281,6 +294,10 @@ impl Client {
         decompress: bool,
     ) -> Result<Outcome> {
         let h2 = conn.sender.is_h2();
+        let mut trace_headers = prepared.trace_headers(h2);
+        if let Some(Some(_)) = &conn.forward_proxy {
+            trace_headers.push(Header::new("Proxy-Authorization", "Basic <redacted>"));
+        }
         rec.record(TraceEvent::RequestHeaders {
             method: prepared.method().to_string(),
             url: url.to_string(),
@@ -289,9 +306,15 @@ impl Client {
             } else {
                 HttpVersion::Http11
             },
-            headers: prepared.trace_headers(h2),
+            headers: trace_headers,
         });
-        let request = if h2 {
+        let request = if let Some(auth) = &conn.forward_proxy {
+            conn.meter.reset();
+            rec.begin_send(SendTiming::Socket(conn.meter.clone()), prepared.body_len);
+            prepared
+                .to_http_via_proxy(auth.as_deref())
+                .map_err(|e| rec.fail(e.to_string(), false))?
+        } else if h2 {
             // The socket is shared by other streams, so time the body instead.
             let body_done = Arc::new(Mutex::new(None));
             rec.begin_send(SendTiming::Stream(body_done.clone()), prepared.body_len);

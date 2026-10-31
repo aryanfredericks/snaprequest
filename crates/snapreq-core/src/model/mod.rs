@@ -15,6 +15,7 @@ pub use body::{Body, KeyValue, MultipartPart, PartValue};
 pub use request::Request;
 pub use response::{Header, HttpVersion, Response, Sizes, Timings};
 pub use settings::{
-    ClientCertificate, HttpVersionPref, RequestSettings, ResolveOverride, TlsSettings, TlsVersion,
+    ClientCertificate, HttpVersionPref, ProxyMode, RequestSettings, ResolveOverride, TlsSettings,
+    TlsVersion,
 };
 pub use trace::{CertificateInfo, Phase, TlsInfo, TraceEntry, TraceEvent};
