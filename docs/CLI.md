@@ -25,6 +25,37 @@ JSON responses (`application/json`, `*+json`, or JSON-looking text) are pretty-p
 colors, keeping the server's key order. Binary bodies are summarized on a terminal instead of
 being dumped into it; when stdout is redirected they are written byte for byte.
 
+## Verbose trace (`-v`, `-vv`)
+
+The trace is written to stderr in a curl-like style: `*` for what SnapRequest did, `>` for what was
+sent, `<` for what came back, `!` for the failure. Credentials are always redacted.
+
+- `-v`: DNS result, connection, TLS version, cipher, ALPN and server certificate, request and response
+  headers, the duration of every phase, redirects and cookie notes, and the total time.
+- `-vv`: everything, with a millisecond timestamp on each line, the full certificate chain (issuer,
+  validity, names, serial, SHA-256 fingerprint) and the raw bytes of each HTTP/1.1 exchange.
+
+When a request fails, `-v` shows the trace up to the failure. Without `-v` the error message
+suggests rerunning with it.
+
+```
+$ snapreq send https://example.com/ -v -p ''
+* resolved example.com → 2606:4700:…, 104.20.23.154 (11.6 ms)
+* connected to [2606:4700:…]:443 from […]:41570 (7.90 ms)
+* TLSv1.3 TLS13_AES_256_GCM_SHA384, ALPN h2 (11.7 ms)
+*   server certificate: CN=example.com
+*     valid until 2026-12-25T22:56:35Z
+> GET https://example.com/ HTTP/2
+> user-agent: snapreq/0.1.0
+…
+< HTTP/2 200 OK
+< content-encoding: br
+…
+* 334 B body received (0.85 ms)
+* decoded br body: 334 → 577 bytes
+* total 50.6 ms
+```
+
 ## Request options
 
 | Option | Meaning |
@@ -67,7 +98,7 @@ Only one kind of body can be given per request.
 |---|---|
 | `-p, --print PARTS` | What to print: `H` request headers (as sent, credentials redacted), `B` request body, `h` status line and response headers, `b` response body, `m` timings and sizes. Default: `hb` on a terminal, `b` when piped, so `snapreq send URL \| jq` works. |
 | `--color auto\|always\|never` | Colors (default `auto`: only on a terminal, and never when `NO_COLOR` is set). |
-| `-v` / `-vv` | More detail (`-vv` also captures raw HTTP/1.1 bytes). |
+| `-v` / `-vv` | Show the trace on **stderr** (stdout keeps only the `--print` parts). See below. |
 | `-f, --fail` | Exit with code 4 when the status is 400 or higher. |
 | `--secret VALUE` | Hide this value everywhere in the output (repeatable). Credentials in `Authorization`, `Cookie` and similar headers are hidden automatically. |
 

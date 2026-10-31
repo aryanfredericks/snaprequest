@@ -191,3 +191,42 @@ async fn timeouts_exit_with_code_6() {
     assert_eq!(out.status.code(), Some(6), "{}", stderr(&out));
     assert!(stderr(&out).contains("timed out"), "{}", stderr(&out));
 }
+
+#[tokio::test]
+async fn verbose_trace_goes_to_stderr_and_keeps_stdout_clean() {
+    let addr = server().await;
+    let out = snapreq(&["send", &format!("http://{addr}/v"), "-v"]).await;
+    let err = stderr(&out);
+
+    assert_eq!(stdout(&out), "GET /v \n");
+    assert!(err.contains(&format!("* connected to {addr}")), "{err}");
+    assert!(err.contains("> GET http://"), "{err}");
+    assert!(err.contains("< HTTP/1.1 200 OK"), "{err}");
+    assert!(err.contains("* total "), "{err}");
+    // -v has no timestamps or wire dump.
+    assert!(!err.contains("wire: sent"), "{err}");
+
+    let err = stderr(&snapreq(&["send", &format!("http://{addr}/v"), "-vv"]).await);
+    assert!(err.contains("] * wire: sent"), "{err}");
+    assert!(err.contains("] > GET /v HTTP/1.1"), "{err}");
+}
+
+#[tokio::test]
+async fn failures_show_the_trace_with_v_and_a_hint_without() {
+    let free = TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let url = format!("http://{free}/");
+
+    let err = stderr(&snapreq(&["send", &url]).await);
+    assert!(
+        err.ends_with("(run with -v to see what happened)\n"),
+        "{err}"
+    );
+
+    let err = stderr(&snapreq(&["send", &url, "-v"]).await);
+    assert!(err.contains("! TCP connect failed"), "{err}");
+    assert!(!err.contains("run with -v"), "{err}");
+}

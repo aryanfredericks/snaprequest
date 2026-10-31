@@ -3,6 +3,7 @@
 mod cli;
 mod output;
 mod send;
+mod trace_view;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -80,8 +81,17 @@ async fn run_send(args: &SendArgs) -> u8 {
         ColorArg::Never => anstream::ColorChoice::Never,
     };
 
+    let show_trace = |trace: &[snapreq_core::model::TraceEntry]| {
+        if args.verbose > 0 {
+            let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);
+            // Losing the debug view is not worth failing the command over.
+            let _ = trace_view::render(&mut err, trace, args.verbose);
+        }
+    };
+
     match Client::default().execute(&request).await {
         Ok(response) => {
+            show_trace(&response.trace);
             let mut out = anstream::AutoStream::new(std::io::stdout().lock(), color);
             if let Err(e) = output::print(&mut out, &request, &response, parts, terminal) {
                 // A closed pipe (`| head`) is not an error worth reporting.
@@ -97,7 +107,15 @@ async fn run_send(args: &SendArgs) -> u8 {
             }
         }
         Err(e) => {
-            eprintln!("error: {e}");
+            if let Some(trace) = e.trace() {
+                show_trace(trace);
+            }
+            let hint = if args.verbose == 0 && e.trace().is_some() {
+                " (run with -v to see what happened)"
+            } else {
+                ""
+            };
+            eprintln!("error: {e}{hint}");
             match e {
                 Error::Execution(ex) if ex.timed_out => exit::TIMEOUT,
                 Error::Execution(_) => exit::NETWORK,

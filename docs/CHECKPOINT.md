@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 2 CLI MVP, starting (Phase 1 complete)
-- **Current checkpoint:** P2.3, verbosity levels
+- **Current checkpoint:** P2.4, timing waterfall
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,15 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P2.3: verbosity. `-v`: print request line/headers (`H`), response (`hb`) and the timing summary (`m`)
-   plus key trace notes (redirects, cookies, TLS version/cipher, `info` events) to **stderr** so stdout stays
-   pipe-friendly? Decide: HTTPie prints everything to stdout with -v. Proposal: with `-v`/`-vv` the trace goes to
-   stderr, the selected parts stay on stdout. `-vv`: the full trace (every event with timestamps, TLS certificate
-   chain) and the wire capture (already captured when `-vv`). On failure (`Error::Execution`) print the partial
-   trace at `-v`. Then P2.4 waterfall, P2.5 `--output json` / `-o file`, P2.6 snapshot tests.
+1. P2.4: timing waterfall in the terminal (stderr, with `-v` or a dedicated part `w`? Proposal: add `--print` letter
+   `t` for the waterfall on stdout and show it automatically at the end of `-v`). Bars for DNS | connect | TLS |
+   send | wait | download scaled to the terminal width, with ms labels; redirect hops shown as separate rows
+   (compute per hop from the trace between `Redirect` events).
+   Then P2.5 `--output json` and `-o FILE`, P2.6 `insta` snapshot tests.
+
+## Verbose notes (P2.3)
+- `crates/snapreq-cli/src/trace_view.rs`: `render(out, trace, level)`, curl-style prefixes `*` `>` `<` `!`; `-vv` adds `[ms]` stamps, full cert chain, wire dump (binary bodies summarized).
+- Trace goes to stderr; stdout only carries `--print` parts. Failures print the partial trace with `-v`, else a hint.
 
 ## Output notes (P2.2)
 - `crates/snapreq-cli/src/output.rs`: `Parts` (`--print` letters H B h b m), `print()`, JSON pretty printer (serde_json `preserve_order` enabled in the CLI crate), binary summary on TTY, `human_bytes`.
@@ -131,7 +134,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 |---|---|
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
-| 2 CLI MVP | 🟨 in progress (P2.1–P2.2 done) |
+| 2 CLI MVP | 🟨 in progress (P2.1–P2.3 done) |
 | 3 Collections & environments | ⬜ |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
@@ -163,6 +166,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.9 — 2026-10-31 — Criterion benchmarks; fixed a 1 ms delay on every new connection. Phase 1 complete. 141 tests total.
 - P2.1 — 2026-10-31 — `snapreq send` with request, connection, TLS and output options; exit codes; docs/CLI.md. 152 tests total.
 - P2.2 — 2026-10-31 — Pretty output: --print parts, colors, JSON formatting, binary summaries. 160 tests total.
+- P2.3 — 2026-10-31 — Verbose trace on stderr (-v compact, -vv timestamps, cert chain, wire bytes). 165 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
