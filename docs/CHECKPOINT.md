@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 1 Core HTTP engine, in progress
-- **Current checkpoint:** P1.6, HTTP/2, decompression, redirects, timeouts, proxies
+- **Current checkpoint:** P1.6, split into: 6a decompression ✅, 6b redirects, 6c HTTP/2, 6d proxies
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -32,6 +32,11 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
    303 → GET), proxies (HTTP CONNECT, SOCKS5, `HTTP(S)_PROXY`/`NO_PROXY`).
    Note: h2 connections are multiplexed, so the pool must share one `SendRequest` (cloneable) instead of check-out/in,
    and the socket meter cannot attribute bytes per stream (document: timings for h2 come from hyper events only).
+
+## Decompression notes (P1.6a)
+- `client/decode.rs`: gzip (multi-member), deflate (zlib, falls back to raw), br, zstd; stacked encodings undone in reverse; pure-Rust decoders (`flate2`, `brotli-decompressor`, `ruzstd`).
+- `Accept-Encoding: gzip, deflate, br, zstd` sent when `settings.decompress` and the user did not set one.
+- Failure or unknown encoding keeps the raw body plus an `info` event; decoded bodies capped at 1 GiB. `Content-Encoding` header stays in the response headers.
 
 ## TLS options notes (P1.5)
 - `RequestSettings::tls: TlsSettings { verify, ca_cert, client_cert {cert,key}, min_version, max_version }` (replaced top-level `verify_tls`). Versions serialize as "1.2"/"1.3".
@@ -101,7 +106,8 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P1.2 — 2026-10-31 — `Client::execute` over HTTP/1.1 with own connection pool, socket metering, timeouts, stale-connection retry. 47 tests total (16 integration tests against local servers).
 - P1.3 — 2026-10-31 — Streaming request bodies: text, JSON, form, file, multipart with file uploads; exact Content-Length. 58 tests total.
 - P1.4 — 2026-10-31 — HTTPS via rustls with traced handshake and certificate chain, host pinning, Happy Eyeballs. ADR-011 (OS resolver, ring). 69 tests total.
-- P1.5 — 2026-10-31 — Per-request TLS options: verify off (with verdict in trace), CA file, mTLS, min/max version; pool separation. Fixed cargo-deny (rustls-pemfile unmaintained, time advisory → MSRV 1.88). 82 tests total.
+- P1.5 — 2026-10-31 — Per-request TLS options: verify off (with verdict in trace), CA file, mTLS, min/max version; pool separation. Fixed cargo-deny (rustls-pemfile unmaintained, time advisory → MSRV 1.88). 79 tests total.
+- P1.6a — 2026-10-31 — Response decompression (gzip, deflate, br, zstd). 86 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

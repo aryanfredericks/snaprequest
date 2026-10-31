@@ -42,6 +42,7 @@ impl TestServer {
 /// - `/close`: replies with `Connection: close`
 /// - `/bytes`: binary body
 /// - `/count`: replies with the number of body bytes received and their sum mod 2^32
+/// - `/gzip`: gzip-encoded text if the request accepts gzip, otherwise plain text
 async fn handle(
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
@@ -71,6 +72,21 @@ async fn handle(
     } else if path == "/close" {
         resp = resp.header("connection", "close");
         "bye".into()
+    } else if path == "/gzip" {
+        let text = "compressible ".repeat(100);
+        let accepts_gzip = req
+            .headers()
+            .get("accept-encoding")
+            .is_some_and(|v| v.to_str().unwrap().contains("gzip"));
+        if accepts_gzip {
+            use std::io::Write;
+            let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            e.write_all(text.as_bytes()).unwrap();
+            resp = resp.header("content-encoding", "gzip");
+            e.finish().unwrap().into()
+        } else {
+            text.into()
+        }
     } else if path == "/count" {
         let body = req.into_body().collect().await.unwrap().to_bytes();
         let sum = body
@@ -584,4 +600,39 @@ async fn missing_upload_file_fails_before_connecting() {
     assert!(matches!(err, Error::InvalidRequest(_)), "{err:?}");
     assert!(err.to_string().contains("no/such/file.bin"), "{err}");
     assert_eq!(server.connections(), 0);
+}
+
+#[tokio::test]
+async fn gzip_responses_are_decoded() {
+    let server = start_server().await;
+    let resp = Client::default()
+        .execute(&Request::get(server.url("/gzip")))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.text().unwrap(), "compressible ".repeat(100));
+    assert_eq!(resp.header("content-encoding"), Some("gzip"));
+    assert_eq!(resp.sizes.response_body_decoded, 1300);
+    assert!(resp.sizes.response_body < 100, "{:?}", resp.sizes);
+    let note = resp
+        .trace
+        .iter()
+        .find_map(|e| match &e.event {
+            TraceEvent::Info { message } => Some(message.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(note.starts_with("decoded gzip body:"), "{note}");
+}
+
+#[tokio::test]
+async fn decompression_can_be_turned_off() {
+    let server = start_server().await;
+    let mut req = Request::get(server.url("/gzip"));
+    req.settings.decompress = false;
+    let resp = Client::default().execute(&req).await.unwrap();
+
+    // No Accept-Encoding is sent, so the server answers uncompressed.
+    assert_eq!(resp.header("content-encoding"), None);
+    assert_eq!(resp.sizes.response_body, resp.sizes.response_body_decoded);
 }

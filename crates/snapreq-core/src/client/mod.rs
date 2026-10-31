@@ -3,6 +3,7 @@
 mod body;
 mod build;
 mod conn;
+mod decode;
 mod meter;
 mod recorder;
 mod tls;
@@ -147,7 +148,7 @@ impl Client {
 
         if let Some(conn) = self.reusable_conn(&key).await {
             rec.record(TraceEvent::ConnectionReused { addr: conn.remote });
-            match self.exchange(conn, url, prepared, rec, true).await? {
+            match self.exchange(conn, url, prepared, rec, true, req.settings.decompress).await? {
                 Outcome::Done(resp, conn, reusable) => {
                     return Ok(self.finish(key, resp, conn, reusable, rec));
                 }
@@ -160,7 +161,10 @@ impl Client {
         }
 
         let conn = self.connect(url, req, tls, rec).await?;
-        match self.exchange(conn, url, prepared, rec, false).await? {
+        match self
+            .exchange(conn, url, prepared, rec, false, req.settings.decompress)
+            .await?
+        {
             Outcome::Done(resp, conn, reusable) => Ok(self.finish(key, resp, conn, reusable, rec)),
             Outcome::Stale(why) => Err(rec.fail(why, false)),
         }
@@ -205,6 +209,7 @@ impl Client {
         prepared: &Prepared,
         rec: &mut Recorder,
         reused: bool,
+        decompress: bool,
     ) -> Result<Outcome> {
         conn.meter.reset();
         rec.record(TraceEvent::RequestHeaders {
@@ -258,6 +263,37 @@ impl Client {
             download: first_byte.elapsed(),
         });
 
+        let body = if decompress {
+            let encodings: Vec<&str> = parts
+                .headers
+                .get_all(header::CONTENT_ENCODING)
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .collect();
+            match decode::decode(buf.freeze(), &encodings) {
+                decode::DecodeOutcome::Identity(body) => body,
+                decode::DecodeOutcome::Decoded { body, encodings } => {
+                    rec.record(TraceEvent::Info {
+                        message: format!(
+                            "decoded {} body: {body_len} → {} bytes",
+                            encodings.join(" + "),
+                            body.len()
+                        ),
+                    });
+                    body
+                }
+                decode::DecodeOutcome::Raw { body, reason } => {
+                    rec.record(TraceEvent::Info {
+                        message: format!("{reason}; showing the raw body"),
+                    });
+                    body
+                }
+            }
+        } else {
+            buf.freeze()
+        };
+
+        let decoded_len = body.len() as u64;
         let snap = conn.meter.snapshot();
         let reusable = !parts
             .headers
@@ -271,7 +307,7 @@ impl Client {
                 version,
                 url: url.to_string(),
                 headers,
-                body: buf.freeze(),
+                body,
                 remote_addr: Some(conn.remote),
                 timings: Timings::default(),
                 sizes: Sizes {
@@ -279,7 +315,7 @@ impl Client {
                     request_body: prepared.body_len,
                     response_headers: snap.bytes_read.saturating_sub(body_len),
                     response_body: body_len,
-                    response_body_decoded: body_len,
+                    response_body_decoded: decoded_len,
                 },
                 trace: Vec::new(),
             },

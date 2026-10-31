@@ -60,6 +60,12 @@ pub(crate) async fn prepare(req: &Request, url: &Url, user_agent: &str) -> Resul
     if !has_header(req, "accept") {
         headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
     }
+    if req.settings.decompress && !has_header(req, "accept-encoding") {
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static(super::decode::ACCEPT_ENCODING),
+        );
+    }
     if let Some(ct) = &body.content_type
         && !has_header(req, "content-type")
     {
@@ -141,10 +147,13 @@ mod tests {
         let req = Request::get("http://example.com:8080/a?b=1").header("x-trace", "1");
         let url = req.effective_url().unwrap();
         let p = prepare(&req, &url, "snapreq/test").await.unwrap();
-        assert_eq!(names(&p), ["Host", "X-Trace", "User-Agent", "Accept"]);
+        assert_eq!(
+            names(&p),
+            ["Host", "X-Trace", "User-Agent", "Accept", "Accept-Encoding"]
+        );
         assert_eq!(p.sent_headers[0].value, "example.com:8080");
         assert_eq!(p.uri, "/a?b=1");
-        assert_eq!(p.to_http().headers().len(), 4);
+        assert_eq!(p.to_http().headers().len(), 5);
     }
 
     #[tokio::test]
@@ -155,7 +164,10 @@ mod tests {
         req.headers.push(KeyValue::new("X-Off", "1").disabled());
         let url = req.effective_url().unwrap();
         let p = prepare(&req, &url, "snapreq/test").await.unwrap();
-        assert_eq!(names(&p), ["Host", "User-Agent", "Accept"]);
+        assert_eq!(
+            names(&p),
+            ["Host", "User-Agent", "Accept", "Accept-Encoding"]
+        );
         assert_eq!(p.sent_headers[1].value, "custom");
     }
 
