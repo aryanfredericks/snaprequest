@@ -8,7 +8,7 @@ pub mod error;
 pub mod model;
 mod serde_util;
 
-pub use client::{Client, ClientConfig};
+pub use client::{Certificate, Client, ClientConfig};
 pub use error::{Error, ExecutionError, Result};
 pub use model::{Body, Request, Response};
 

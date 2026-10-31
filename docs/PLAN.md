@@ -70,7 +70,7 @@ snaprequest/
 | Async runtime | `tokio` |
 | HTTP engine | `hyper` 1.x + `hyper-util`, **not** `reqwest`. We need hooks into every connection phase to record timings and wire bytes. |
 | TLS | `rustls` + `tokio-rustls` (pure Rust, records handshake details), with `webpki-roots` and native certs |
-| DNS | `hickory-resolver`, so DNS can be timed separately and overridden (like curl's `--resolve`) |
+| DNS | OS resolver (timed separately) plus our own host pinning like curl's `--resolve` (ADR-011) |
 | Serialization | `serde`, `serde_json`, `toml` |
 | Collection format | TOML, one file per request, with folders as directories |
 | JSON querying | `serde_json_path` (RFC 9535 JSONPath) |
@@ -134,7 +134,7 @@ The heart of the product. Most of the performance and "detailed logs" value is b
 - **P1.1** Data model: `Request` (method, URL, headers, query, body, settings) and `Response` (status, version, headers, body, timings, sizes). Serde round-trip.
 - **P1.2** Basic execution with hyper: all methods, headers, query params, HTTP/1.1, connection pooling.
 - **P1.3** Body types: raw text, JSON, `x-www-form-urlencoded`, multipart (with file upload), binary file, streaming large bodies.
-- **P1.4** Instrumented connector: custom DNS (hickory), TCP and TLS steps, each timed and emitted as `TraceEvent`s.
+- **P1.4** Instrumented connector: timed DNS (OS resolver) with host pinning, Happy Eyeballs TCP connect, and the rustls TLS handshake, each emitted as `TraceEvent`s.
 - **P1.5** TLS options: verify on/off, custom CA, client certificates (mTLS), min/max TLS version; capture the peer certificate chain.
 - **P1.6** HTTP/2 (ALPN), response decompression (gzip, br, zstd, deflate), redirect policy (follow, max count, keep auth on redirects), timeouts (connect, total), proxy support (HTTP/HTTPS/SOCKS5, `NO_PROXY`).
 - **P1.7** Cookie jar (per session, can be persisted).

@@ -5,6 +5,9 @@ mod build;
 mod conn;
 mod meter;
 mod recorder;
+mod tls;
+
+pub use self::tls::Certificate;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,6 +32,9 @@ pub struct ClientConfig {
     pub pool_idle_timeout: Duration,
     /// Maximum idle connections kept per scheme/host/port. `0` disables reuse.
     pub pool_max_idle_per_host: usize,
+    /// Extra trusted root certificates, added to the OS trust store
+    /// (for example a company or local development CA).
+    pub extra_root_certificates: Vec<Certificate>,
 }
 
 impl Default for ClientConfig {
@@ -37,6 +43,7 @@ impl Default for ClientConfig {
             user_agent: format!("snapreq/{}", crate::VERSION),
             pool_idle_timeout: Duration::from_secs(90),
             pool_max_idle_per_host: 8,
+            extra_root_certificates: Vec::new(),
         }
     }
 }
@@ -53,11 +60,17 @@ pub struct Client {
 struct Inner {
     config: ClientConfig,
     pool: Pool,
+    tls: Arc<rustls::ClientConfig>,
 }
 
 impl Default for Client {
+    /// A client with the default configuration (OS trust store, no extra roots).
     fn default() -> Self {
-        Self::new(ClientConfig::default())
+        let config = ClientConfig::default();
+        let tls = tls::build_config(&[])
+            // Only extra roots can make this fail, and the default has none.
+            .unwrap_or_else(|e| unreachable!("default TLS configuration is valid: {e}"));
+        Self::from_parts(config, tls)
     }
 }
 
@@ -71,10 +84,16 @@ enum Outcome {
 }
 
 impl Client {
-    pub fn new(config: ClientConfig) -> Self {
+    /// Creates a client. Fails only if an extra root certificate is invalid.
+    pub fn new(config: ClientConfig) -> Result<Self> {
+        let tls = tls::build_config(&config.extra_root_certificates)?;
+        Ok(Self::from_parts(config, tls))
+    }
+
+    fn from_parts(config: ClientConfig, tls: Arc<rustls::ClientConfig>) -> Self {
         let pool = Pool::new(config.pool_idle_timeout, config.pool_max_idle_per_host);
         Self {
-            inner: Arc::new(Inner { config, pool }),
+            inner: Arc::new(Inner { config, pool, tls }),
         }
     }
 
@@ -88,8 +107,11 @@ impl Client {
     /// the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
-        if url.scheme() == "https" {
-            return Err(Error::Unsupported("HTTPS".into()));
+        if !req.settings.verify_tls {
+            return Err(Error::Unsupported("disabling TLS verification".into()));
+        }
+        if req.settings.http_version == crate::model::HttpVersionPref::Http2 {
+            return Err(Error::Unsupported("HTTP/2".into()));
         }
         let prepared = build::prepare(req, &url, &self.inner.config.user_agent).await?;
 
@@ -149,14 +171,19 @@ impl Client {
 
     async fn connect(&self, url: &url::Url, req: &Request, rec: &mut Recorder) -> Result<Conn> {
         match req.settings.connect_timeout {
-            Some(limit) => match tokio::time::timeout(limit, conn::connect(url, rec)).await {
+            Some(limit) => match tokio::time::timeout(
+                limit,
+                conn::connect(url, &req.settings, &self.inner.tls, rec),
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => Err(rec.fail(
                     format!("no connection within {} ms", limit.as_millis()),
                     true,
                 )),
             },
-            None => conn::connect(url, rec).await,
+            None => conn::connect(url, &req.settings, &self.inner.tls, rec).await,
         }
     }
 

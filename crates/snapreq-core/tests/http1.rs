@@ -422,15 +422,6 @@ async fn unknown_host_is_a_dns_error() {
 }
 
 #[tokio::test]
-async fn https_is_not_supported_yet() {
-    let err = Client::default()
-        .execute(&Request::get("https://example.com/"))
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::Unsupported(_)), "{err:?}");
-}
-
-#[tokio::test]
 async fn response_serializes_to_json() {
     let server = start_server().await;
     let resp = Client::default()

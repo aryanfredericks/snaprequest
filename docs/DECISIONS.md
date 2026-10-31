@@ -68,3 +68,16 @@ handshakes and pools connections itself (keyed by scheme, host, port), and wraps
 I/O adapter that records bytes and the first-read/last-write instants.
 **Consequences:** Exact per-request trace events, connection-reuse visibility and byte counts. We own pool
 correctness (idle timeouts, closed-connection detection).
+
+## ADR-011: System resolver instead of hickory; ring as the TLS crypto provider
+**Status:** Accepted (2026-10-31). Supersedes the DNS row of the PLAN tech table.
+**Context:** A debugging tool must resolve names exactly as curl and browsers on the same machine do
+(`/etc/hosts`, nsswitch, mDNS, VPN split DNS, corporate resolvers). hickory reads `resolv.conf`-style
+configuration and can diverge from the OS. Timing DNS and pinning hosts do not need a custom resolver.
+**Decision:** Use the OS resolver (`getaddrinfo` via `tokio::net::lookup_host`), timed as its own phase.
+Host pinning (like curl `--resolve`) is implemented in SnapRequest (`RequestSettings::resolve`). Connections use
+Happy Eyeballs (RFC 8305 style: interleaved families, 250 ms stagger). TLS uses rustls with the `ring`
+provider (pure Rust + asm, no CMake/NASM on Windows), trusting the OS certificate store with Mozilla's
+roots (`webpki-roots`) as fallback.
+**Consequences:** No resolver drift from the OS. Choosing a specific DNS server or DNS-over-HTTPS would need hickory
+later as an opt-in.
