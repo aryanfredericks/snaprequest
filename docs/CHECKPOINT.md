@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 3 Collections, environments and variables, starting (Phases 0–2 complete)
-- **Current checkpoint:** P3.4, secrets
+- **Current checkpoint:** P3.5, inheritance
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P3.4: secrets. Values for `{ secret = true }` variables come from outside the collection:
-   (a) a local, git-ignored file next to the collection (`.snapreq/secrets.toml`? or `<collection>/.secrets/<env>.toml`;
-   names starting with `.` are already ignored by the loader), (b) environment variables `SNAPREQ_SECRET_<NAME>`?,
-   (c) `--var`. Decide, document in FORMAT.md, and add a check that a secret value never ends up in a saved file
-   (`save_environment` already writes only markers). Consider OS keychain later (keyring crate) — probably P8.
-   Then P3.5 inheritance, P3.6 CLI (`snapreq send path/to/request.toml -e dev`, `snapreq ls`, `snapreq new`).
+1. P3.5: inheritance in `build_request`: headers and settings from collection → folders (outermost first) → request.
+   Headers: inherited entries come first; a request/folder entry with the same name (case-insensitive) replaces
+   the inherited one(s); a disabled entry with the same name switches the inherited header off (document).
+   Settings: request keys override folder keys override collection keys override core defaults; relative paths
+   (ca_cert, client_cert/key) resolve against the file that set them. Auth inheritance comes with Phase 4.
+   Update FORMAT.md. Then P3.6 CLI: `snapreq send path/to/request.toml -e dev` / `snapreq run`? (run is P5),
+   `snapreq ls`, `snapreq new`, `snapreq secret set NAME [-e ENV]`, `--var name=value`.
+
+## Secret notes (P3.4)
+- `crates/snapreq-collection/src/secrets.rs`: `Secrets::load(collection, env, env_vars)` → `get(name)` (`SNAPREQ_SECRET_<NAME>` > `.secrets/<env>.toml` > `.secrets/shared.toml`), `fill(&mut Scopes)` fills secret variables without value. `--var` wins via the runtime scope.
+- `store()` writes `.secrets/<env>.toml` (or `shared.toml`), creates `.secrets/.gitignore` (`*`), chmod 600 on Unix.
+- Process env is passed in (no `std::env` reads inside the library) so tests stay hermetic.
 
 ## Interpolation notes (P3.3)
 - `crates/snapreq-collection/src/interp.rs`: `Interpolator` (`{{name}}`, recursive with cycle detection, `\{{` literal, `$uuid`/`$timestamp`/`$isoTimestamp`/`$randomInt`), collects secret values used.
@@ -166,7 +172,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 0 Foundation | ✅ done |
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
-| 3 Collections & environments | 🟨 in progress (P3.1–P3.3 done) |
+| 3 Collections & environments | 🟨 in progress (P3.1–P3.4 done) |
 | 4 Auth helpers | ⬜ |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
@@ -204,6 +210,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P3.1 — 2026-10-31 — Collection format v1 spec (docs/FORMAT.md), loading with file:line errors, stable saving (toml_edit, ADR-013). 196 tests total.
 - P3.2 — 2026-10-31 — Environments, `[vars]` tables and scope precedence. 203 tests total.
 - P3.3 — 2026-10-31 — `{{var}}` interpolation, dynamic variables, building core requests from collections. 212 tests total.
+- P3.4 — 2026-10-31 — Secrets from SNAPREQ_SECRET_* env vars and git-ignored `.secrets/` files. 217 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

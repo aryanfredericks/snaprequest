@@ -8,6 +8,7 @@ pub mod interp;
 pub mod kv;
 pub mod load;
 pub mod save;
+pub mod secrets;
 pub mod vars;
 
 pub use build::build_request;
@@ -17,4 +18,5 @@ pub use files::{
 };
 pub use kv::KeyValues;
 pub use load::{Collection, Folder, Item, RequestItem};
+pub use secrets::Secrets;
 pub use vars::{Environment, Scope, Scopes, Variable, Variables};

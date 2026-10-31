@@ -329,6 +329,15 @@ impl Scopes {
         self.layers.push((Scope::Runtime, vars));
     }
 
+    /// Calls `f` on every variable in every scope (used to fill in secret values).
+    pub fn for_each_variable_mut(&mut self, mut f: impl FnMut(&mut Variable)) {
+        for (_, vars) in &mut self.layers {
+            for v in &mut vars.0 {
+                f(v);
+            }
+        }
+    }
+
     /// The scopes searched, highest precedence first (for error messages).
     pub fn scope_names(&self) -> Vec<String> {
         self.layers.iter().map(|(s, _)| s.to_string()).collect()

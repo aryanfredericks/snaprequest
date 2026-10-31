@@ -194,8 +194,22 @@ base_url = "https://api.example.com"
 token = { secret = true }
 ```
 
-Secret values are never written into collection files; they are supplied separately (see the CLI
-documentation) so the collection can be committed safely.
+Secret values are never written into collection files, so the collection can be committed safely.
+
+## Secrets
+
+A variable declared `{ secret = true }` gets its value from the first of:
+
+1. `--var name=value` on the command line;
+2. the environment variable `SNAPREQ_SECRET_<NAME>` (upper case; `.` and `-` become `_`, so
+   `api.key` is `SNAPREQ_SECRET_API_KEY`), the natural choice in CI;
+3. `.secrets/<environment>.toml` inside the collection;
+4. `.secrets/shared.toml` inside the collection.
+
+The files in `.secrets/` are flat `name = "value"` tables. SnapRequest creates them (for example with
+`snapreq secret set`), writes a `.secrets/.gitignore` containing `*` so they are never committed
+even if the project's `.gitignore` forgets them, and makes them readable by their owner only on
+Unix. Secret values are hidden in every trace and output.
 
 ## Ordering
 
