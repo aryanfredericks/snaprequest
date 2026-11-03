@@ -1,9 +1,13 @@
 //! Runs: a flow or a list of requests, once or once per iteration / data row.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use futures_util::StreamExt as _;
 use snapreq_collection::{Collection, Environment, FlowItem, Secrets, Variables};
 use snapreq_core::{Client, Request};
 
-use crate::flow::{FlowRun, run_flow};
+use crate::flow::{FlowRun, run_flow_with};
 use crate::session::{RequestRun, Session};
 
 /// What a run executes.
@@ -27,14 +31,20 @@ pub struct Iteration {
 #[derive(Debug)]
 pub enum UnitRun {
     Flow(FlowRun),
-    Requests(Vec<RequestRun>),
+    /// The requests sent; fewer than `total` when the run bailed out.
+    Requests {
+        runs: Vec<RequestRun>,
+        total: usize,
+    },
 }
 
 impl Iteration {
     pub fn passed(&self) -> bool {
         match &self.result {
             UnitRun::Flow(f) => f.passed(),
-            UnitRun::Requests(r) => r.iter().all(RequestRun::passed),
+            UnitRun::Requests { runs, total } => {
+                runs.len() == *total && runs.iter().all(RequestRun::passed)
+            }
         }
     }
 
@@ -42,7 +52,7 @@ impl Iteration {
     pub fn requests(&self) -> Vec<&RequestRun> {
         match &self.result {
             UnitRun::Flow(f) => f.steps.iter().map(|s| &s.run).collect(),
-            UnitRun::Requests(r) => r.iter().collect(),
+            UnitRun::Requests { runs, .. } => runs.iter().collect(),
         }
     }
 }
@@ -62,6 +72,20 @@ pub struct Plan<'a> {
     pub rows: Vec<Variables>,
     /// Iterations when there are no rows (at least 1).
     pub iterations: usize,
+    pub options: RunOptions,
+}
+
+/// How a run proceeds.
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    /// Stop at the first failing request: the rest of the iteration and later
+    /// iterations are skipped. (Flows always stop at a failing step.)
+    pub bail: bool,
+    /// Pause between requests (and flow steps) of an iteration.
+    pub delay: Option<Duration>,
+    /// Iterations run at the same time (at least 1). Requests within an iteration always
+    /// run in order, because later ones may use values captured by earlier ones.
+    pub parallel: usize,
 }
 
 /// The keys of every request of the collection, or of `folder` (a folder key such as
@@ -88,7 +112,8 @@ pub fn request_keys(collection: &Collection, folder: Option<&str>) -> Result<Vec
 }
 
 /// Runs `unit` once per row (or `plan.iterations` times). Each iteration starts with no
-/// captured values.
+/// captured values. Results are in iteration order; with `bail`, iterations after a
+/// failure are not started (ones already running finish).
 pub async fn execute(
     plan: &Plan<'_>,
     unit: &Unit<'_>,
@@ -99,36 +124,73 @@ pub async fn execute(
     } else {
         plan.rows.iter().map(Some).collect()
     };
-    let mut out = Vec::new();
-    for (i, row) in rows.into_iter().enumerate() {
-        let mut session = Session::new(
-            plan.collection,
-            plan.environment,
-            plan.secrets,
-            plan.client.clone(),
-        );
-        session.overrides = plan.overrides.clone();
-        for h in &plan.hidden {
-            session.hide(h.clone());
-        }
-        if let Some(row) = row {
-            session.data = row.clone();
-        }
-        let result = match unit {
-            Unit::Flow(flow) => UnitRun::Flow(run_flow(&mut session, flow, &adjust).await),
-            Unit::Requests(keys) => {
-                let mut runs = Vec::new();
-                for key in keys {
-                    runs.push(session.send(key, &adjust).await);
-                }
-                UnitRun::Requests(runs)
+    let stop = AtomicBool::new(false);
+    let adjust = &adjust;
+    let stop = &stop;
+    futures_util::stream::iter(rows.into_iter().enumerate())
+        .map(|(i, row)| async move {
+            if stop.load(Ordering::SeqCst) {
+                return None;
             }
-        };
-        out.push(Iteration {
-            number: i + 1,
-            data: row.cloned(),
-            result,
-        });
+            let it = iteration(plan, unit, i + 1, row, adjust).await;
+            if plan.options.bail && !it.passed() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            Some(it)
+        })
+        .buffered(plan.options.parallel.max(1))
+        .filter_map(|it| async move { it })
+        .collect()
+        .await
+}
+
+async fn iteration(
+    plan: &Plan<'_>,
+    unit: &Unit<'_>,
+    number: usize,
+    row: Option<&Variables>,
+    adjust: &impl Fn(&mut Request),
+) -> Iteration {
+    let mut session = Session::new(
+        plan.collection,
+        plan.environment,
+        plan.secrets,
+        plan.client.clone(),
+    );
+    session.overrides = plan.overrides.clone();
+    for h in &plan.hidden {
+        session.hide(h.clone());
     }
-    out
+    if let Some(row) = row {
+        session.data = row.clone();
+    }
+    let delay = plan.options.delay;
+    let result = match unit {
+        Unit::Flow(flow) => UnitRun::Flow(run_flow_with(&mut session, flow, adjust, delay).await),
+        Unit::Requests(keys) => {
+            let mut runs = Vec::new();
+            for (i, key) in keys.iter().enumerate() {
+                if let Some(d) = delay
+                    && i > 0
+                {
+                    tokio::time::sleep(d).await;
+                }
+                let run = session.send(key, adjust).await;
+                let failed = !run.passed();
+                runs.push(run);
+                if failed && plan.options.bail {
+                    break;
+                }
+            }
+            UnitRun::Requests {
+                runs,
+                total: keys.len(),
+            }
+        }
+    };
+    Iteration {
+        number,
+        data: row.cloned(),
+        result,
+    }
 }

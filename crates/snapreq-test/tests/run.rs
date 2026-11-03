@@ -12,7 +12,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use snapreq_collection::{Collection, Secrets, Variables};
 use snapreq_core::Client;
-use snapreq_test::{Plan, Unit, data, execute, request_keys};
+use snapreq_test::{Plan, RunOptions, Unit, UnitRun, data, execute, request_keys};
 use tokio::net::TcpListener;
 
 /// Echoes the path; `/counter` returns how often it was called.
@@ -28,6 +28,9 @@ async fn start() -> SocketAddr {
                 let svc = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                     let hits = hits.clone();
                     async move {
+                        if req.uri().path() == "/slow" {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                        }
                         let body = if req.uri().path() == "/counter" {
                             (hits.fetch_add(1, Ordering::SeqCst) + 1).to_string()
                         } else {
@@ -45,8 +48,8 @@ async fn start() -> SocketAddr {
     addr
 }
 
-fn collection(addr: SocketAddr) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("snapreq-run-{}", std::process::id()));
+fn collection(tag: &str, addr: SocketAddr) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("snapreq-run-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     for (path, text) in [
         ("snapreq.toml", format!("format = 1\nname = \"R\"\norder = [\"users\", \"other\"]\n[vars]\nbase = \"http://{addr}\"\nuser = \"default\"\n")),
@@ -65,7 +68,7 @@ fn collection(addr: SocketAddr) -> std::path::PathBuf {
 #[tokio::test]
 async fn iterations_and_data_rows() {
     let addr = start().await;
-    let dir = collection(addr);
+    let dir = collection("data", addr);
     let (c, _) = Collection::load(&dir).unwrap();
     let secrets = Secrets::default();
 
@@ -92,6 +95,7 @@ async fn iterations_and_data_rows() {
         hidden: Vec::new(),
         rows: Vec::new(),
         iterations: 2,
+        options: RunOptions::default(),
     };
     let unit = Unit::Requests(request_keys(&c, Some("users")).unwrap());
     let runs = execute(&plan, &unit, |_| {}).await;
@@ -150,4 +154,81 @@ async fn iterations_and_data_rows() {
             .unwrap()
             .starts_with("/hello/cli/")
     }));
+}
+
+#[tokio::test]
+async fn bail_delay_and_parallel_iterations() {
+    use std::time::{Duration, Instant};
+    let addr = start().await;
+    let dir = collection("control", addr);
+    std::fs::write(dir.join("users/slow.toml"), "url = \"{{base}}/slow\"\n").unwrap();
+    let (c, _) = Collection::load(&dir).unwrap();
+    let secrets = Secrets::default();
+    let mut plan = Plan {
+        collection: &c,
+        environment: None,
+        secrets: &secrets,
+        client: Client::default(),
+        overrides: Variables::default(),
+        hidden: Vec::new(),
+        rows: data::from_csv("user\nbob\nalice\nbob\n").unwrap(),
+        iterations: 1,
+        options: RunOptions {
+            bail: true,
+            ..RunOptions::default()
+        },
+    };
+
+    // `greet` fails for bob: with bail, the rest of iteration 1 and later iterations are skipped.
+    let all = Unit::Requests(request_keys(&c, Some("users")).unwrap());
+    let runs = execute(&plan, &all, |_| {}).await;
+    assert_eq!(runs.len(), 1);
+    let UnitRun::Requests { runs: sent, total } = &runs[0].result else {
+        panic!()
+    };
+    assert_eq!((sent.len(), *total), (2, 3));
+    assert!(!runs[0].passed());
+
+    // Without bail every iteration runs and keeps going.
+    plan.options.bail = false;
+    let runs = execute(&plan, &all, |_| {}).await;
+    assert_eq!(runs.len(), 3);
+    assert_eq!(
+        runs.iter().map(|r| r.passed()).collect::<Vec<_>>(),
+        [false, true, false]
+    );
+
+    // Iterations in parallel finish in about the time of one; results stay in order.
+    let slow = Unit::Requests(vec!["users/slow".into()]);
+    plan.rows = data::from_csv("user\n1\n2\n3\n4\n").unwrap();
+    plan.options.parallel = 4;
+    let started = Instant::now();
+    let runs = execute(&plan, &slow, |_| {}).await;
+    let parallel = started.elapsed();
+    assert_eq!(
+        runs.iter().map(|r| r.number).collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+    assert!(parallel < Duration::from_millis(450), "{parallel:?}");
+
+    plan.options.parallel = 1;
+    let started = Instant::now();
+    execute(&plan, &slow, |_| {}).await;
+    assert!(
+        started.elapsed() >= Duration::from_millis(600),
+        "{:?}",
+        started.elapsed()
+    );
+
+    // A delay between requests.
+    plan.rows = Vec::new();
+    plan.options.delay = Some(Duration::from_millis(100));
+    let two = Unit::Requests(vec!["other".into(), "other".into(), "other".into()]);
+    let started = Instant::now();
+    execute(&plan, &two, |_| {}).await;
+    assert!(
+        started.elapsed() >= Duration::from_millis(200),
+        "{:?}",
+        started.elapsed()
+    );
 }

@@ -48,9 +48,24 @@ pub async fn run_flow(
     flow: &FlowItem,
     adjust: impl Fn(&mut Request),
 ) -> FlowRun {
+    run_flow_with(session, flow, adjust, None).await
+}
+
+/// [`run_flow`] with a pause of `delay` between steps (in addition to their `delay_ms`).
+pub async fn run_flow_with(
+    session: &mut Session<'_>,
+    flow: &FlowItem,
+    adjust: impl Fn(&mut Request),
+    delay: Option<Duration>,
+) -> FlowRun {
     let path = session.collection().root.join(&flow.path);
     let mut steps = Vec::new();
     for (i, step) in flow.file.steps.iter().enumerate() {
+        if let Some(d) = delay
+            && i > 0
+        {
+            tokio::time::sleep(d).await;
+        }
         if let Some(ms) = step.delay_ms {
             tokio::time::sleep(Duration::from_millis(ms)).await;
         }

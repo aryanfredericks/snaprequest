@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use snapreq_collection::{Collection, Environment, FLOW_SUFFIX, Scopes, Secrets};
 use snapreq_core::{Error, Request};
 use snapreq_test::{
-    Iteration, Plan, RequestRun, RunOutcome, Unit, UnitRun, data, execute, request_keys,
+    Iteration, Plan, RequestRun, RunOptions, RunOutcome, Unit, UnitRun, data, execute, request_keys,
 };
 
 use crate::cli::{ColorArg, FormatArg, RunArgs};
@@ -163,6 +163,9 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
         },
         None => Vec::new(),
     };
+    if args.parallel == 0 {
+        return invalid("--parallel must be at least 1".into());
+    }
     if args.iterations == Some(0) {
         return invalid("--iterations must be at least 1".into());
     }
@@ -201,6 +204,16 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
         hidden: hidden.clone(),
         rows,
         iterations: args.iterations.unwrap_or(1),
+        options: RunOptions {
+            bail: args.bail,
+            delay: args.delay.map(Duration::from_millis),
+            parallel: args.parallel,
+        },
+    };
+    let planned = if plan.rows.is_empty() {
+        plan.iterations
+    } else {
+        plan.rows.len()
     };
     let adjust = |req: &mut Request| {
         if args.insecure {
@@ -217,7 +230,7 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
     let info = Info::new(&collection, &unit);
 
     if json {
-        crate::emit_json(&json_doc(&info, &iterations, &declared));
+        crate::emit_json(&json_doc(&info, &iterations, planned, &declared));
     } else {
         let color = match args.color {
             ColorArg::Auto => anstream::ColorChoice::Auto,
@@ -225,8 +238,14 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             ColorArg::Never => anstream::ColorChoice::Never,
         };
         let mut out = anstream::AutoStream::new(io::stdout().lock(), color);
-        if let Err(e) = render(&mut out, &info, &iterations, args.verbose, &declared)
-            && e.kind() != io::ErrorKind::BrokenPipe
+        if let Err(e) = render(
+            &mut out,
+            &info,
+            &iterations,
+            planned,
+            args.verbose,
+            &declared,
+        ) && e.kind() != io::ErrorKind::BrokenPipe
         {
             eprintln!("error: {e}");
             return exit::INTERNAL;
@@ -322,7 +341,7 @@ fn lines(it: &Iteration) -> Vec<Line<'_>> {
                 run: &s.run,
             })
             .collect(),
-        UnitRun::Requests(runs) => runs
+        UnitRun::Requests { runs, .. } => runs
             .iter()
             .enumerate()
             .map(|(i, r)| Line {
@@ -339,7 +358,7 @@ fn lines(it: &Iteration) -> Vec<Line<'_>> {
 fn counts(it: &Iteration) -> (usize, usize) {
     match &it.result {
         UnitRun::Flow(f) => (f.total, f.skipped()),
-        UnitRun::Requests(r) => (r.len(), 0),
+        UnitRun::Requests { runs, total } => (*total, total - runs.len()),
     }
 }
 
@@ -386,6 +405,7 @@ fn render(
     out: &mut dyn Write,
     info: &Info,
     iterations: &[Iteration],
+    planned: usize,
     verbose: u8,
     declared: &Scopes,
 ) -> io::Result<()> {
@@ -394,29 +414,30 @@ fn render(
         _ => info.key.clone(),
     };
     writeln!(out, "{}  {DIM}{what}{DIM:#}", info.name)?;
-    let many = iterations.len() > 1;
+    let many = planned > 1;
     for it in iterations {
         if many {
             let row = row_text(it, declared)
                 .map(|r| format!("  {DIM}{r}{DIM:#}"))
                 .unwrap_or_default();
-            writeln!(out, "iteration {}/{}{row}", it.number, iterations.len())?;
+            writeln!(out, "iteration {}/{planned}{row}", it.number)?;
         }
         render_iteration(out, info, it, verbose)?;
     }
     if many {
         let failed = iterations.iter().filter(|i| !i.passed()).count();
-        if failed == 0 {
-            writeln!(
-                out,
-                "{PASS}all {} iterations passed{PASS:#}",
-                iterations.len()
-            )?;
+        let skipped = planned - iterations.len();
+        let skipped = if skipped > 0 {
+            format!(", {skipped} skipped")
+        } else {
+            String::new()
+        };
+        if failed == 0 && skipped.is_empty() {
+            writeln!(out, "{PASS}all {planned} iterations passed{PASS:#}")?;
         } else {
             writeln!(
                 out,
-                "{FAIL}{failed} of {} iterations failed{FAIL:#}",
-                iterations.len()
+                "{FAIL}{failed} of {planned} iterations failed{skipped}{FAIL:#}"
             )?;
         }
     }
@@ -607,7 +628,7 @@ fn step_json(line: &Line<'_>) -> Value {
 }
 
 /// `--format json`.
-fn json_doc(info: &Info, iterations: &[Iteration], declared: &Scopes) -> Value {
+fn json_doc(info: &Info, iterations: &[Iteration], planned: usize, declared: &Scopes) -> Value {
     let its: Vec<Value> = iterations
         .iter()
         .map(|it| {
@@ -640,7 +661,8 @@ fn json_doc(info: &Info, iterations: &[Iteration], declared: &Scopes) -> Value {
     json!({
         "format": 1,
         "target": { "kind": info.kind, "key": info.key, "name": info.name },
-        "passed": iterations.iter().all(Iteration::passed),
+        "passed": iterations.len() == planned && iterations.iter().all(Iteration::passed),
+        "planned_iterations": planned,
         "iterations": its,
     })
 }

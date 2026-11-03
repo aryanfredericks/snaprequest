@@ -98,6 +98,20 @@ pub(crate) struct RunArgs {
     #[arg(long = "var", value_name = "NAME=VALUE")]
     pub vars: Vec<String>,
 
+    /// Stop at the first failing request (flows always stop at a failing step); later
+    /// iterations are skipped.
+    #[arg(long)]
+    pub bail: bool,
+
+    /// Pause between requests (and flow steps), in milliseconds.
+    #[arg(long, value_name = "MS")]
+    pub delay: Option<u64>,
+
+    /// Run up to N iterations (data rows) at the same time. Requests within an iteration
+    /// always run in order.
+    #[arg(long, value_name = "N", default_value = "1")]
+    pub parallel: usize,
+
     /// Show every check and capture; `-vv` also the trace of a failing step with wire bytes.
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
     pub verbose: u8,

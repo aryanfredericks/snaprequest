@@ -12,6 +12,7 @@ authors.workspace = true
 [dependencies]
 snapreq-core.workspace = true
 snapreq-collection.workspace = true
+futures-util.workspace = true
 jsonschema.workspace = true
 regex.workspace = true
 serde.workspace = true

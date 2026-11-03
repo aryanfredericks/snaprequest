@@ -866,3 +866,72 @@ async fn run_a_collection_a_folder_and_data_rows() {
         err(&o)
     );
 }
+
+#[tokio::test]
+async fn run_bail_parallel_and_delay_options() {
+    let addr = server().await;
+    let dir = collection("bail");
+    std::fs::write(
+        dir.join("users/hello.toml"),
+        "url = \"{{base_url}}/hello/{{who}}\"\n[assert.body]\nnot_contains = \"/hello/bob\"\n",
+    )
+    .unwrap();
+    let csv = dir.join("people.csv");
+    std::fs::write(&csv, "who\nbob\nalice\ncarol\n").unwrap();
+    let base = format!("base_url=http://{addr}");
+    let d = dir.to_str().unwrap();
+    let args = [
+        "run",
+        "-c",
+        d,
+        "users",
+        "--data",
+        csv.to_str().unwrap(),
+        "--var",
+        base.as_str(),
+        "--var",
+        "token=t",
+        "--color",
+        "never",
+    ];
+
+    let o = run(&[&args[..], &["--bail"]].concat(), None, None, &[]).await;
+    assert_eq!(o.status.code(), Some(7), "{}", out(&o));
+    let text = out(&o);
+    assert!(text.contains("iteration 1/3  who=bob\n"), "{text}");
+    assert!(!text.contains("iteration 2/3"), "{text}");
+    assert!(text.contains("skipped"), "{text}");
+    assert!(
+        text.ends_with("1 of 3 iterations failed, 2 skipped\n"),
+        "{text}"
+    );
+
+    let o = run(
+        &[
+            &args[..],
+            &["--parallel", "3", "--delay", "1", "--format", "json"],
+        ]
+        .concat(),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    let numbers: Vec<u64> = doc["iterations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, [1, 2, 3]);
+    assert_eq!(doc["planned_iterations"], 3);
+
+    let o = run(&[&args[..], &["--parallel", "0"]].concat(), None, None, &[]).await;
+    assert_eq!(o.status.code(), Some(3));
+    assert!(
+        err(&o).contains("--parallel must be at least 1"),
+        "{}",
+        err(&o)
+    );
+}

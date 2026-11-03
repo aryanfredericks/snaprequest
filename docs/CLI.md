@@ -79,6 +79,10 @@ key or a folder key.
   variable names; RFC 4180 quoting) or a JSON file (array of objects). Every iteration starts without
   captured values. Data values rank below `--var` and step variables and above everything else; values of
   variables declared secret are hidden. `-n` and `--data` cannot be combined.
+- **Run control:** `--bail` stops at the first failing request (the rest of the iteration and later
+  iterations are skipped and counted as such); `--delay MS` pauses between requests and flow steps;
+  `--parallel N` runs up to N iterations at the same time. Requests inside one iteration always run in
+  order, because later ones may use values captured by earlier ones; results are reported in order.
 
 One line per request or step, with failing checks and missing captures underneath; `-v` lists every check
 and capture, `-vv` adds the trace (with wire bytes) of failures.
@@ -92,7 +96,8 @@ Checkout  orders/checkout
 flow failed: 2 of 4 steps passed, 1 skipped
 ```
 
-Options: `-e ENV`, `--var name=value` (wins over everything), `--folder`, `-n N`, `--data FILE`, `-v`/`-vv`,
+Options: `-e ENV`, `--var name=value` (wins over everything), `--folder`, `-n N`, `--data FILE`, `--bail`,
+`--delay MS`, `--parallel N`, `-v`/`-vv`,
 `--format pretty|json`, `--color`, `-k` (no TLS verification), `-t SECONDS` (per request), `--secret VALUE`.
 
 Exit codes: 0 everything passed; otherwise the worst problem: 3 a request could not be built, 5 a network
@@ -104,6 +109,7 @@ failure, 6 a timeout, 7 a check or capture failed.
 { "format": 1,
   "target": { "kind": "flow" | "folder" | "collection", "key": "orders/checkout", "name": "Checkout" },
   "passed": false,
+  "planned_iterations": 1,
   "iterations": [{ "number": 1, "data": { "user": "alice" } | null, "passed": false, "total": 4, "skipped": 1,
     "steps": [{ "number": 1, "title": "auth/login", "key": "auth/login", "passed": true, "attempts": 1,
       "request": { "method": "POST", "url": "…" }, "response": { "status": 200, "duration_ms": 41.2 },
