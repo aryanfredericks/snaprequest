@@ -22,4 +22,6 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
   },
+  // Component tests mount Svelte's browser build.
+  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
 });

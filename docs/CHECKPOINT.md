@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.4, debug view (P7.1–P7.3 done)
+- **Current checkpoint:** P7.5, collections sidebar and environments (P7.1–P7.4 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,7 +25,15 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.4 debug view (waterfall, TLS, wire log, redirect chain), then P7.5–P7.8.
+1. P7.5 collections sidebar (tree, drag and drop), environment switcher and editor, then P7.6–P7.8.
+
+## Web UI notes (P7.4)
+- `model/trace.ts`: `hops()` (same rules as the CLI waterfall: split at redirect/auth challenge, segment =
+  [at − duration, at]; per hop request/response/DNS/connection/reuse/TLS/wire), `describe()`, `daysLeft()`.
+- `DebugView` (Waterfall · Events · Connection/Redirects · TLS · Wire log, hop selector), live from
+  `tab.live` while sending; failures show `error.trace`. Wire capture is HTTP/1.1 only (engine).
+- Component tests run in jsdom (`// @vitest-environment jsdom`, `resolve.conditions: ["browser"]` under
+  Vitest). E2E: the server pools connections across tests, so DNS/connect assertions use `localhost`.
 
 ## Web UI notes (P7.3)
 - `BodyViewer` (Pretty/Raw/Preview/Hex; CodeMirror read-only with search panel, pretty-print up to 8 MiB,
@@ -481,6 +489,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.1 — 2026-11-03 — Web UI setup: Svelte 5 + TS + Vite in `web/`, typed API client generated from the OpenAPI document, UI embedded in the binary (ADR-021), Docker/CI updated. 345 Rust + 3 web tests.
 - P7.2 — 2026-11-03 — Request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth, settings, checks; unsaved edits sent in collection context; save / save as; Playwright e2e tests.
 - P7.3 — 2026-11-03 — Response viewer: pretty/raw/preview/hex, headers, cookies, checks, search in the body, virtualized large bodies.
+- P7.4 — 2026-11-03 — Debug view: live timing waterfall per redirect hop, event list with headers, connection and redirect chain, TLS and certificate chain, raw wire log (text/hex).
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

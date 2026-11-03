@@ -4,6 +4,7 @@
   import BodyViewer from "./BodyViewer.svelte";
   import ChecksView from "./ChecksView.svelte";
   import CookiesTable from "./CookiesTable.svelte";
+  import DebugView from "./DebugView.svelte";
   import HeadersTable from "./HeadersTable.svelte";
   import Tabs from "./Tabs.svelte";
 
@@ -12,8 +13,9 @@
   }
   let { tab }: Props = $props();
 
-  type Section = "body" | "headers" | "cookies" | "checks";
-  let section = $state<Section>("body");
+  type Section = "body" | "headers" | "cookies" | "checks" | "debug";
+  /** What the user picked; shown whenever it is available (only Debug is, while sending). */
+  let chosen = $state<Section>("body");
 
   const result = $derived(tab.result);
   const r = $derived(result?.response ?? null);
@@ -21,14 +23,22 @@
   const assertions = $derived(result?.assertions ?? []);
   const captures = $derived(result?.captures ?? []);
   const failed = $derived(assertions.filter((a) => !a.passed).length);
+  const trace = $derived(tab.running ? tab.live : (r?.trace ?? result?.error?.trace ?? []));
+  const done = $derived(!tab.running && !tab.error);
   const sections = $derived([
-    { id: "body" as const, label: "Body" },
-    { id: "headers" as const, label: "Headers", badge: r?.headers.length ?? 0 },
-    { id: "cookies" as const, label: "Cookies", badge: cookies.length },
-    ...(assertions.length || captures.length
+    ...(r && done
+      ? [
+          { id: "body" as const, label: "Body" },
+          { id: "headers" as const, label: "Headers", badge: r.headers.length },
+          { id: "cookies" as const, label: "Cookies", badge: cookies.length },
+        ]
+      : []),
+    ...(done && (assertions.length || captures.length)
       ? [{ id: "checks" as const, label: "Checks", badge: failed ? `${failed} failed` : `${assertions.length} ✓` }]
       : []),
+    ...(trace.length || tab.running ? [{ id: "debug" as const, label: tab.running ? "Debug (live)" : "Debug" }] : []),
   ]);
+  const section = $derived(sections.some((s) => s.id === chosen) ? chosen : (sections[0]?.id ?? "body"));
   const fileName = $derived.by(() => {
     const ct = header(r?.headers, "content-type") ?? "";
     const ext = ct.includes("json") ? "json" : ct.includes("html") ? "html" : ct.includes("xml") ? "xml" : ct.startsWith("text/") ? "txt" : "bin";
@@ -65,10 +75,14 @@
     <p class="muted">Send the request to see the response.</p>
   {/if}
 
-  {#if r && !tab.running && !tab.error}
-    <Tabs tabs={sections} selected={section} label="Response parts" idPrefix="res-{tab.id}" onselect={(s) => (section = s)} />
+  {#if sections.length}
+    <Tabs tabs={sections} selected={section} label="Response parts" idPrefix="res-{tab.id}" onselect={(s) => (chosen = s)} />
     <div class="panel" role="tabpanel" id="res-{tab.id}-panel" aria-labelledby="res-{tab.id}-tab-{section}">
-      {#if section === "body"}
+      {#if section === "debug"}
+        <DebugView {trace} live={tab.running} idPrefix="dbg-{tab.id}" />
+      {:else if !r}
+        <!-- only Debug without a response -->
+      {:else if section === "body"}
         <BodyViewer body={r.body} contentType={header(r.headers, "content-type")} name={fileName} />
       {:else if section === "headers"}
         <HeadersTable headers={r.headers} label="Response headers" />
