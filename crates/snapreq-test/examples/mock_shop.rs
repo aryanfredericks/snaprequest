@@ -11,6 +11,11 @@
 //! - `POST /orders` (`{"item": "..."}`) → 201 with the order, state `pending`
 //! - `GET /orders/{id}` → the order; it becomes `ready` on the third poll
 //! - `DELETE /orders/{id}` → 204, then the order is gone (404)
+//!
+//! For the web UI's end-to-end tests:
+//! - `GET /catalog?items=N` → a JSON array of `N` products (default 20), with a `Set-Cookie`
+//! - `GET /page` → a small HTML page
+//! - `GET /old-health` → 302 to `/health`
 #![allow(clippy::unwrap_used)] // example code
 
 use std::collections::BTreeMap;
@@ -53,6 +58,7 @@ async fn handle(
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
     let method = req.method().as_str().to_owned();
     let path = req.uri().path().trim_end_matches('/').to_owned();
+    let query = req.uri().query().unwrap_or("").to_owned();
     let authorized = req
         .headers()
         .get("authorization")
@@ -63,6 +69,35 @@ async fn handle(
 
     let resp = match (method.as_str(), path.as_str()) {
         ("GET", "/health") => reply(200, &json!({ "status": "ok" })),
+        ("GET", "/catalog") => {
+            let n: usize = query
+                .split('&')
+                .find_map(|p| p.strip_prefix("items="))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(20);
+            let items: Vec<Value> = (1..=n)
+                .map(|i| json!({ "sku": format!("sku-{i}"), "name": format!("Product {i}"), "price": i * 3 % 100 }))
+                .collect();
+            let mut resp = reply(200, &json!(items));
+            resp.headers_mut().insert(
+                "set-cookie",
+                "visited=yes; Path=/; Max-Age=600; HttpOnly; SameSite=Lax"
+                    .parse()
+                    .unwrap(),
+            );
+            resp
+        }
+        ("GET", "/page") => hyper::Response::builder()
+            .header("content-type", "text/html; charset=utf-8")
+            .body(Full::new(Bytes::from_static(
+                b"<!doctype html><title>Shop</title><h1>Welcome to the shop</h1><p>Preview me.</p>",
+            )))
+            .unwrap(),
+        ("GET", "/old-health") => hyper::Response::builder()
+            .status(302)
+            .header("location", "/health")
+            .body(Full::new(Bytes::new()))
+            .unwrap(),
         ("POST", "/login") => {
             if input["user"] == "demo" && input["password"] == "letmein" {
                 reply(200, &json!({ "token": TOKEN, "expires_in": 3600 }))

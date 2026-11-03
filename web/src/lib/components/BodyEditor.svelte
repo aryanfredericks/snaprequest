@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import type { VariableInfo } from "../api/types";
-  import { formatJson } from "../editor/cm";
+  import { formatJson } from "../model/format";
   import { BODY_TYPES, part, type BodyDraft, type BodyType } from "../model/draft";
   import { CONTENT_TYPES } from "../model/headers";
   import CodeEditor from "./CodeEditor.svelte";

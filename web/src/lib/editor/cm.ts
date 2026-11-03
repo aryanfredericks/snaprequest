@@ -236,12 +236,3 @@ export function createState(o: EditorOptions): EditorState {
   }
   return EditorState.create({ doc: o.doc, extensions: ext });
 }
-
-/** Pretty-prints JSON text (unchanged when it does not parse). */
-export function formatJson(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}

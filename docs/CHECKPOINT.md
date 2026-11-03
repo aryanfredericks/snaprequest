@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.3, response viewer (P7.1–P7.2 done)
+- **Current checkpoint:** P7.4, debug view (P7.1–P7.3 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,7 +25,14 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.3 response viewer (pretty/raw/preview, headers, cookies, search, large bodies), then P7.4–P7.8.
+1. P7.4 debug view (waterfall, TLS, wire log, redirect chain), then P7.5–P7.8.
+
+## Web UI notes (P7.3)
+- `BodyViewer` (Pretty/Raw/Preview/Hex; CodeMirror read-only with search panel, pretty-print up to 8 MiB,
+  HTML preview in `<iframe sandbox="">` srcdoc, images via blob URLs, download/copy), `HexView` on
+  `VirtualList` (fixed-height rows), `HeadersTable`, `CookiesTable` (`parseSetCookie`), `ChecksView`.
+- `model/http.ts` (status texts, phases, sizes, cookies, text detection, hex rows), `model/format.ts`.
+- mock_shop gained `/catalog?items=N` (with Set-Cookie), `/page` (HTML), `/old-health` (302) for e2e.
 
 ## Web UI notes (P7.2)
 - Server: `ExecuteBody.file` (unsaved request file sent in its collection context via
@@ -471,8 +478,9 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
 - P6.6 — 2026-11-03 — Outbound request policy (SSRF): connect-time checks of every address in the engine, server allow/deny lists, private and cloud-metadata blocking (ADR-020). 339 tests total.
 - P6.7 — 2026-11-03 — Docker image (distroless, non-root), docker-compose example, smoke test passing against the image. Phase 6 complete.
-- P7.2 — 2026-11-03 — Request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth, settings, checks; unsaved edits sent in collection context; save / save as; Playwright e2e tests.
 - P7.1 — 2026-11-03 — Web UI setup: Svelte 5 + TS + Vite in `web/`, typed API client generated from the OpenAPI document, UI embedded in the binary (ADR-021), Docker/CI updated. 345 Rust + 3 web tests.
+- P7.2 — 2026-11-03 — Request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth, settings, checks; unsaved edits sent in collection context; save / save as; Playwright e2e tests.
+- P7.3 — 2026-11-03 — Response viewer: pretty/raw/preview/hex, headers, cookies, checks, search in the body, virtualized large bodies.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

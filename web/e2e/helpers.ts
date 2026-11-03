@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
 export const MOCK = process.env.SNAPREQ_E2E_MOCK ?? "http://127.0.0.1:8765";
+export const BASE = process.env.SNAPREQ_E2E_URL ?? "http://127.0.0.1:7881";
 export const WORKSPACE = process.env.SNAPREQ_E2E_WORKSPACE ?? "";
 
 /** Replaces the text of a CodeMirror editor found by its accessible name. */
