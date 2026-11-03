@@ -395,3 +395,132 @@ async fn execute_history_and_runs() {
         400
     );
 }
+
+#[tokio::test]
+async fn websocket_streams_traces_progress_and_results() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let api = Api::start("ws").await;
+    let target = target().await;
+    let base = format!("http://{target}");
+    api.call("POST", "/collections", Some(json!({ "id": "app" })))
+        .await;
+    api.call(
+        "PUT",
+        "/collections/app/environments/test",
+        Some(json!({ "base": base })),
+    )
+    .await;
+    api.call("PUT", "/collections/app/requests/login", Some(json!({ "method": "POST", "url": "{{base}}/login", "capture": { "token": { "json": "$.token", "secret": true } } }))).await;
+    api.call(
+        "PUT",
+        "/collections/app/requests/me",
+        Some(json!({ "url": "{{base}}/me", "auth": { "type": "bearer", "token": "{{token}}" } })),
+    )
+    .await;
+    api.call(
+        "PUT",
+        "/collections/app/flows/session",
+        Some(json!({ "step": [{ "request": "login" }, { "request": "me" }] })),
+    )
+    .await;
+
+    let url = format!("{}/ws", api.base.replacen("http://", "ws://", 1));
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+    // Execute: trace events arrive before the result.
+    let msg = json!({ "type": "execute", "id": "a", "request": { "method": "GET", "url": format!("{base}/x") } });
+    ws.send(Message::Text(msg.to_string().into()))
+        .await
+        .unwrap();
+    let mut events = Vec::new();
+    loop {
+        let v: Value = match ws.next().await.unwrap().unwrap() {
+            Message::Text(t) => serde_json::from_str(&t).unwrap(),
+            _ => continue,
+        };
+        let done = v["type"] == "result" || v["type"] == "error";
+        events.push(v);
+        if done {
+            break;
+        }
+    }
+    let kinds: Vec<String> = events
+        .iter()
+        .map(|e| e["type"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(kinds.last().unwrap(), "result");
+    assert!(
+        kinds.iter().filter(|k| *k == "trace").count() >= 5,
+        "{kinds:?}"
+    );
+    assert_eq!(events[0]["id"], "a");
+    assert_eq!(events[0]["entry"]["event"], "connect_start");
+    assert_eq!(events.last().unwrap()["result"]["response"]["status"], 200);
+
+    // Run: progress per request, the token captured by `login` is hidden in later traces.
+    let msg =
+        json!({ "type": "run", "id": 7, "collection": "app", "target": "session", "env": "test" });
+    ws.send(Message::Text(msg.to_string().into()))
+        .await
+        .unwrap();
+    let mut events = Vec::new();
+    loop {
+        let v: Value = match ws.next().await.unwrap().unwrap() {
+            Message::Text(t) => serde_json::from_str(&t).unwrap(),
+            _ => continue,
+        };
+        let done = v["type"] == "result" || v["type"] == "error";
+        events.push(v);
+        if done {
+            break;
+        }
+    }
+    let progress: Vec<(String, String)> = events
+        .iter()
+        .filter(|e| e["type"] == "progress")
+        .map(|e| {
+            (
+                e["event"].as_str().unwrap().to_owned(),
+                e["key"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        progress,
+        [
+            ("request_started".to_owned(), "login".to_owned()),
+            ("request_done".to_owned(), "login".to_owned()),
+            ("request_started".to_owned(), "me".to_owned()),
+            ("request_done".to_owned(), "me".to_owned()),
+        ]
+    );
+    let all = serde_json::to_string(&events).unwrap();
+    assert!(!all.contains("srv-secret-token-1"), "{all}");
+    assert!(all.contains("Bearer <redacted>"));
+    let result = &events.last().unwrap()["result"];
+    assert_eq!(result["passed"], true, "{result}");
+    assert!(
+        result["id"].as_i64().is_some(),
+        "runs over the socket are stored too"
+    );
+
+    // Bad messages get an error and the connection stays usable.
+    ws.send(Message::Text("[1]".into())).await.unwrap();
+    ws.send(Message::Text(json!({ "type": "dance" }).to_string().into()))
+        .await
+        .unwrap();
+    let mut errors = Vec::new();
+    while errors.len() < 2 {
+        if let Message::Text(t) = ws.next().await.unwrap().unwrap() {
+            errors.push(serde_json::from_str::<Value>(&t).unwrap());
+        }
+    }
+    assert_eq!(errors[0]["error"]["message"], "expected a JSON object");
+    assert!(
+        errors[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown message type `dance`")
+    );
+}

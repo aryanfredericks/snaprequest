@@ -22,7 +22,7 @@ snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
 anstream = "1"
 anstyle = "1"
 anyhow = "1"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "ws"] }
 base64 = "0.22"
 brotli = "9"
 brotli-decompressor = "6"

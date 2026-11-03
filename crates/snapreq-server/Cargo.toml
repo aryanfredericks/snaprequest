@@ -25,6 +25,8 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+futures-util = { workspace = true, features = ["sink"] }
+tokio-tungstenite = "0.29"
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true

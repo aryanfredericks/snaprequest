@@ -96,3 +96,29 @@ Tree items are `{ "type": "request", "key", "name", "method" }` or
 `{ "type": "folder", "key", "name", "items": [...] }`. File JSON uses the same keys as the TOML files
 (`docs/FORMAT.md`), e.g. `{ "name": "Create user", "method": "POST", "url": "{{base}}/users",
 "headers": { "X-Team": "shop" }, "assert": { "status": 201 } }`.
+
+## Live traces and run progress (WebSocket)
+
+`GET /api/v1/ws` upgrades to a WebSocket. The client sends one JSON message per job; jobs on one
+connection run one after another, and `id` (any JSON value, optional) is echoed on every message about
+that job.
+
+```json
+{ "type": "execute", "id": 1, "request": { "method": "GET", "url": "https://api.example.com/users" } }
+{ "type": "execute", "id": 2, "collection": "shop", "key": "users/create", "env": "dev" }
+{ "type": "run", "id": 3, "collection": "shop", "target": "orders/checkout", "env": "staging" }
+```
+
+The bodies are the same as `POST /api/v1/requests/execute` and `POST /api/v1/runs`. While the job
+runs, the server sends:
+
+- `{ "type": "trace", "id", "entry": { "at_ms", "event", ... } }` for every trace event as it happens
+  (redacted with the secrets known at that moment; the final result is authoritative). With
+  `parallel` above 1, events of different iterations interleave.
+- `{ "type": "progress", "id", "event": "request_started", "iteration", "key" }` and
+  `{ "type": "progress", "id", "event": "request_done", "iteration", "key", "passed", "status",
+  "duration_ms" }` for runs.
+
+and finally `{ "type": "result", "id", "result": … }` (the same document as the REST endpoint, and
+stored in history or runs the same way) or `{ "type": "error", "id", "error": { "kind", "message" } }`.
+A malformed message gets an `error` and the connection stays open.

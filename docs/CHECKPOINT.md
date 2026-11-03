@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.4, WebSocket live traces and run progress
+- **Current checkpoint:** P6.5, OpenAPI description
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,11 +25,16 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.4 WebSocket `/api/v1/ws`: client sends `{"type":"execute", ...ExecuteBody}` or `{"type":"run", ...RunBody}`;
-   server streams `{"type":"trace", ...}` / `{"type":"progress", ...}` and a final `{"type":"result"}` or
-   `{"type":"error"}`. Hooks exist: `Client::execute_with(req, TraceSink)`, `Session::{trace, progress}`,
-   `Plan::live`, `api::{execute_body, run_body}` take them.
-2. P6.5 OpenAPI (utoipa), P6.6 SSRF policy (connect-time IP check in core), P6.7 Docker.
+1. P6.5 OpenAPI: `GET /api/v1/openapi.json` describing every endpoint (utoipa derive on handlers + DTOs; core
+   types as free-form objects to keep utoipa out of snapreq-core). Test: the document parses and lists every
+   route of `api::routes()`.
+2. P6.6 SSRF policy (connect-time IP check in core; defaults per ADR-018 mode), P6.7 Docker.
+
+## WebSocket notes (P6.4)
+- `snapreq_server::ws` (`GET /api/v1/ws`): per message `{type: execute|run, id?, ...body}`; events forwarded from an
+  unbounded mpsc channel fed by the `TraceSink` and `ProgressSink`; `select!` stops polling the channel once it is
+  closed (all senders can be dropped before the job finishes; polling a closed channel first starved the job and
+  hung the first version of the test). Results are stored like the REST endpoints.
 
 ## API notes (P6.3)
 - `snapreq_server::api` (`docs/SERVER.md`): execute (raw `Request` or collection key + env + vars, via `Session`),
@@ -416,6 +421,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.1 — 2026-11-03 — `snapreq serve`: axum server with config file / env / flags, graceful shutdown, health and version endpoints, loopback-only by default (ADR-018). 319 tests total.
 - P6.2 — 2026-11-03 — SQLite storage (rusqlite, ADR-019, MSRV 1.89): redacted request history and run results, migrations, retention by age and size. 325 tests total.
 - P6.3 — 2026-11-03 — REST API: execute, history, runs, collections/requests/flows/environments CRUD over the workspace; docs/SERVER.md. 329 tests total.
+- P6.4 — 2026-11-03 — WebSocket endpoint streaming live trace events and run progress, then the stored result. 330 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

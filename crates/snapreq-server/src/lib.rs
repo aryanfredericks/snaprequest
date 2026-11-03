@@ -6,6 +6,7 @@
 pub mod api;
 pub mod config;
 pub mod store;
+pub mod ws;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -63,6 +64,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/api/v1/version", get(version))
+        .route("/api/v1/ws", get(ws::upgrade))
         .nest("/api/v1", api::routes())
         .layer(
             TraceLayer::new_for_http()
