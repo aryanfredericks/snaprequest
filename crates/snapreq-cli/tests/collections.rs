@@ -432,3 +432,28 @@ async fn collection_auth_is_applied_and_command_line_auth_wins() {
         "{text}"
     );
 }
+
+#[tokio::test]
+async fn ls_marks_where_auth_is_set() {
+    let dir = collection("ls-auth");
+    let manifest = dir.join("snapreq.toml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        format!("{text}\n[auth]\ntype = \"bearer\"\ntoken = \"{{{{token}}}}\"\n"),
+    )
+    .unwrap();
+    let health = dir.join("health.toml");
+    let text = std::fs::read_to_string(&health).unwrap();
+    std::fs::write(&health, format!("{text}\n[auth]\ntype = \"none\"\n")).unwrap();
+
+    let o = run(&["ls", dir.to_str().unwrap()], None, None, &[]).await;
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let text = out(&o);
+    assert!(text.starts_with("Basic API  [auth: bearer]\n"), "{text}");
+    assert!(text.contains("── GET     health  [auth: none]\n"), "{text}");
+    assert!(
+        text.contains("── GET     list-users  List users\n"),
+        "{text}"
+    );
+}

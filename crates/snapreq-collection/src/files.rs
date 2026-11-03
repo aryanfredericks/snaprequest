@@ -232,6 +232,31 @@ pub struct OAuth2Spec {
     pub params: KeyValues,
 }
 
+impl AuthSpec {
+    /// A one-line description without secrets, for listings: `bearer`,
+    /// `oauth2 client_credentials`, `api_key header X-API-Key`, `aws_sigv4 eu-west-1/s3`.
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Inherit => "inherit".into(),
+            Self::None => "none".into(),
+            Self::Basic { .. } => "basic".into(),
+            Self::Bearer { .. } => "bearer".into(),
+            Self::Digest { .. } => "digest".into(),
+            Self::ApiKey { name, location, .. } => format!(
+                "api_key {} {name}",
+                match location {
+                    ApiKeyLocation::Header => "header",
+                    ApiKeyLocation::Query => "query",
+                }
+            ),
+            Self::OAuth2(o) => format!("oauth2 {}", o.grant.as_str()),
+            Self::AwsSigV4 {
+                region, service, ..
+            } => format!("aws_sigv4 {region}/{service}"),
+        }
+    }
+}
+
 fn is_header(l: &ApiKeyLocation) -> bool {
     *l == ApiKeyLocation::Header
 }

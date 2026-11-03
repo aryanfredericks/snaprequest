@@ -349,6 +349,32 @@ fn auth_is_inherited_overridden_and_switched_off() {
         }
     );
 
+    // Where each request's auth comes from.
+    let (c, _) = Collection::load(&dir).unwrap();
+    let source = |key: &str| {
+        snapreq_collection::effective_auth(&c, key).map(|(spec, file)| {
+            (
+                spec.summary(),
+                file.strip_prefix(&dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            )
+        })
+    };
+    assert_eq!(
+        source("plain"),
+        Some(("bearer".into(), "snapreq.toml".into()))
+    );
+    assert_eq!(
+        source("keys/inherits"),
+        Some(("api_key query api_key".into(), "keys/folder.toml".into()))
+    );
+    assert_eq!(
+        source("keys/open"),
+        Some(("none".into(), "keys/open.toml".into()))
+    );
+
     // Overridden auth is not interpolated: `token` and `key` may be undefined there.
     assert!(build(&dir, "keys/basic", &[("user", "me")]).is_ok());
     let err = build(&dir, "keys/inherits", &[]).unwrap_err().to_string();

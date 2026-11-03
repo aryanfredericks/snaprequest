@@ -11,7 +11,7 @@ pub mod save;
 pub mod secrets;
 pub mod vars;
 
-pub use build::build_request;
+pub use build::{build_request, effective_auth};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,

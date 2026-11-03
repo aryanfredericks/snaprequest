@@ -42,7 +42,6 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
         file: root.join(COLLECTION_FILE),
         dir: root.clone(),
         headers: &collection.file.headers,
-        auth: collection.file.auth.as_ref(),
         settings: &collection.file.settings,
     }];
     for folder in collection.folders_of(key_path) {
@@ -51,7 +50,6 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
             file: dir.join(FOLDER_FILE),
             dir,
             headers: &folder.file.headers,
-            auth: folder.file.auth.as_ref(),
             settings: &folder.file.settings,
         });
     }
@@ -63,23 +61,16 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     };
     let mut headers = Vec::new();
     let mut settings = RequestSettings::default();
-    // The innermost explicit auth and the file it comes from.
-    let mut auth: Option<(&AuthSpec, PathBuf)> = None;
+    let auth = effective_auth(collection, key_path);
     for layer in layers {
         b.file = layer.file;
         b.base_dir = layer.dir;
         let own = b.key_values("headers", layer.headers)?;
         merge_headers(&mut headers, own);
         settings = b.settings(layer.settings, settings)?;
-        if let Some(spec) = layer.auth.filter(|a| **a != AuthSpec::Inherit) {
-            auth = Some((spec, b.file.clone()));
-        }
     }
 
     let file_path = root.join(&item.path);
-    if let Some(spec) = item.file.auth.as_ref().filter(|a| **a != AuthSpec::Inherit) {
-        auth = Some((spec, file_path.clone()));
-    }
     b.base_dir = file_path.parent().unwrap_or(root).to_path_buf();
     b.file = file_path;
     let mut req = b.request(item, headers, settings)?;
@@ -94,12 +85,33 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     Ok(req)
 }
 
+/// The auth that applies to the request at `key_path` and the file that sets it: the
+/// innermost `[auth]` that is not `inherit`, from the request file up to `snapreq.toml`.
+/// `None` when nothing sets one (no auth).
+pub fn effective_auth<'a>(
+    collection: &'a Collection,
+    key_path: &str,
+) -> Option<(&'a AuthSpec, PathBuf)> {
+    let explicit = |a: &'a Option<AuthSpec>| a.as_ref().filter(|a| **a != AuthSpec::Inherit);
+    let root = &collection.root;
+    if let Some(item) = collection.find(key_path)
+        && let Some(spec) = explicit(&item.file.auth)
+    {
+        return Some((spec, root.join(&item.path)));
+    }
+    for folder in collection.folders_of(key_path).into_iter().rev() {
+        if let Some(spec) = explicit(&folder.file.auth) {
+            return Some((spec, root.join(&folder.path).join(FOLDER_FILE)));
+        }
+    }
+    explicit(&collection.file.auth).map(|spec| (spec, root.join(COLLECTION_FILE)))
+}
+
 /// One level of inheritance: the collection or a folder.
 struct Layer<'a> {
     file: PathBuf,
     dir: PathBuf,
     headers: &'a KeyValues,
-    auth: Option<&'a AuthSpec>,
     settings: &'a Settings,
 }
 

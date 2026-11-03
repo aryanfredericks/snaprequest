@@ -4,7 +4,7 @@
 snapreq send [METHOD] URL [OPTIONS]
 snapreq send REQUEST_FILE.toml [-e ENV] [--var name=value] [OPTIONS]
 snapreq send -c COLLECTION_DIR REQUEST_KEY [-e ENV] [OPTIONS]
-snapreq ls | new | secret …
+snapreq ls | new | secret | tokens …
 ```
 
 `METHOD` defaults to `GET`, or `POST` when a body option is given. A URL without a scheme gets
@@ -47,7 +47,7 @@ overrides the matching setting. Options you do not give leave the files' setting
 Other collection commands:
 
 ```sh
-snapreq ls [DIR]                                   # folders, requests and environments
+snapreq ls [DIR]                                   # folders, requests, environments; `[auth: …]` marks where auth is set
 snapreq new collection my-api [--name "My API"]    # creates my-api/snapreq.toml
 snapreq new request my-api/users/get.toml GET '{{base_url}}/users/{{id}}' --name "Get user"
 snapreq secret set token -e prod [-c my-api]       # prompts for the value (hidden)

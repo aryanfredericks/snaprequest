@@ -154,7 +154,13 @@ pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError
         eprintln!("warning: {w}");
     }
     let io = |e: std::io::Error| ArgError(e.to_string());
-    writeln!(out, "{}", c.file.name).map_err(io)?;
+    writeln!(out, "{}{}", c.file.name, auth_note(c.file.auth.as_ref())).map_err(io)?;
+    /// `  [auth: bearer]` where a file sets its own auth; inheriting items show nothing.
+    fn auth_note(auth: Option<&snapreq_collection::AuthSpec>) -> String {
+        auth.filter(|a| **a != snapreq_collection::AuthSpec::Inherit)
+            .map(|a| format!("  [auth: {}]", a.summary()))
+            .unwrap_or_default()
+    }
     fn walk(items: &[Item], prefix: &str, out: &mut dyn Write) -> std::io::Result<()> {
         for (i, item) in items.iter().enumerate() {
             let last = i + 1 == items.len();
@@ -169,9 +175,10 @@ pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError
                         .unwrap_or_default();
                     writeln!(
                         out,
-                        "{prefix}{branch}{:<7} {}{name}",
+                        "{prefix}{branch}{:<7} {}{name}{}",
                         r.file.method(),
-                        r.key
+                        r.key,
+                        auth_note(r.file.auth.as_ref())
                     )?;
                 }
                 Item::Folder(f) => {
@@ -181,7 +188,12 @@ pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError
                         .as_deref()
                         .map(|n| format!("  {n}"))
                         .unwrap_or_default();
-                    writeln!(out, "{prefix}{branch}{}/{name}", f.key)?;
+                    writeln!(
+                        out,
+                        "{prefix}{branch}{}/{name}{}",
+                        f.key,
+                        auth_note(f.file.auth.as_ref())
+                    )?;
                     let next = format!("{prefix}{}", if last { "    " } else { "│   " });
                     walk(&f.items, &next, out)?;
                 }

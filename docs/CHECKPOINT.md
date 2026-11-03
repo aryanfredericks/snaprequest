@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 4 Authentication helpers, in progress (Phases 0–3 complete)
-- **Current checkpoint:** P4.5, auth inheritance details
+- **Phase:** 5 Assertions and the test runner, starting (Phases 0–4 complete)
+- **Current checkpoint:** P5.1, declarative assertions
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,8 +25,15 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P4.5: `[auth]` inheritance with `inherit`/`none` already landed in P4.1. Remaining: show the effective auth
-   and the file it comes from in `snapreq ls`; then Phase 4 is done and Phase 5 (assertions, runner) starts.
+1. P5.1 declarative assertions in request files (status, header, response time, body contains, JSONPath
+   equals/exists/matches/type, JSON Schema), in `snapreq-test`. Read PLAN Phase 5 and ADR-008 first; decide the
+   TOML shape (probably `[[assert]]` tables or a compact `[assert]` table) and the JSONPath / JSON Schema crates
+   (check licenses with cargo-deny; prefer `serde_json_path` (RFC 9535) and `jsonschema`). Likely an ADR.
+
+## Auth inheritance notes (P4.5)
+- `snapreq_collection::effective_auth(collection, key)` → innermost non-`inherit` `[auth]` and its file;
+  `build_request` uses it. `AuthSpec::summary()` gives a secret-free one-liner.
+- `snapreq ls` appends `  [auth: …]` to the collection, folder or request that sets auth itself.
 
 ## SigV4 notes (P4.4)
 - `Auth::AwsSigV4 { access_key, secret_key, session_token, region, service }` (JSON/TOML `type = "aws_sigv4"`).
@@ -238,7 +245,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
 | 3 Collections & environments | ✅ done |
-| 4 Auth helpers | 🟨 |
+| 4 Auth helpers | ✅ done |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
 | 7 Web UI | ⬜ |
@@ -282,6 +289,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P4.2 — 2026-11-03 — Digest auth (RFC 7616) with challenge retry traced as `auth_challenge`; ADR-014 (md-5). 256 tests total.
 - P4.3 — 2026-11-03 — OAuth 2.0 (client credentials, password, authorization code + PKCE, refresh, 401 retry); `TokenStore`/`AuthorizationPrompt` in core, file cache + `snapreq tokens` in the CLI; ADR-015. 275 tests total.
 - P4.4 — 2026-11-03 — AWS Signature V4 (every hop signed, strict query encoding, S3 payload hash), verified against botocore vectors and a re-verifying mock. 281 tests total.
+- P4.5 — 2026-11-03 — `effective_auth` and auth markers in `snapreq ls`. Phase 4 complete. 282 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -297,4 +305,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
-- **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3 and P4.4 done.
+- **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
