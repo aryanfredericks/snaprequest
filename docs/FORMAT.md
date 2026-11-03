@@ -11,7 +11,8 @@ my-api/
 │   ├── folder.toml           # folder settings and order (optional)
 │   ├── list-users.toml
 │   ├── create-user.toml
-│   └── create-user.json      # a body file used by create-user.toml
+│   ├── create-user.json      # a body file used by create-user.toml
+│   └── onboarding.flow.toml  # a flow (see "Flows")
 └── environments/             # environments (see "Environments")
     ├── dev.toml
     └── prod.toml
@@ -19,8 +20,8 @@ my-api/
 
 ## Rules
 
-- Every `*.toml` file in the collection directory or a folder is a request, except `snapreq.toml`
-  and `folder.toml`. Other files (body files, READMEs) are ignored.
+- Every `*.toml` file in the collection directory or a folder is a request, except `snapreq.toml`,
+  `folder.toml` and flows (`*.flow.toml`). Other files (body files, READMEs) are ignored.
 - Every subdirectory is a folder, except `environments/` at the top level. Folders can be nested.
 - Names starting with `.` are ignored (`.git`, editor files).
 - An item's **key** is its file name without `.toml`, or the folder's directory name. Keys are used
@@ -346,6 +347,60 @@ down to the request file.
 - **Settings:** each key overrides the inherited value; keys that are not set are inherited. Relative
   paths (`ca_cert`, `client_cert`, `client_key`) resolve against the directory of the file that set them.
 - **Variables:** see "Variables" for how `[vars]` tables combine.
+
+## Flows
+
+A **flow** (`*.flow.toml`, anywhere in the collection) is a workflow of chained requests: its steps run
+in order, values captured by one step are available to the next, and the flow stops at the first
+step that fails. Its key is its path without `.flow.toml` (`users/onboarding`).
+
+```toml
+name = "Checkout"                      # optional
+description = "Log in, order, wait for payment, clean up."
+
+[vars]                                 # defaults for every step
+item = "sku-42"
+
+[[step]]
+request = "auth/login"                 # a request of the collection, with its own [assert]/[capture]
+[step.capture]
+token = { json = "$.access_token", secret = true }
+
+[[step]]
+name = "Create order"                  # or an inline request: every request-file key works
+method = "POST"
+url = "{{base_url}}/orders"
+[step.body]
+type = "json"
+content = '{ "item": "{{item}}" }'
+[step.assert]
+status = 201
+[step.capture]
+order_id = "$.id"
+
+[[step]]
+request = "orders/get"                 # uses {{order_id}}
+vars = { expand = "items" }            # variables for this step only
+delay_ms = 200                         # wait before the step
+[step.retry]                           # poll: send again until the checks pass
+max = 20                               # attempts in total (default 10)
+every_ms = 500                         # pause between attempts (default 1000)
+[step.retry.until.json]                # optional; default: the step's own checks
+"$.state" = "paid"
+```
+
+- A step has either `request` (a collection request key) or `url` (an inline request). A `request`
+  step cannot change the request's method, headers, body, auth or settings; use an inline step.
+- Inline steps inherit headers, auth and settings like a request file in the flow's folder
+  (`users/folder.toml` for `users/onboarding.flow.toml`), and resolve relative paths against the flow.
+- Checks: a `request` step runs the request file's `[assert]` and `[capture]` plus the step's own.
+- Variables, highest first: `--var` → step `vars` → values captured earlier in the run → the flow's
+  `[vars]` → the request's usual scopes (request, folders, environment, collection).
+- Retries: a step with `retry` is sent again while the `until` checks (or, without `until`, any of its
+  checks or captures) fail, and also after network errors, up to `max` attempts. A step that cannot
+  be built (an undefined variable, say) is not retried. Write `[step.retry]` as a table when it has
+  `until` (TOML cannot add tables to an inline `retry = { ... }`).
+- A step passes when it got a response, every check passed and every capture found its value.
 
 ## Ordering
 

@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result, Warning};
 use crate::files::{CollectionFile, FORMAT_VERSION, FolderFile, RequestFile};
+use crate::flow::{FLOW_SUFFIX, FlowFile};
 
 /// The collection's root file name.
 pub const COLLECTION_FILE: &str = "snapreq.toml";
@@ -21,6 +22,24 @@ pub struct Collection {
     pub root: PathBuf,
     pub file: CollectionFile,
     pub items: Vec<Item>,
+    /// `*.flow.toml` files anywhere in the collection, sorted by key.
+    pub flows: Vec<FlowItem>,
+}
+
+/// A flow file in the collection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowItem {
+    /// Path without `.flow.toml`, with `/`: `orders/checkout`.
+    pub key: String,
+    /// Relative to the collection root.
+    pub path: PathBuf,
+    pub file: FlowFile,
+}
+
+impl FlowItem {
+    pub fn name(&self) -> &str {
+        self.file.name.as_deref().unwrap_or(&self.key)
+    }
 }
 
 /// A request or a folder, in display order.
@@ -94,8 +113,25 @@ impl Collection {
         }
 
         let mut warnings = Vec::new();
-        let items = load_dir(&root, Path::new(""), &file.order, true, &mut warnings)?;
-        Ok((Self { root, file, items }, warnings))
+        let mut flows = Vec::new();
+        let items = load_dir(
+            &root,
+            Path::new(""),
+            &file.order,
+            true,
+            &mut warnings,
+            &mut flows,
+        )?;
+        flows.sort_by(|a: &FlowItem, b| a.key.cmp(&b.key));
+        Ok((
+            Self {
+                root,
+                file,
+                items,
+                flows,
+            },
+            warnings,
+        ))
     }
 
     /// Every request in display order, with its slash-separated key path
@@ -132,6 +168,15 @@ impl Collection {
     }
 
     /// The folders on the way to a request, outermost first (used for inheritance).
+    /// The flow with this key (`orders/checkout`, with or without `.flow.toml`).
+    pub fn find_flow(&self, key: &str) -> Option<&FlowItem> {
+        let wanted = key
+            .trim_matches('/')
+            .trim_end_matches(FLOW_SUFFIX)
+            .replace('\\', "/");
+        self.flows.iter().find(|f| f.key == wanted)
+    }
+
     pub fn folders_of(&self, key_path: &str) -> Vec<&Folder> {
         let mut out = Vec::new();
         let mut items = &self.items;
@@ -165,6 +210,7 @@ fn load_dir(
     order: &[String],
     top_level: bool,
     warnings: &mut Vec<Warning>,
+    flows: &mut Vec<FlowItem>,
 ) -> Result<Vec<Item>> {
     let dir = root.join(rel);
     let entries = std::fs::read_dir(&dir).map_err(|e| Error::io(&dir, e))?;
@@ -189,13 +235,23 @@ fn load_dir(
             } else {
                 FolderFile::default()
             };
-            let children = load_dir(root, &rel_path, &folder_file.order, false, warnings)?;
+            let children = load_dir(root, &rel_path, &folder_file.order, false, warnings, flows)?;
             items.push(Item::Folder(Folder {
                 key: name,
                 path: rel_path,
                 file: folder_file,
                 items: children,
             }));
+        } else if let Some(stem) = name.strip_suffix(FLOW_SUFFIX) {
+            let path = root.join(&rel_path);
+            let file: FlowFile = read_toml(&path)?;
+            file.validate().map_err(|m| Error::invalid(&path, m))?;
+            let key = rel.join(stem).to_string_lossy().replace('\\', "/");
+            flows.push(FlowItem {
+                key,
+                path: rel_path,
+                file,
+            });
         } else if let Some(key) = name.strip_suffix(".toml") {
             if name == COLLECTION_FILE || name == FOLDER_FILE {
                 continue;

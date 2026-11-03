@@ -32,7 +32,15 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Send(SendArgs),
 
-    /// List the folders and requests of a collection.
+    /// Run a flow (`*.flow.toml`): chained requests with captures and checks.
+    ///
+    /// Examples:
+    ///   snapreq run my-api/orders/checkout.flow.toml -e staging
+    ///   snapreq run -c my-api orders/checkout --var item=sku-1
+    #[command(verbatim_doc_comment)]
+    Run(RunArgs),
+
+    /// List the folders, requests and flows of a collection.
     Ls(LsArgs),
 
     /// Create a collection or a request file.
@@ -54,6 +62,48 @@ pub(crate) enum TokensCommand {
     Clear,
     /// Print the path of the token cache file.
     Path,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RunArgs {
+    /// A flow file, or a flow key (`orders/checkout`) with `-c` or from inside a collection.
+    #[arg(value_name = "FLOW")]
+    pub target: String,
+
+    /// Collection directory; FLOW is then a flow key.
+    #[arg(short = 'c', long = "collection", value_name = "DIR")]
+    pub collection: Option<PathBuf>,
+
+    /// Environment to use (`environments/<NAME>.toml`).
+    #[arg(short = 'e', long = "env", value_name = "NAME")]
+    pub env: Option<String>,
+
+    /// Set a variable for the whole run, `name=value` (wins over flow and step variables).
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    pub vars: Vec<String>,
+
+    /// Show every check and capture; `-vv` also the trace of a failing step with wire bytes.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbose: u8,
+
+    /// Output format.
+    #[arg(long, value_name = "FORMAT", default_value = "pretty")]
+    pub format: FormatArg,
+
+    #[arg(long, value_name = "WHEN", default_value = "auto")]
+    pub color: ColorArg,
+
+    /// Skip TLS certificate verification for every request.
+    #[arg(short = 'k', long)]
+    pub insecure: bool,
+
+    /// Total time limit per request in seconds.
+    #[arg(short = 't', long, value_name = "SECONDS")]
+    pub timeout: Option<f64>,
+
+    /// Value to hide in all output. Repeatable.
+    #[arg(long = "secret", value_name = "VALUE")]
+    pub secrets: Vec<String>,
 }
 
 #[derive(Debug, Args)]

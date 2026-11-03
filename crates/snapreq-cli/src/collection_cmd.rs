@@ -87,7 +87,7 @@ pub(crate) fn resolve_target(args: &SendArgs) -> Result<Target, ArgError> {
     Ok(Target::Url)
 }
 
-fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
+pub(crate) fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
     let mut vars = Variables::default();
     for v in raw {
         let (name, value) = v
@@ -219,6 +219,11 @@ pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError
     let envs = Environment::list(&c).map_err(|e| ArgError(e.to_string()))?;
     if !envs.is_empty() {
         writeln!(out, "\nenvironments: {}", envs.join(", ")).map_err(io)?;
+    }
+    if !c.flows.is_empty() {
+        let flows: Vec<&str> = c.flows.iter().map(|f| f.key.as_str()).collect();
+        let gap = if envs.is_empty() { "\n" } else { "" };
+        writeln!(out, "{gap}flows: {}", flows.join(", ")).map_err(io)?;
     }
     Ok(())
 }

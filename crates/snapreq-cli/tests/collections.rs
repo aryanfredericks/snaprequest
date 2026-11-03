@@ -592,3 +592,158 @@ async fn request_file_captures_are_shown_with_v_and_in_json() {
         err(&o)
     );
 }
+
+#[tokio::test]
+async fn run_executes_a_flow_and_reports_each_step() {
+    let addr = server().await;
+    let dir = collection("flow");
+    std::fs::write(
+        dir.join("users/onboard.flow.toml"),
+        r#"name = "Onboard"
+[vars]
+who = "flow-default"
+
+[[step]]
+name = "First"
+url = "{{base_url}}/first/{{who}}"
+[step.capture]
+path = { regex = '^GET (\S+)' }
+[step.assert]
+status = 200
+
+[[step]]
+request = "users/list-users"
+vars = { section = "from-step" }
+[step.assert.body]
+contains = "x-section: users"
+
+[[step]]
+name = "Uses capture"
+url = "{{base_url}}/echo"
+[step.headers]
+X-Prev = "{{path}}"
+[step.assert.body]
+contains = "{{expect}}"
+"#,
+    )
+    .unwrap();
+    let base = format!("base_url=http://{addr}");
+    let flow = dir.join("users/onboard.flow.toml");
+    let flow = flow.to_str().unwrap();
+
+    let o = run(&["ls", dir.to_str().unwrap()], None, None, &[]).await;
+    assert!(out(&o).contains("flows: users/onboard\n"), "{}", out(&o));
+
+    let o = run(
+        &[
+            "run",
+            flow,
+            "--var",
+            &base,
+            "--var",
+            "who=cli",
+            "--var",
+            "expect=x-prev: /first/cli",
+            "--color",
+            "never",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    let text = out(&o);
+    assert!(text.starts_with("Onboard  users/onboard\n"), "{text}");
+    assert!(
+        text.contains("✓  1  First             GET http://"),
+        "{text}"
+    );
+    assert!(
+        text.contains("✓  2  users/list-users  GET http://"),
+        "{text}"
+    );
+    assert!(text.ends_with("flow passed: 3 of 3 steps\n"), "{text}");
+
+    // A failing check stops the flow: exit 7, the failure is shown, the rest is skipped.
+    let o = run(
+        &[
+            "run",
+            "-c",
+            dir.to_str().unwrap(),
+            "users/onboard",
+            "--var",
+            &base,
+            "--var",
+            "expect=nope",
+            "--color",
+            "never",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(7), "{}", out(&o));
+    let text = out(&o);
+    assert!(text.contains("✗  3  Uses capture"), "{text}");
+    assert!(
+        text.contains("      ✗ body contains \"nope\"  (actual: "),
+        "{text}"
+    );
+    assert!(text.contains("flow failed: 2 of 3 steps passed"), "{text}");
+
+    let o = run(
+        &[
+            "run",
+            flow,
+            "--var",
+            &base,
+            "--var",
+            "expect=nope",
+            "--format",
+            "json",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(doc["passed"], false);
+    assert_eq!(
+        doc["steps"][0]["captures"][0]["value"],
+        "/first/flow-default"
+    );
+    assert_eq!(doc["steps"][2]["assertions"][0]["passed"], false);
+    assert_eq!(doc["steps"][1]["response"]["status"], 200);
+
+    // Undefined variables: the step is not sent, exit 3.
+    let o = run(
+        &["run", flow, "--var", &base, "--color", "never"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(3), "{}", out(&o));
+    assert!(
+        out(&o).contains("variable `expect` is not defined"),
+        "{}",
+        out(&o)
+    );
+
+    let o = run(
+        &["run", "-c", dir.to_str().unwrap(), "nope"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(3));
+    assert!(
+        err(&o).contains("no flow `nope` in the collection (flows: users/onboard)"),
+        "{}",
+        err(&o)
+    );
+}

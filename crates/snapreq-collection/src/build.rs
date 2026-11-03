@@ -10,10 +10,10 @@ use snapreq_core::model::{
 };
 
 use crate::error::{Error, Result};
-use crate::files::{AuthSpec, BodySpec, Settings};
+use crate::files::{AuthSpec, BodySpec, RequestFile, Settings};
 use crate::interp::Interpolator;
 use crate::kv::KeyValues;
-use crate::load::{COLLECTION_FILE, Collection, FOLDER_FILE, RequestItem};
+use crate::load::{COLLECTION_FILE, Collection, FOLDER_FILE};
 use crate::vars::Scopes;
 
 /// Builds the request at `key_path` (for example `users/create-user`) with every
@@ -36,7 +36,25 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
             format!("no request `{key_path}` in the collection"),
         )
     })?;
+    build_file(
+        collection,
+        key_path,
+        &item.file,
+        &collection.root.join(&item.path),
+        scopes,
+    )
+}
 
+/// Builds a request that is not a collection item, such as an inline flow step, as if
+/// it were the file `file_path` at `key_path`: it inherits from the folders of `key_path`
+/// and resolves relative paths against `file_path`'s directory.
+pub fn build_file(
+    collection: &Collection,
+    key_path: &str,
+    file: &RequestFile,
+    file_path: &Path,
+    scopes: &Scopes,
+) -> Result<Request> {
     let root = &collection.root;
     let mut layers: Vec<Layer> = vec![Layer {
         file: root.join(COLLECTION_FILE),
@@ -61,7 +79,7 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     };
     let mut headers = Vec::new();
     let mut settings = RequestSettings::default();
-    let auth = effective_auth(collection, key_path);
+    let auth = effective_auth_with(collection, key_path, file.auth.as_ref(), file_path);
     for layer in layers {
         b.file = layer.file;
         b.base_dir = layer.dir;
@@ -70,10 +88,9 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
         settings = b.settings(layer.settings, settings)?;
     }
 
-    let file_path = root.join(&item.path);
     b.base_dir = file_path.parent().unwrap_or(root).to_path_buf();
-    b.file = file_path;
-    let mut req = b.request(item, headers, settings)?;
+    b.file = file_path.to_path_buf();
+    let mut req = b.request(file, headers, settings)?;
     if let Some((spec, file)) = auth {
         // Only the auth that applies is interpolated, so an overridden one may use
         // variables that are not defined.
@@ -99,14 +116,23 @@ pub fn build_assertions(
             format!("no request `{key_path}` in the collection"),
         )
     })?;
-    let file = collection.root.join(&item.path);
-    let dir = file.parent().unwrap_or(&collection.root).to_path_buf();
-    let mut spec = (*item.file.assert).clone();
+    interpolate_assertions(&item.file.assert, &collection.root.join(&item.path), scopes)
+}
+
+/// Resolves placeholders in `spec` and makes its schema path absolute against the
+/// directory of `file` (which is also named in errors).
+pub fn interpolate_assertions(
+    spec: &crate::assert::AssertSpec,
+    file: &Path,
+    scopes: &Scopes,
+) -> Result<crate::assert::AssertSpec> {
+    let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
+    let mut spec = spec.clone();
     let mut interp = Interpolator::new(scopes);
     spec.try_map_strings(|place, text| {
         interp
             .interpolate(text)
-            .map_err(|e| Error::invalid(&file, format!("{place}: {e}")))
+            .map_err(|e| Error::invalid(file, format!("{place}: {e}")))
     })?;
     if let Some(p) = &spec.schema
         && p.is_relative()
@@ -123,12 +149,26 @@ pub fn effective_auth<'a>(
     collection: &'a Collection,
     key_path: &str,
 ) -> Option<(&'a AuthSpec, PathBuf)> {
+    let item = collection.find(key_path);
+    effective_auth_with(
+        collection,
+        key_path,
+        item.and_then(|i| i.file.auth.as_ref()),
+        &item.map_or_else(PathBuf::new, |i| collection.root.join(&i.path)),
+    )
+}
+
+/// Like [`effective_auth`] for a request whose own `[auth]` is `own`, in `own_path`.
+fn effective_auth_with<'a>(
+    collection: &'a Collection,
+    key_path: &str,
+    own: Option<&'a AuthSpec>,
+    own_path: &Path,
+) -> Option<(&'a AuthSpec, PathBuf)> {
     let explicit = |a: &'a Option<AuthSpec>| a.as_ref().filter(|a| **a != AuthSpec::Inherit);
     let root = &collection.root;
-    if let Some(item) = collection.find(key_path)
-        && let Some(spec) = explicit(&item.file.auth)
-    {
-        return Some((spec, root.join(&item.path)));
+    if let Some(spec) = own.filter(|a| **a != AuthSpec::Inherit) {
+        return Some((spec, own_path.to_path_buf()));
     }
     for folder in collection.folders_of(key_path).into_iter().rev() {
         if let Some(spec) = explicit(&folder.file.auth) {
@@ -197,11 +237,10 @@ impl Builder<'_> {
 
     fn request(
         &mut self,
-        item: &RequestItem,
+        f: &RequestFile,
         mut headers: Vec<KeyValue>,
         settings: RequestSettings,
     ) -> Result<Request> {
-        let f = &item.file;
         let method = http::Method::from_bytes(f.method().as_bytes())
             .map_err(|_| Error::invalid(&self.file, format!("invalid method `{}`", f.method())))?;
         let mut req = Request::new(method, self.text("url", &f.url)?);

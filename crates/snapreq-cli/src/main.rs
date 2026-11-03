@@ -7,6 +7,7 @@ mod collection_cmd;
 mod fixtures;
 mod json_out;
 mod output;
+mod run_cmd;
 mod send;
 #[cfg(test)]
 mod snapshot_tests;
@@ -65,6 +66,7 @@ async fn main() -> ExitCode {
 
     let code = match cli.command {
         Command::Send(args) => run_send(&args).await,
+        Command::Run(args) => run_cmd::run(&args).await,
         Command::Ls(args) => report(collection_cmd::ls(
             args.dir.as_deref(),
             &mut std::io::stdout().lock(),
@@ -117,7 +119,7 @@ fn prompt_target(auth: &mut snapreq_core::model::Auth) -> Option<(&mut String, &
 }
 
 /// The client: tokens cached in the user's cache directory, sign-in through the browser.
-fn client() -> Client {
+pub(crate) fn client() -> Client {
     let token_store: std::sync::Arc<dyn snapreq_core::auth::TokenStore> = match tokens::token_file()
     {
         Some(path) => std::sync::Arc::new(tokens::FileTokenStore::new(path)),
@@ -304,7 +306,7 @@ fn report(result: Result<(), send::ArgError>) -> u8 {
 }
 
 /// Writes one JSON document to stdout.
-fn emit_json(doc: &serde_json::Value) {
+pub(crate) fn emit_json(doc: &serde_json::Value) {
     let mut out = std::io::stdout().lock();
     // Serializing a `Value` cannot fail; a closed pipe is not worth reporting.
     let _ = serde_json::to_writer_pretty(&mut out, doc);

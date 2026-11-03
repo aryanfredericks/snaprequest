@@ -6,6 +6,7 @@ pub mod build;
 pub mod capture;
 pub mod error;
 pub mod files;
+pub mod flow;
 pub mod interp;
 pub mod kv;
 pub mod load;
@@ -14,14 +15,17 @@ pub mod secrets;
 pub mod vars;
 
 pub use assert::{AssertSpec, Check, Checks, JsonType};
-pub use build::{build_assertions, build_request, effective_auth};
+pub use build::{
+    build_assertions, build_file, build_request, effective_auth, interpolate_assertions,
+};
 pub use capture::{CaptureSource, CaptureSpec, Captures};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,
     RequestFile, Settings,
 };
+pub use flow::{FLOW_SUFFIX, FlowFile, RetrySpec, StepSpec};
 pub use kv::KeyValues;
-pub use load::{Collection, Folder, Item, RequestItem};
+pub use load::{Collection, FlowItem, Folder, Item, RequestItem};
 pub use secrets::Secrets;
 pub use vars::{Environment, Scope, Scopes, Variable, Variables};

@@ -142,3 +142,19 @@ sub-tables, `[assert.headers]` and `[assert.json]` (JSONPath keys), mirroring `[
 `jsonschema` without default features (MIT; no HTTP fetching of remote `$ref`s, no extra TLS stack).
 **Consequences:** One key per subject, so two checks on the same JSONPath go in one table. Comparing with an
 object needs `{ equals = { ... } }`. Remote schema references are not fetched (local files only).
+
+## ADR-017: Flows as `*.flow.toml` files inside a collection
+**Status:** Accepted (2026-11-03). Requested by the maintainer ("chain testing", like Hurl, in the CLI and web UI).
+**Context:** Workflow tests chain requests: log in, create, poll, clean up, passing values along. Hurl does this
+with its own text format in one file. SnapRequest already has TOML request files, inheritance, environments,
+secrets, `[assert]` and `[capture]`.
+**Decision:** A flow is a `*.flow.toml` file anywhere inside a collection (so it shares environments, secrets, auth
+and folder inheritance), excluded from the request tree and addressed by key. Ordered `[[step]]` tables either
+reference a collection request (`request = "key"`) or define one inline with the request-file keys; steps add
+`vars`, `[step.capture]`, `[step.assert]`, `delay_ms` and `[step.retry]` (`max`, `every_ms`, optional `until`
+checks). Variable precedence: `--var` > step vars > captured values > flow vars > the request's scopes. Runs stop at
+the first failing step. The engine is `snapreq_test::{Session, run_flow}`, which the CLI (`snapreq run`), the
+server and the web UI (P7.7) share.
+**Consequences:** One format and parser for everything, editable by the web UI with `toml_edit`. Long flows are
+wordier than Hurl files; a Hurl importer (P9.1) eases migration. `request` steps cannot patch the referenced
+request (keeps steps and files from drifting); inline steps cover one-off variations.

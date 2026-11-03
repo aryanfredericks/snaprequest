@@ -169,7 +169,7 @@ impl RequestFile {
     }
 }
 
-fn method<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+pub(crate) fn method<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let raw = String::deserialize(d)?;
     let upper = raw.trim().to_ascii_uppercase();
     http::Method::from_bytes(upper.as_bytes())

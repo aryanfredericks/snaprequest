@@ -4,6 +4,7 @@
 snapreq send [METHOD] URL [OPTIONS]
 snapreq send REQUEST_FILE.toml [-e ENV] [--var name=value] [OPTIONS]
 snapreq send -c COLLECTION_DIR REQUEST_KEY [-e ENV] [OPTIONS]
+snapreq run FLOW [-e ENV] [--var name=value]
 snapreq ls | new | secret | tokens …
 ```
 
@@ -47,7 +48,7 @@ overrides the matching setting. Options you do not give leave the files' setting
 Other collection commands:
 
 ```sh
-snapreq ls [DIR]                                   # folders, requests, environments; `[auth: …]` marks where auth is set
+snapreq ls [DIR]                                   # folders, requests, environments, flows; `[auth: …]` marks where auth is set
 snapreq new collection my-api [--name "My API"]    # creates my-api/snapreq.toml
 snapreq new request my-api/users/get.toml GET '{{base_url}}/users/{{id}}' --name "Get user"
 snapreq secret set token -e prod [-c my-api]       # prompts for the value (hidden)
@@ -57,6 +58,35 @@ echo "$TOKEN" | snapreq secret set token -e prod   # or reads it from stdin
 Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment variables, then
 `.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
 every trace and output, including when given with `--var`.
+
+## Flows (`snapreq run`)
+
+```sh
+snapreq run my-api/orders/checkout.flow.toml -e staging [--var name=value]
+snapreq run -c my-api orders/checkout          # by key
+```
+
+Runs a flow (see `docs/FORMAT.md`, "Flows"): one line per step, with failing checks and missing
+captures underneath; `-v` lists every check and capture, `-vv` adds the trace (with wire bytes) of the
+failing step. The flow stops at the first failing step.
+
+```text
+Checkout  orders/checkout
+✓  1  auth/login    POST https://api.example.com/login → 200  41.2 ms
+✓  2  Create order  POST https://api.example.com/orders → 201  63.0 ms
+✗  3  orders/get    GET https://api.example.com/orders/17 → 200  12.4 ms  20 attempts
+      ✗ json $.state equals "paid"  (actual: "pending")
+flow failed: 2 of 4 steps passed, 1 skipped
+```
+
+Options: `-e ENV`, `--var name=value` (wins over flow and step variables), `-v`/`-vv`,
+`--format pretty|json`, `--color`, `-k` (no TLS verification), `-t SECONDS` (per request),
+`--secret VALUE`. Exit codes: 0 passed; 7 a check or capture failed; 3 a step could not be built;
+5 / 6 network failure / timeout of the last step.
+
+`--format json` prints `{ "format": 1, "flow": { "key", "name" }, "passed", "total", "skipped",
+"steps": [{ "number", "title", "passed", "attempts", "request": { "method", "url" }, "response":
+{ "status", "duration_ms" }, "error", "assertions", "until", "captures" }] }`.
 
 ## Assertions
 

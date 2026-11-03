@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
-- **Current checkpoint:** P5.3, flows (chain testing)
+- **Current checkpoint:** P5.4, `snapreq run` for collections and folders, data-driven runs
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,14 +25,29 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.3 flows (`*.flow.toml`, maintainer request 2026-11-03): ordered `[[step]]`s that reference collection
-   requests (`request = "auth/login"`) or define inline ones (reuse `RequestFile` fields), with step `vars`,
-   `[step.capture]`, `[step.assert]` (same types as request files: `Captures`, `AssertSpec`), `retry = { until,
-   every_ms, max }` (until = an assertion-style check?) and `delay_ms`; stop at the first failing step. Build on
-   `snapreq_test::Session` (add a way to send an inline `RequestFile` with the collection's inheritance). Where
-   flows live: inside a collection (e.g. `flows/` dir, excluded from the request tree) so they share envs and
-   secrets. Needs an ADR for the flow format. CLI: `snapreq run x.flow.toml` can come with P5.4.
-2. P5.4 `snapreq run` (collection | folder | flow) on top of `Session`; unify `snapreq send` on `Session` too.
+1. P5.4: extend `snapreq run` (already runs flows) to a whole collection or a folder (`snapreq run -c DIR
+   [--folder users]` / `snapreq run DIR`): every request in tree order through one `Session` (captures flow
+   between requests), continuing after failures by default (`--bail` comes with P5.5). `--iterations N` and
+   `--data data.csv|json` (one iteration per row, row values as variables, between flow vars and captures?
+   decide; probably at the `overrides` level below `--var`). Consider running every flow of a collection too.
+   Move `snapreq send`'s collection path onto `Session` so both share variable/secret handling.
+2. P5.5 run control (bail, delays, parallel independent requests), P5.6 reporters (JUnit, HTML, JSON with
+   traces), P5.7 CI example.
+
+## Flow notes (P5.3)
+- Format (ADR-017): `snapreq_collection::flow::{FlowFile, StepSpec, RetrySpec, FLOW_SUFFIX}`; loader collects
+  `*.flow.toml` into `Collection::flows` (`FlowItem { key, path, file }`, `find_flow`), never into the request tree.
+  `StepSpec::inline_request()` → `RequestFile`; validation names the step (`step 2 (Create order): ...`).
+- `build_file(collection, key, &RequestFile, path, scopes)` builds non-item requests with the folder inheritance of
+  `key` (inline steps use the flow's key); `interpolate_assertions(spec, file, scopes)`; auth via `effective_auth_with`.
+- `Session`: `overrides` (`--var`) > step vars > `runtime` (captures) > flow vars; `send_spec(SendSpec { target:
+  Request(key) | Inline { key, file, path }, lower_vars, upper_vars, assert, capture, until }, adjust)`;
+  `RequestRun::until` holds retry-until outcomes. `run_flow(session, flow, adjust) -> FlowRun { steps: StepRun {
+  number, title, attempts, run }, total }`: delay, retry (also after network errors, not for invalid steps), stop at
+  the first failing step.
+- CLI `snapreq run FLOW` (`run_cmd.rs`): flow file path or key (`-c DIR` / from inside the collection); pretty output
+  per step (failures always, everything with -v, failing trace with -vv), JSON summary, exit 0/7/3/5/6.
+  `snapreq ls` lists flows. Verified against httpbin.org.
 
 ## Capture notes (P5.2)
 - Format: `snapreq_collection::capture::{Captures, CaptureSpec, CaptureSource}`; `RequestFile::capture`; plain string =
@@ -321,6 +336,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P4.5 — 2026-11-03 — `effective_auth` and auth markers in `snapreq ls`. Phase 4 complete. 282 tests total.
 - P5.1 — 2026-11-03 — Declarative `[assert]` checks (status, duration, body, headers, JSONPath, JSON Schema) evaluated by `snapreq-test`; `snapreq send` reports them, exit code 7; ADR-016. 293 tests total.
 - P5.2 — 2026-11-03 — `[capture]` (JSONPath, header, cookie, regex, status, body; secret captures) and `snapreq_test::Session` passing captured values to later requests. 297 tests total.
+- P5.3 — 2026-11-03 — Flows (`*.flow.toml`): chained steps (collection or inline requests) with captures, checks, delays and retry-until polling; `snapreq run FLOW`; ADR-017. 302 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -337,4 +353,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
-- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1 and P5.2 done.
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1, P5.2 and P5.3 (flows) done.

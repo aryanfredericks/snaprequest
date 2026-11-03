@@ -2,11 +2,13 @@
 
 pub mod assert;
 pub mod capture;
+pub mod flow;
 pub mod session;
 
 pub use assert::{Assertions, Outcome};
 pub use capture::{Captured, Capturer};
-pub use session::{RequestRun, RunOutcome, Session};
+pub use flow::{FlowRun, StepRun, run_flow};
+pub use session::{RequestRun, RunOutcome, SendSpec, Session, Target};
 
 /// Errors produced by `snapreq-test`.
 #[derive(Debug, thiserror::Error)]

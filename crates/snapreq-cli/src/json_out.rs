@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use snapreq_core::{Error, Request, Response};
 
 /// Removes the request's secrets from a URL shown in the output.
-fn scrub(req: &Request, url: &str) -> String {
+pub(crate) fn scrub(req: &Request, url: &str) -> String {
     let mut url = url.to_owned();
     let mut secrets = req.secrets();
     secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
