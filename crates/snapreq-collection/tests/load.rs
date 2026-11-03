@@ -231,3 +231,37 @@ fn saved_files_read_like_hand_written_ones() {
     let back: RequestFile = toml::from_str(&text).unwrap();
     assert_eq!(back, new);
 }
+
+#[test]
+fn put_request_replaces_or_adds_in_memory() {
+    let (mut c, _) = Collection::load(fixture()).unwrap();
+    let keys =
+        |c: &Collection| -> Vec<String> { c.requests().into_iter().map(|(k, _)| k).collect() };
+    let first = keys(&c)[1].clone();
+    c.put_request(&first, RequestFile::new("PATCH", "http://edited"))
+        .unwrap();
+    assert_eq!(c.find(&first).unwrap().file.url, "http://edited");
+
+    let folder = first
+        .rsplit_once('/')
+        .map_or(String::new(), |(f, _)| format!("{f}/"));
+    let new_key = format!("{folder}brand-new");
+    c.put_request(&new_key, RequestFile::new("GET", "http://new"))
+        .unwrap();
+    let added = c.find(&new_key).unwrap();
+    assert_eq!(added.file.url, "http://new");
+    assert_eq!(added.path, Path::new(&format!("{new_key}.toml")));
+
+    assert!(
+        c.put_request("no-such-folder/x", RequestFile::new("GET", "u"))
+            .is_err()
+    );
+    // Nothing is written.
+    assert!(
+        Collection::load(fixture())
+            .unwrap()
+            .0
+            .find(&new_key)
+            .is_none()
+    );
+}

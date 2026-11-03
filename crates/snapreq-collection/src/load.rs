@@ -167,6 +167,46 @@ impl Collection {
             .map(|(_, r)| r)
     }
 
+    /// Replaces the request at `key_path` in memory, or adds it to its (existing) folder,
+    /// so unsaved edits can be built and sent as if they were saved. Nothing is written.
+    pub fn put_request(
+        &mut self,
+        key_path: &str,
+        file: RequestFile,
+    ) -> std::result::Result<(), String> {
+        let wanted = key_path.trim_matches('/').trim_end_matches(".toml");
+        let mut parts: Vec<&str> = wanted.split('/').collect();
+        let name = parts
+            .pop()
+            .filter(|n| !n.is_empty())
+            .ok_or("empty request key")?;
+        let mut items = &mut self.items;
+        let mut dir = PathBuf::new();
+        for part in parts {
+            dir.push(part);
+            items = match items.iter_mut().find_map(|i| match i {
+                Item::Folder(f) if f.key == part => Some(f),
+                _ => None,
+            }) {
+                Some(f) => &mut f.items,
+                None => return Err(format!("no folder `{}`", dir.display())),
+            };
+        }
+        let existing = items.iter_mut().find_map(|i| match i {
+            Item::Request(r) if r.key == name => Some(r),
+            _ => None,
+        });
+        match existing {
+            Some(r) => r.file = file,
+            None => items.push(Item::Request(RequestItem {
+                key: name.to_owned(),
+                path: dir.join(format!("{name}.toml")),
+                file,
+            })),
+        }
+        Ok(())
+    }
+
     /// The folders on the way to a request, outermost first (used for inheritance).
     /// The flow with this key (`orders/checkout`, with or without `.flow.toml`).
     pub fn find_flow(&self, key: &str) -> Option<&FlowItem> {

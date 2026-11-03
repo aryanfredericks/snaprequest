@@ -20,6 +20,9 @@ Thanks for your interest in contributing!
    npm ci
    npm run dev      # UI on http://localhost:5173, API forwarded to `snapreq serve` on :7878
    npm run build    # web/dist, embedded into release builds of snapreq
+   npm test         # unit tests (Vitest)
+   npx playwright install chromium   # once
+   npm run e2e      # end-to-end tests in a headless browser (scripts/web-e2e.sh)
    ```
 
    Without a build, `snapreq serve` shows a page explaining how to build the UI. When an API handler changes,

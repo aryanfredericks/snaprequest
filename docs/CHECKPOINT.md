@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.2, request builder (P7.1 done)
+- **Current checkpoint:** P7.3, response viewer (P7.1–P7.2 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,9 +25,21 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.2 request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth
-   tab. Needs hand-written TS types for the core `Request`/response/trace JSON (they are `Object` in OpenAPI) and a
-   typed WebSocket client for `/api/v1/ws` (live traces).
+1. P7.3 response viewer (pretty/raw/preview, headers, cookies, search, large bodies), then P7.4–P7.8.
+
+## Web UI notes (P7.2)
+- Server: `ExecuteBody.file` (unsaved request file sent in its collection context via
+  `Collection::put_request`, in memory) and `capture_wire`; `GET /collections/{id}/variables?key=&env=`
+  (`Scopes::visible`, secret values never returned).
+- `web/src/lib/api/types.ts`: hand-written core/file/report types; `ws.ts` `JobClient` (one lazy
+  WebSocket, jobs routed by id, pending jobs fail on close, reconnects).
+- `model/draft.ts`: `Draft` ⇄ request file (unedited keys kept in `rest`; rows with the same name grouped)
+  and → core request (scratch requests). `model/vars.ts`: placeholders and their state.
+- `editor/cm.ts`: CodeMirror setup; `{{var}}` decorations (`setVars` effect), hover description,
+  completion. `state/app.svelte.ts`: `AppState` (collections, env per collection in localStorage, tabs,
+  send via WebSocket with `capture_wire`, save / save as); `state/route.ts` hash routes.
+- E2E: `scripts/web-e2e.sh` (mock shop on 8765 + `snapreq serve` on a copy of examples/shop, Playwright
+  Chromium, `web/e2e/`); in check.sh when the Playwright browser is installed; CI job `web-e2e`.
 
 ## Web UI notes (P7.1)
 - `web/`: Svelte 5 + TS 5.9 (openapi-typescript needs TS 5; TS 7 is out) + Vite 8 + Vitest 5. Scripts: `dev`
@@ -459,6 +471,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
 - P6.6 — 2026-11-03 — Outbound request policy (SSRF): connect-time checks of every address in the engine, server allow/deny lists, private and cloud-metadata blocking (ADR-020). 339 tests total.
 - P6.7 — 2026-11-03 — Docker image (distroless, non-root), docker-compose example, smoke test passing against the image. Phase 6 complete.
+- P7.2 — 2026-11-03 — Request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth, settings, checks; unsaved edits sent in collection context; save / save as; Playwright e2e tests.
 - P7.1 — 2026-11-03 — Web UI setup: Svelte 5 + TS + Vite in `web/`, typed API client generated from the OpenAPI document, UI embedded in the binary (ADR-021), Docker/CI updated. 345 Rust + 3 web tests.
 
 ## Session log

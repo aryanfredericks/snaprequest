@@ -84,6 +84,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/{id}/variables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The variables a request sees, with the scope each comes from (for highlighting
+         *     placeholders in the UI).
+         */
+        get: operations["list_variables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/history": {
         parameters: {
             query?: never;
@@ -215,9 +235,19 @@ export interface components {
             message: string;
         };
         ExecuteBody: {
+            /**
+             * @description Record the raw bytes sent and received (a `wire` trace event), whatever the
+             *     request's own settings say.
+             */
+            capture_wire?: boolean;
             /** @description Or a collection request: collection id and request key. */
             collection?: string | null;
             env?: string | null;
+            /**
+             * @description With `collection` and `key`: unsaved contents of the request file (as JSON), sent
+             *     instead of the saved file, with the same inheritance and variables. Not written.
+             */
+            file?: Record<string, unknown> | null;
             key?: string | null;
             /** @description A complete request (the core JSON model). */
             request?: Record<string, unknown> | null;
@@ -972,6 +1002,61 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Does not validate */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_variables: {
+        parameters: {
+            query?: {
+                /** @description Request (or flow) key whose scopes are listed; absent lists collection-level ones. */
+                key?: string;
+                /** @description Environment name. */
+                env?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Collection id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `{ variables: [{ name, value, secret, has_value, scope }] }`; secret values are never returned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
             };
             /** @description Bad request */
             400: {

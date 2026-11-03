@@ -95,6 +95,14 @@ requests also report their `[assert]` results and `[capture]` values (secret one
 A request that cannot be built (undefined variable, bad URL) is a 422. Every execution is stored in
 the history.
 
+Two optional fields:
+
+- `"file": { … }` (with `collection` and `key`): unsaved contents of the request file, sent instead of
+  the saved one with the same inheritance, environment and variables (the web UI sends edits this
+  way). `key` may also name a new request in an existing folder. Nothing is written.
+- `"capture_wire": true`: record the raw bytes sent and received (a `wire` trace event), whatever the
+  request's settings say. Credentials in the wire log are redacted like everywhere else.
+
 ## History
 
 | Method and path | Result |
@@ -138,6 +146,7 @@ A summary is `{ "id", "created_at" (Unix ms), "method", "url", "status", "durati
 | `DELETE /api/v1/collections/{id}/requests/{key}` | | 204 |
 | `GET` / `PUT` / `DELETE /api/v1/collections/{id}/flows/{key}` | a flow file as JSON | `{key}.flow.toml` |
 | `GET` / `PUT` / `DELETE /api/v1/collections/{id}/environments/{name}` | `{ "var": "value", "token": { "secret": true } }` | `environments/{name}.toml`; secret values are never returned or written |
+| `GET /api/v1/collections/{id}/variables?key=&env=` | | `{ "variables": [{ "name", "value", "secret", "has_value", "scope" }] }`: the variables the request at `key` sees with `env`, winning definition first-seen; `value` is `null` for secrets |
 
 Tree items are `{ "type": "request", "key", "name", "method" }` or
 `{ "type": "folder", "key", "name", "items": [...] }`. File JSON uses the same keys as the TOML files

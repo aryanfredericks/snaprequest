@@ -99,6 +99,7 @@ pub fn router() -> OpenApiRouter<Arc<AppState>> {
             put_environment,
             delete_environment
         ))
+        .routes(routes!(list_variables))
 }
 
 /// `{ "error": { "kind", "message" } }`
@@ -203,10 +204,18 @@ pub struct ExecuteBody {
     /// Or a collection request: collection id and request key.
     pub collection: Option<String>,
     pub key: Option<String>,
+    /// With `collection` and `key`: unsaved contents of the request file (as JSON), sent
+    /// instead of the saved file, with the same inheritance and variables. Not written.
+    #[schema(value_type = Option<Object>)]
+    pub file: Option<RequestFile>,
     pub env: Option<String>,
     /// Variables for this execution (highest precedence).
     #[serde(default)]
     pub vars: BTreeMap<String, String>,
+    /// Record the raw bytes sent and received (a `wire` trace event), whatever the
+    /// request's own settings say.
+    #[serde(default)]
+    pub capture_wire: bool,
 }
 
 fn vars_of(map: &BTreeMap<String, String>) -> Variables {
@@ -269,12 +278,13 @@ pub(crate) async fn execute_body(
     trace: Option<snapreq_core::client::TraceSink>,
 ) -> ApiResult<Value> {
     match (body.request, body.collection, body.key) {
-        (Some(req), None, None) => {
-            if body.env.is_some() || !body.vars.is_empty() {
+        (Some(mut req), None, None) => {
+            if body.env.is_some() || !body.vars.is_empty() || body.file.is_some() {
                 return Err(ApiError::bad_request(
-                    "`env` and `vars` only apply to collection requests",
+                    "`env`, `vars` and `file` only apply to collection requests",
                 ));
             }
+            req.settings.capture_wire |= body.capture_wire;
             req.effective_url()
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
             let result = state.client.execute_with(&req, trace).await;
@@ -288,7 +298,14 @@ pub(crate) async fn execute_body(
             })
         }
         (None, Some(cid), Some(key)) => {
-            let collection = load_collection(state, &cid)?;
+            let mut collection = load_collection(state, &cid)?;
+            if let Some(file) = body.file {
+                file.validate().map_err(ApiError::invalid)?;
+                key_path(&key, ".toml")?;
+                collection
+                    .put_request(&key, file)
+                    .map_err(ApiError::not_found)?;
+            }
             if collection.find(&key).is_none() {
                 return Err(ApiError::not_found(format!(
                     "no request `{key}` in collection `{cid}`"
@@ -311,7 +328,10 @@ pub(crate) async fn execute_body(
             session.overrides = vars_of(&body.vars);
             hide_declared(&mut session, &key);
             session.trace = trace;
-            let run = session.send(&key, |_| {}).await;
+            let wire = body.capture_wire;
+            let run = session
+                .send(&key, |r| r.settings.capture_wire |= wire)
+                .await;
             if let RunOutcome::Invalid(why) = &run.outcome {
                 return Err(ApiError::invalid(why.clone()));
             }
@@ -849,4 +869,56 @@ mod tests {
         assert!(valid_segment("my-api_v2.1"));
         assert!(!valid_segment(".."));
     }
+}
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+struct VariablesParams {
+    /// Request (or flow) key whose scopes are listed; absent lists collection-level ones.
+    key: Option<String>,
+    /// Environment name.
+    env: Option<String>,
+}
+
+#[utoipa::path(get, path = "/collections/{id}/variables", tag = "collections", params(("id" = String, Path, description = "Collection id"), VariablesParams), responses((status = 200, description = "`{ variables: [{ name, value, secret, has_value, scope }] }`; secret values are never returned", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
+/// The variables a request sees, with the scope each comes from (for highlighting
+/// placeholders in the UI).
+async fn list_variables(
+    State(state): Shared,
+    UrlPath(id): UrlPath<String>,
+    Query(p): Query<VariablesParams>,
+) -> ApiResult<Json<Value>> {
+    let c = load_collection(&state, &id)?;
+    let environment = p
+        .env
+        .as_deref()
+        .map(|e| Environment::load(&c, e))
+        .transpose()
+        .map_err(|e| ApiError::not_found(e.to_string()))?;
+    let secrets = Secrets::load(&c, p.env.as_deref(), std::env::vars())
+        .map_err(|e| ApiError::invalid(e.to_string()))?;
+    let key = p.key.as_deref().unwrap_or("").trim_matches('/');
+    let mut scopes = snapreq_collection::Scopes::for_request(
+        &c,
+        key,
+        environment.as_ref(),
+        &Variables::default(),
+        &Variables::default(),
+    );
+    secrets.fill(&mut scopes);
+    let variables: Vec<Value> = scopes
+        .visible()
+        .into_iter()
+        .map(|(v, scope)| {
+            json!({
+                "name": v.name,
+                "value": if v.secret { None } else { v.value.as_deref() },
+                "secret": v.secret,
+                "has_value": v.value.is_some(),
+                "scope": scope.to_string(),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "variables": variables })))
 }

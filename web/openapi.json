@@ -913,6 +913,86 @@
         }
       }
     },
+    "/api/v1/collections/{id}/variables": {
+      "get": {
+        "tags": [
+          "collections"
+        ],
+        "summary": "The variables a request sees, with the scope each comes from (for highlighting\nplaceholders in the UI).",
+        "operationId": "list_variables",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Collection id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "description": "Request (or flow) key whose scopes are listed; absent lists collection-level ones.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "description": "Environment name.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{ variables: [{ name, value, secret, has_value, scope }] }`; secret values are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Does not validate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/history": {
       "get": {
         "tags": [
@@ -1332,6 +1412,10 @@
       "ExecuteBody": {
         "type": "object",
         "properties": {
+          "capture_wire": {
+            "type": "boolean",
+            "description": "Record the raw bytes sent and received (a `wire` trace event), whatever the\nrequest's own settings say."
+          },
           "collection": {
             "type": [
               "string",
@@ -1344,6 +1428,13 @@
               "string",
               "null"
             ]
+          },
+          "file": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "With `collection` and `key`: unsaved contents of the request file (as JSON), sent\ninstead of the saved file, with the same inheritance and variables. Not written."
           },
           "key": {
             "type": [

@@ -559,3 +559,107 @@ async fn the_outbound_policy_blocks_executed_requests() {
             .contains("blocked by the outbound request policy")
     );
 }
+
+#[tokio::test]
+async fn unsaved_edits_wire_capture_and_variables() {
+    let api = Api::start("unsaved").await;
+    let target = target().await;
+    let base = format!("http://{target}");
+    api.call("POST", "/collections", Some(json!({ "id": "app" })))
+        .await;
+    api.call(
+        "PUT",
+        "/collections/app",
+        Some(json!({ "format": 1, "name": "App", "vars": { "base": "http://unused", "token": { "secret": true } }, "headers": { "X-From": "collection" } })),
+    )
+    .await;
+    api.call(
+        "PUT",
+        "/collections/app/environments/dev",
+        Some(json!({ "base": base })),
+    )
+    .await;
+    api.call(
+        "PUT",
+        "/collections/app/requests/users/list",
+        Some(json!({ "url": "{{base}}/saved" })),
+    )
+    .await;
+
+    // The edited file is sent with the collection's headers and the environment.
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "collection": "app", "key": "users/list", "env": "dev", "capture_wire": true,
+                         "file": { "method": "PUT", "url": "{{base}}/edited/{{who}}", "vars": { "who": "me" } } })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    let body = doc["response"]["body"]["data"].as_str().unwrap();
+    assert!(body.starts_with("PUT /edited/me"), "{body}");
+    assert!(body.contains("x-from: collection"), "{body}");
+    let trace = doc["response"]["trace"].as_array().unwrap();
+    assert!(trace.iter().any(|e| e["event"] == "wire"), "no wire event");
+    // Nothing was saved.
+    let (_, saved) = api
+        .call("GET", "/collections/app/requests/users/list", None)
+        .await;
+    assert_eq!(saved["file"]["url"], "{{base}}/saved");
+
+    // A new, unsaved request in an existing folder; invalid files and folders are refused.
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "collection": "app", "key": "users/new", "env": "dev", "file": { "url": "{{base}}/new" } })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    assert_eq!(doc["response"]["status"], 200);
+    let (status, _) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "collection": "app", "key": "nope/new", "file": { "url": "{{base}}/new" } })),
+        )
+        .await;
+    assert_eq!(status, 404);
+    let (status, _) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "collection": "app", "key": "users/list", "file": { "url": "" } })),
+        )
+        .await;
+    assert_eq!(status, 422);
+    let (status, _) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "request": { "method": "GET", "url": base }, "file": { "url": "x" } })),
+        )
+        .await;
+    assert_eq!(status, 400);
+
+    // Variables as the request sees them; secret values are never returned.
+    let (status, doc) = api
+        .call(
+            "GET",
+            "/collections/app/variables?key=users/list&env=dev",
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    let vars = doc["variables"].as_array().unwrap();
+    let base_var = vars.iter().find(|v| v["name"] == "base").unwrap();
+    assert_eq!(base_var["value"], base.as_str());
+    assert_eq!(base_var["scope"], "environment `dev`");
+    let token = vars.iter().find(|v| v["name"] == "token").unwrap();
+    assert_eq!(token["secret"], true);
+    assert_eq!(token["value"], Value::Null);
+    let (status, _) = api
+        .call("GET", "/collections/app/variables?env=nope", None)
+        .await;
+    assert_eq!(status, 404);
+}
