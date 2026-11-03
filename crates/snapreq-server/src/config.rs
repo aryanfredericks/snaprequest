@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::outbound::{OutboundConfig, OutboundPolicy};
 use crate::store::Retention;
 use crate::{Error, Result};
 
@@ -29,6 +30,8 @@ pub struct Config {
     pub allow_remote: bool,
     /// How long and how much history and run results to keep.
     pub retention: Retention,
+    /// Which destinations executed requests may reach.
+    pub outbound: OutboundPolicy,
 }
 
 /// `[history]` in the config file; `0` means no limit.
@@ -49,6 +52,8 @@ struct FileConfig {
     allow_remote: Option<bool>,
     #[serde(default)]
     history: HistoryConfig,
+    #[serde(default)]
+    outbound: OutboundConfig,
 }
 
 /// Values given on the command line; `None` means "not given".
@@ -139,7 +144,10 @@ impl Config {
             .or_else(|| env("SNAPREQ_WORKSPACE").map(PathBuf::from))
             .or(file.workspace.clone())
             .unwrap_or_else(|| data_dir.join("workspace"));
+        let outbound =
+            OutboundPolicy::from_config(&file.outbound, allow_remote).map_err(Error::Config)?;
         let config = Self {
+            outbound,
             bind,
             workspace,
             data_dir,
@@ -300,6 +308,42 @@ mod tests {
             ..Overrides::default()
         };
         assert!(Config::load(&v6, env(&[]), Some("/d".into())).is_ok());
+    }
+
+    #[test]
+    fn outbound_policy_from_the_file() {
+        let dir = temp("outbound");
+        let c = Config::load(&Overrides::default(), env(&[]), Some(dir.clone())).unwrap();
+        assert!(
+            c.outbound.is_open(),
+            "a local server restricts nothing by default"
+        );
+        let remote = Overrides {
+            bind: Some("0.0.0.0:7878".into()),
+            allow_remote: true,
+            ..Overrides::default()
+        };
+        assert!(
+            Config::load(&remote, env(&[]), Some(dir.clone()))
+                .unwrap()
+                .outbound
+                .block_metadata
+        );
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[outbound]\ndeny = [\"10.0.0.0/8\"]\nblock_private = true\nblock_metadata = false\n",
+        )
+        .unwrap();
+        let c = Config::load(&remote, env(&[]), Some(dir.clone())).unwrap();
+        assert_eq!(c.outbound.deny.len(), 1);
+        assert!(c.outbound.block_private && !c.outbound.block_metadata);
+        std::fs::write(dir.join(CONFIG_FILE), "[outbound]\nallow = [\"x/99\"]\n").unwrap();
+        assert!(
+            Config::load(&Overrides::default(), env(&[]), Some(dir))
+                .unwrap_err()
+                .to_string()
+                .contains("outbound.allow")
+        );
     }
 
     #[test]

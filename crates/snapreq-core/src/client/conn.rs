@@ -224,6 +224,7 @@ pub(crate) async fn connect(
     settings: &RequestSettings,
     tls: Option<&RequestTls>,
     proxy: Option<&Proxy>,
+    policy: Option<&dyn super::ConnectPolicy>,
     rec: &mut Recorder,
 ) -> Result<Conn> {
     let port = url.port_or_known_default().unwrap_or(80);
@@ -234,14 +235,37 @@ pub(crate) async fn connect(
     let mut forward_proxy = None;
     let (mut tcp, remote) = match proxy {
         None => {
+            let host = url.host_str().unwrap_or_default();
             let addrs = addresses(target.clone(), port, settings, rec).await?;
-            happy_eyeballs(&addrs, url.host_str().unwrap_or_default(), port, rec).await?
+            let addrs = allowed(policy, host, addrs, rec)?;
+            happy_eyeballs(&addrs, host, port, rec).await?
         }
         Some(proxy) => {
             rec.record(TraceEvent::Info {
                 message: format!("using proxy {} (from {})", proxy.display(), proxy.source),
             });
             let addrs = addresses(proxy.host(), proxy.port, settings, rec).await?;
+            let addrs = allowed(policy, &proxy.host, addrs, rec)?;
+            // The target is reached through the proxy; check what is known about it.
+            if let Some(policy) = policy
+                && !matches!(proxy.kind, ProxyKind::Socks5 if matches!(target, Host::Domain(_)))
+            {
+                let host = url.host_str().unwrap_or_default();
+                let ip = match &target {
+                    Host::Ipv4(v4) => Some((*v4).into()),
+                    Host::Ipv6(v6) => Some((*v6).into()),
+                    Host::Domain(_) => None,
+                };
+                rec.phase = Phase::Connect;
+                policy
+                    .check(host.trim_matches(['[', ']']), ip)
+                    .map_err(|why| {
+                        rec.fail(
+                            format!("blocked by the outbound request policy: {host}: {why}"),
+                            false,
+                        )
+                    })?;
+            }
             happy_eyeballs(&addrs, &proxy.host, proxy.port, rec).await?
         }
     };
@@ -272,7 +296,9 @@ pub(crate) async fn connect(
                     (ProxyKind::Socks5h, Host::Domain(d)) => proxy::SocksTarget::Domain(d),
                     (_, Host::Domain(_)) => {
                         // socks5://: resolve locally, like curl.
-                        ip = addresses(target.clone(), port, settings, rec).await?[0].ip();
+                        let host = url.host_str().unwrap_or_default();
+                        let found = addresses(target.clone(), port, settings, rec).await?;
+                        ip = allowed(policy, host, found, rec)?[0].ip();
                         rec.phase = Phase::Connect;
                         proxy::SocksTarget::Ip(ip)
                     }
@@ -345,6 +371,44 @@ pub(crate) async fn connect(
         remote,
         forward_proxy,
     })
+}
+
+/// The addresses `policy` allows. Blocked ones are noted in the trace; if none is left,
+/// the request fails with the reason.
+fn allowed(
+    policy: Option<&dyn super::ConnectPolicy>,
+    host: &str,
+    addrs: Vec<SocketAddr>,
+    rec: &mut Recorder,
+) -> Result<Vec<SocketAddr>> {
+    let Some(policy) = policy else {
+        return Ok(addrs);
+    };
+    let host = host.trim_matches(['[', ']']);
+    let mut kept = Vec::new();
+    let mut reasons = Vec::new();
+    for a in addrs {
+        match policy.check(host, Some(a.ip())) {
+            Ok(()) => kept.push(a),
+            Err(why) => reasons.push(format!("{}: {why}", a.ip())),
+        }
+    }
+    if kept.is_empty() {
+        rec.phase = Phase::Connect;
+        return Err(rec.fail(
+            format!(
+                "blocked by the outbound request policy: {}",
+                reasons.join("; ")
+            ),
+            false,
+        ));
+    }
+    if !reasons.is_empty() {
+        rec.record(TraceEvent::Info {
+            message: format!("outbound request policy skipped {}", reasons.join("; ")),
+        });
+    }
+    Ok(kept)
 }
 
 /// Addresses for `host`: pinned addresses, a DNS lookup, or the literal IP.

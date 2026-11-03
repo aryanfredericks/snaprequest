@@ -10,7 +10,8 @@ pub mod model;
 mod serde_util;
 
 pub use client::{
-    Certificate, Client, ClientConfig, DEFAULT_SENSITIVE_HEADERS, StoredCookie, TraceSink,
+    Certificate, Client, ClientConfig, ConnectPolicy, DEFAULT_SENSITIVE_HEADERS, StoredCookie,
+    TraceSink,
 };
 pub use error::{Error, ExecutionError, Result};
 pub use model::{Body, Request, Response};

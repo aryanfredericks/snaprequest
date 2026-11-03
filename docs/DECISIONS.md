@@ -183,3 +183,16 @@ policy of ADR-012 allows.
 **Consequences:** Fewer dependencies and no compile-time database checks; queries are covered by tests instead.
 A C compiler is needed to build (available on all CI runners). Postgres, if ever needed, goes behind the `Store`
 interface.
+
+## ADR-020: The outbound request policy is checked at connect time, in the engine
+**Status:** Accepted (2026-11-03)
+**Context:** A server that executes requests for its users is an SSRF vector: users can reach internal services
+and cloud metadata endpoints. Checking URLs before sending is not enough: a public name can resolve to an internal
+address (or change between check and connect, DNS rebinding), redirects lead elsewhere, and hosts can be pinned.
+**Decision:** `snapreq-core` exposes a `ConnectPolicy` trait on `ClientConfig`; the engine calls it for every
+resolved address right before connecting (direct connections, proxies, locally resolved SOCKS5 targets) and for
+proxy-resolved targets by name. Blocked addresses are skipped, and the request fails only if nothing is left.
+The server implements it as `OutboundPolicy` from `[outbound]` (deny, allow, `block_private`, `block_metadata`),
+with `block_metadata` on by default whenever `allow_remote` is on (PLAN P6.6).
+**Consequences:** No check can be bypassed by DNS or redirects. The CLI keeps an open policy (it runs as its user).
+Requests through an HTTP or SOCKS5h proxy rely on name rules for the target, because the proxy resolves it.

@@ -75,6 +75,7 @@ async fn the_document_is_served() {
         workspace: root.join("workspace"),
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
+        outbound: Default::default(),
     };
     let server = snapreq_server::Server::bind(config).await.unwrap();
     let addr = server.local_addr().unwrap();

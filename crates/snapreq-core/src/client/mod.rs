@@ -37,6 +37,17 @@ use crate::{Error, Result};
 /// secrets known at that moment; the trace in the final response or error is authoritative.
 pub type TraceSink = Arc<dyn Fn(&crate::model::TraceEntry) + Send + Sync>;
 
+/// Decides which destinations the client may connect to (an outbound request policy, for
+/// servers that send requests on behalf of others).
+///
+/// `check` is called for every address before connecting, with the host name from the URL
+/// (or the proxy) and the resolved IP. When a proxy resolves the target itself, the target
+/// is checked with `ip = None` (an IP literal host is passed as the IP). Returning `Err`
+/// with a reason blocks that address.
+pub trait ConnectPolicy: std::fmt::Debug + Send + Sync {
+    fn check(&self, host: &str, ip: Option<std::net::IpAddr>) -> std::result::Result<(), String>;
+}
+
 /// Client-wide configuration. Per-request options live in
 /// [`RequestSettings`](crate::model::RequestSettings).
 #[derive(Debug, Clone)]
@@ -59,6 +70,8 @@ pub struct ClientConfig {
     /// Shows the authorization URL of the OAuth 2.0 authorization code grant to the user.
     /// Without one, that grant fails with an explanation.
     pub authorization_prompt: Option<Arc<dyn crate::auth::AuthorizationPrompt>>,
+    /// Which destinations may be reached. Default: any.
+    pub connect_policy: Option<Arc<dyn ConnectPolicy>>,
 }
 
 impl Default for ClientConfig {
@@ -75,6 +88,7 @@ impl Default for ClientConfig {
             wire_capture_limit: 1024 * 1024,
             token_store: Arc::new(crate::auth::MemoryTokenStore::default()),
             authorization_prompt: None,
+            connect_policy: None,
         }
     }
 }
@@ -447,6 +461,10 @@ impl Client {
         None
     }
 
+    fn policy(&self) -> Option<&dyn ConnectPolicy> {
+        self.inner.config.connect_policy.as_deref()
+    }
+
     async fn connect(
         &self,
         url: &url::Url,
@@ -459,7 +477,7 @@ impl Client {
             Some(limit) => {
                 match tokio::time::timeout(
                     limit,
-                    conn::connect(url, &req.settings, tls, proxy, rec),
+                    conn::connect(url, &req.settings, tls, proxy, self.policy(), rec),
                 )
                 .await
                 {
@@ -470,7 +488,7 @@ impl Client {
                     )),
                 }
             }
-            None => conn::connect(url, &req.settings, tls, proxy, rec).await,
+            None => conn::connect(url, &req.settings, tls, proxy, self.policy(), rec).await,
         }
     }
 

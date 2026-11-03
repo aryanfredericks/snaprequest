@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod config;
+pub mod outbound;
 pub mod store;
 pub mod ws;
 
@@ -193,6 +194,17 @@ impl Server {
             source,
         })?;
         let store = store::Store::open(&config.data_dir.join(store::DB_FILE)).await?;
+        let policy = config.outbound.clone();
+        if policy.is_open() && !config.bind.ip().is_loopback() {
+            tracing::warn!(
+                "no outbound request policy: requests may reach any address this machine can"
+            );
+        }
+        let client = snapreq_core::Client::new(snapreq_core::ClientConfig {
+            connect_policy: (!policy.is_open())
+                .then(|| Arc::new(policy) as Arc<dyn snapreq_core::ConnectPolicy>),
+            ..snapreq_core::ClientConfig::default()
+        })?;
         let pruned = store.prune(config.retention).await?;
         if pruned != store::Pruned::default() {
             tracing::info!(
@@ -212,7 +224,7 @@ impl Server {
             state: Arc::new(AppState {
                 config,
                 store,
-                client: snapreq_core::Client::default(),
+                client,
             }),
         })
     }

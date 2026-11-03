@@ -54,6 +54,10 @@ struct Api {
 
 impl Api {
     async fn start(tag: &str) -> Self {
+        Self::start_with(tag, Default::default()).await
+    }
+
+    async fn start_with(tag: &str, outbound: snapreq_server::outbound::OutboundPolicy) -> Self {
         let root = std::env::temp_dir().join(format!("snapreq-api-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let config = Config {
@@ -62,6 +66,7 @@ impl Api {
             workspace: root.join("workspace"),
             allow_remote: false,
             retention: Retention::default(),
+            outbound,
         };
         let server = Server::bind(config).await.unwrap();
         let addr = server.local_addr().unwrap();
@@ -522,5 +527,35 @@ async fn websocket_streams_traces_progress_and_results() {
             .as_str()
             .unwrap()
             .contains("unknown message type `dance`")
+    );
+}
+
+#[tokio::test]
+async fn the_outbound_policy_blocks_executed_requests() {
+    let policy = snapreq_server::outbound::OutboundPolicy {
+        deny: vec!["127.0.0.0/8".parse().unwrap()],
+        ..Default::default()
+    };
+    let api = Api::start_with("ssrf", policy).await;
+    let target = target().await;
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/requests/execute",
+            Some(json!({ "request": { "method": "GET", "url": format!("http://{target}/") } })),
+        )
+        .await;
+    assert_eq!(status, 200, "the API itself is reachable: {doc}");
+    assert_eq!(doc["error"]["phase"], "connect");
+    assert_eq!(
+        doc["error"]["message"],
+        "blocked by the outbound request policy: 127.0.0.1: denied by rule `127.0.0.0/8`"
+    );
+    let (_, doc) = api.call("GET", "/history", None).await;
+    assert!(
+        doc["entries"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("blocked by the outbound request policy")
     );
 }

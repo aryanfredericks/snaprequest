@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.6, outbound request policy (SSRF protection)
+- **Current checkpoint:** P6.7, Docker image and docker-compose example
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.6 SSRF policy: core `ClientConfig::connect_policy` checked on every resolved address before connecting
-   (so DNS rebinding and redirects are covered), plus proxy targets by host name. Server config `[outbound]`
-   allow/deny lists (CIDRs, host names, `*.suffix`), `block_private`; defaults: nothing blocked on loopback-only
-   servers, cloud metadata (169.254.169.254, fd00:ec2::254, metadata.google.internal …) and link-local blocked when
-   `allow_remote` is on. Errors name the rule.
-2. P6.7 Docker (distroless, non-root) + docker-compose.yml; test with podman/docker if available.
+1. P6.7 Docker: multi-stage `Dockerfile` (rust builder → `gcr.io/distroless/cc-debian12:nonroot`), `SNAPREQ_BIND=0.0.0.0:7878`,
+   `SNAPREQ_ALLOW_REMOTE=1`, `SNAPREQ_DATA_DIR=/data` volume, healthcheck via `snapreq send --fail`,
+   `docker-compose.yml` publishing on 127.0.0.1, `.dockerignore`. Verify with docker/podman if available; CI job
+   building the image and running a request through the API (Phase 6 acceptance).
+
+## Outbound policy notes (P6.6)
+- Core `ConnectPolicy` (`ClientConfig::connect_policy`), checked in `conn::connect` via `allowed()` on every resolved
+  address (direct, proxy address, locally resolved SOCKS5 target) and by name for proxy-resolved targets; blocked
+  addresses skipped with an `info` event; none left → connect-phase failure naming the reason (ADR-020).
+- `snapreq_server::outbound`: `Rule` (CIDR/IP/host/`*.domain`, own CIDR math, IPv4-mapped normalised),
+  `OutboundPolicy { allow, deny, block_private, block_metadata }` (deny > allow > metadata > private > allow-list),
+  `[outbound]` config; `block_metadata` defaults to `allow_remote`. The server's `Client` gets the policy;
+  warning when remote with an open policy.
 
 ## OpenAPI notes (P6.5)
 - `utoipa` 6 + `utoipa-axum` 0.3: `api::router()` is an `OpenApiRouter` built with `routes!(...)` from
@@ -431,6 +438,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.3 — 2026-11-03 — REST API: execute, history, runs, collections/requests/flows/environments CRUD over the workspace; docs/SERVER.md. 329 tests total.
 - P6.4 — 2026-11-03 — WebSocket endpoint streaming live trace events and run progress, then the stored result. 330 tests total.
 - P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
+- P6.6 — 2026-11-03 — Outbound request policy (SSRF): connect-time checks of every address in the engine, server allow/deny lists, private and cloud-metadata blocking (ADR-020). 339 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

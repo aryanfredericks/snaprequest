@@ -16,6 +16,7 @@ async fn health_and_version_then_graceful_shutdown() {
         workspace: data_dir.join("workspace"),
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
+        outbound: Default::default(),
     };
     let server = Server::bind(config).await.unwrap();
     assert!(data_dir.is_dir(), "the data directory is created");
@@ -72,6 +73,7 @@ async fn binding_a_busy_port_fails_clearly() {
         workspace: std::env::temp_dir(),
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
+        outbound: Default::default(),
     };
     let err = Server::bind(config).await.unwrap_err().to_string();
     assert!(

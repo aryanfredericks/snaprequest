@@ -11,6 +11,32 @@ Configuration (bind address, data directory, workspace, retention) is described 
 - **Security:** no authentication yet (Phase 8). The server listens on loopback only unless
   `--allow-remote` is given (ADR-018).
 
+## Outbound request policy
+
+The server sends requests for whoever calls its API, so it can be used to reach anything the machine
+can reach (SSRF). The `[outbound]` table of `config.toml` limits that:
+
+```toml
+[outbound]
+deny = ["10.0.0.0/8", "*.internal.example.com"]   # always blocked
+allow = ["api.example.com", "*.staging.example.com", "192.168.50.0/24"]   # if set, nothing else
+block_private = true      # loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, link-local, 0.0.0.0
+block_metadata = true     # cloud metadata endpoints (169.254.169.254, fd00:ec2::254, metadata.google.internal …)
+                          # and link-local; default: on when --allow-remote is set, off otherwise
+```
+
+Rules are CIDRs, single IPs, host names or `*.domain` (the domain and its subdomains). A `deny`
+match always blocks; an `allow` match always permits (even a private address); then `block_metadata`
+and `block_private` apply; finally, a non-empty `allow` list blocks everything it does not match.
+
+The engine checks **every address it connects to, after DNS**, so names that resolve to internal
+addresses, `--resolve` pins and redirects are covered. Addresses of a name that are blocked are
+skipped (noted in the trace); if none is left the request fails in the connect phase with
+`blocked by the outbound request policy: <address>: <reason>`. Through a proxy, the proxy address is
+checked, and the target by name (or IP literal) when the proxy resolves it.
+
+A server reachable from the network without any policy logs a warning at start.
+
 ## Conventions
 
 - Base path `/api/v1`; JSON in and out.
