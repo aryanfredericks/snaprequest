@@ -10,15 +10,22 @@ export SNAPREQ_SECRET_PASSWORD="${SNAPREQ_SECRET_PASSWORD:-letmein}"
 # Keep OAuth caches and the like out of the user's directories.
 export SNAPREQ_CACHE_DIR="${SNAPREQ_CACHE_DIR:-target/api-cache}"
 
-cargo build --quiet -p snapreq-cli -p snapreq-test --example mock_shop
+# Two builds: a target flag such as --example limits a build to that target.
+cargo build --quiet -p snapreq-cli
+cargo build --quiet -p snapreq-test --example mock_shop
 SNAPREQ=target/debug/snapreq
+for bin in "$SNAPREQ" target/debug/examples/mock_shop; do
+  [ -x "$bin" ] || { echo "error: $bin was not built" >&2; exit 1; }
+done
 target/debug/examples/mock_shop "$PORT" &
 MOCK=$!
 trap 'kill $MOCK 2>/dev/null || true' EXIT
+ready=0
 for _ in $(seq 50); do
-  if "$SNAPREQ" send "http://127.0.0.1:$PORT/health" -t 1 >/dev/null 2>&1; then break; fi
+  if "$SNAPREQ" send "http://127.0.0.1:$PORT/health" -t 1 >/dev/null 2>&1; then ready=1; break; fi
   sleep 0.1
 done
+[ "$ready" = 1 ] || { echo "error: the mock API did not start on port $PORT" >&2; exit 1; }
 
 rm -rf "$REPORTS"
 status=0
