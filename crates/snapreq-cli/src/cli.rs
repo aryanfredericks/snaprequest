@@ -32,11 +32,13 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Send(SendArgs),
 
-    /// Run a flow (`*.flow.toml`): chained requests with captures and checks.
+    /// Run a flow, a folder or a whole collection, with checks and captures.
     ///
     /// Examples:
     ///   snapreq run my-api/orders/checkout.flow.toml -e staging
     ///   snapreq run -c my-api orders/checkout --var item=sku-1
+    ///   snapreq run my-api                     # every request of the collection
+    ///   snapreq run -c my-api --folder users --data users.csv
     #[command(verbatim_doc_comment)]
     Run(RunArgs),
 
@@ -66,13 +68,27 @@ pub(crate) enum TokensCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
-    /// A flow file, or a flow key (`orders/checkout`) with `-c` or from inside a collection.
-    #[arg(value_name = "FLOW")]
-    pub target: String,
+    /// A flow file, a collection or folder directory, or (with `-c`, or from inside a
+    /// collection) a flow or folder key. Default: the collection around the current directory.
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
 
-    /// Collection directory; FLOW is then a flow key.
+    /// Collection directory; TARGET is then a flow or folder key.
     #[arg(short = 'c', long = "collection", value_name = "DIR")]
     pub collection: Option<PathBuf>,
+
+    /// Run only the requests of this folder (`users`, `users/admin`).
+    #[arg(long, value_name = "FOLDER")]
+    pub folder: Option<String>,
+
+    /// Run everything this many times (fresh captures each time).
+    #[arg(short = 'n', long, value_name = "N", conflicts_with = "data")]
+    pub iterations: Option<usize>,
+
+    /// Data-driven run: one iteration per row of a CSV (header row = variable names) or
+    /// JSON (array of objects) file.
+    #[arg(long, value_name = "FILE")]
+    pub data: Option<PathBuf>,
 
     /// Environment to use (`environments/<NAME>.toml`).
     #[arg(short = 'e', long = "env", value_name = "NAME")]

@@ -4,7 +4,7 @@
 snapreq send [METHOD] URL [OPTIONS]
 snapreq send REQUEST_FILE.toml [-e ENV] [--var name=value] [OPTIONS]
 snapreq send -c COLLECTION_DIR REQUEST_KEY [-e ENV] [OPTIONS]
-snapreq run FLOW [-e ENV] [--var name=value]
+snapreq run [COLLECTION | FOLDER | FLOW] [-e ENV] [--var name=value] [--data FILE | -n N]
 snapreq ls | new | secret | tokens …
 ```
 
@@ -59,16 +59,29 @@ Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment
 `.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
 every trace and output, including when given with `--var`.
 
-## Flows (`snapreq run`)
+## Runs (`snapreq run`)
 
 ```sh
-snapreq run my-api/orders/checkout.flow.toml -e staging [--var name=value]
-snapreq run -c my-api orders/checkout          # by key
+snapreq run my-api                                   # every request of the collection, in tree order
+snapreq run my-api/users                             # a folder (or: -c my-api users, --folder users)
+snapreq run my-api/orders/checkout.flow.toml -e staging   # a flow (or: -c my-api orders/checkout)
+snapreq run -c my-api --folder users --data users.csv     # once per data row
+snapreq run -c my-api orders/checkout -n 5                # five times
 ```
 
-Runs a flow (see `docs/FORMAT.md`, "Flows"): one line per step, with failing checks and missing
-captures underneath; `-v` lists every check and capture, `-vv` adds the trace (with wire bytes) of the
-failing step. The flow stops at the first failing step.
+Without a TARGET, `run` uses the collection around the current directory. With `-c DIR`, TARGET is a flow
+key or a folder key.
+
+- **Collections and folders:** every request is sent in order through one run, so values captured by one
+  request are available to the next; a failing request does not stop the run.
+- **Flows** (see `docs/FORMAT.md`, "Flows") stop at the first failing step.
+- **Iterations:** `-n N` runs everything N times; `--data FILE` runs once per row of a CSV file (first row:
+  variable names; RFC 4180 quoting) or a JSON file (array of objects). Every iteration starts without
+  captured values. Data values rank below `--var` and step variables and above everything else; values of
+  variables declared secret are hidden. `-n` and `--data` cannot be combined.
+
+One line per request or step, with failing checks and missing captures underneath; `-v` lists every check
+and capture, `-vv` adds the trace (with wire bytes) of failures.
 
 ```text
 Checkout  orders/checkout
@@ -79,14 +92,23 @@ Checkout  orders/checkout
 flow failed: 2 of 4 steps passed, 1 skipped
 ```
 
-Options: `-e ENV`, `--var name=value` (wins over flow and step variables), `-v`/`-vv`,
-`--format pretty|json`, `--color`, `-k` (no TLS verification), `-t SECONDS` (per request),
-`--secret VALUE`. Exit codes: 0 passed; 7 a check or capture failed; 3 a step could not be built;
-5 / 6 network failure / timeout of the last step.
+Options: `-e ENV`, `--var name=value` (wins over everything), `--folder`, `-n N`, `--data FILE`, `-v`/`-vv`,
+`--format pretty|json`, `--color`, `-k` (no TLS verification), `-t SECONDS` (per request), `--secret VALUE`.
 
-`--format json` prints `{ "format": 1, "flow": { "key", "name" }, "passed", "total", "skipped",
-"steps": [{ "number", "title", "passed", "attempts", "request": { "method", "url" }, "response":
-{ "status", "duration_ms" }, "error", "assertions", "until", "captures" }] }`.
+Exit codes: 0 everything passed; otherwise the worst problem: 3 a request could not be built, 5 a network
+failure, 6 a timeout, 7 a check or capture failed.
+
+`--format json`:
+
+```json
+{ "format": 1,
+  "target": { "kind": "flow" | "folder" | "collection", "key": "orders/checkout", "name": "Checkout" },
+  "passed": false,
+  "iterations": [{ "number": 1, "data": { "user": "alice" } | null, "passed": false, "total": 4, "skipped": 1,
+    "steps": [{ "number": 1, "title": "auth/login", "key": "auth/login", "passed": true, "attempts": 1,
+      "request": { "method": "POST", "url": "…" }, "response": { "status": 200, "duration_ms": 41.2 },
+      "error": null, "assertions": […], "until": […], "captures": […] }] }] }
+```
 
 ## Assertions
 

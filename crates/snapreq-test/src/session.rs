@@ -106,8 +106,8 @@ impl<'t> SendSpec<'t> {
 
 /// State shared by the requests of one run.
 ///
-/// Variable precedence, highest first: `overrides` (`--var`) → step variables → captured
-/// values (`runtime`) → flow variables → the request's usual scopes.
+/// Variable precedence, highest first: `overrides` (`--var`) → step variables → the data
+/// row (`data`) → captured values (`runtime`) → flow variables → the request's usual scopes.
 #[derive(Debug)]
 pub struct Session<'a> {
     collection: &'a Collection,
@@ -117,6 +117,8 @@ pub struct Session<'a> {
     pub globals: Variables,
     /// Set by the caller (`--var`): win over everything.
     pub overrides: Variables,
+    /// The current row of a data-driven run.
+    pub data: Variables,
     /// Captured values.
     pub runtime: Variables,
     /// Secret values seen in this run, hidden in every later request.
@@ -137,6 +139,7 @@ impl<'a> Session<'a> {
             client,
             globals: Variables::default(),
             overrides: Variables::default(),
+            data: Variables::default(),
             runtime: Variables::default(),
             hidden: Vec::new(),
         }
@@ -157,9 +160,15 @@ impl<'a> Session<'a> {
     /// The highest-precedence layer for one send.
     fn runtime_layer(&self, lower: Option<&Variables>, upper: Option<&Variables>) -> Variables {
         let mut out = Variables::default();
-        for layer in [lower, Some(&self.runtime), upper, Some(&self.overrides)]
-            .into_iter()
-            .flatten()
+        for layer in [
+            lower,
+            Some(&self.runtime),
+            Some(&self.data),
+            upper,
+            Some(&self.overrides),
+        ]
+        .into_iter()
+        .flatten()
         {
             for v in &layer.0 {
                 match out.0.iter_mut().find(|o| o.name == v.name) {

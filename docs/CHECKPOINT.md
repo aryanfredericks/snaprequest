@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
-- **Current checkpoint:** P5.4, `snapreq run` for collections and folders, data-driven runs
+- **Current checkpoint:** P5.5, run control (bail, delays, parallel runs)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,14 +25,24 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.4: extend `snapreq run` (already runs flows) to a whole collection or a folder (`snapreq run -c DIR
-   [--folder users]` / `snapreq run DIR`): every request in tree order through one `Session` (captures flow
-   between requests), continuing after failures by default (`--bail` comes with P5.5). `--iterations N` and
-   `--data data.csv|json` (one iteration per row, row values as variables, between flow vars and captures?
-   decide; probably at the `overrides` level below `--var`). Consider running every flow of a collection too.
-   Move `snapreq send`'s collection path onto `Session` so both share variable/secret handling.
-2. P5.5 run control (bail, delays, parallel independent requests), P5.6 reporters (JUnit, HTML, JSON with
-   traces), P5.7 CI example.
+1. P5.5 run control: `--bail` (stop a collection/folder run at the first failing request), `--delay MS` between
+   requests, parallel runs of independent requests (`--parallel N`? only safe when requests do not capture/use
+   captured values; probably run iterations or whole folders concurrently rather than requests within a chain;
+   decide and document). Implement in `snapreq_test::run` (Plan options) so the server can reuse it.
+2. P5.6 reporters: JUnit XML, single-file HTML (with traces), JSON (full traces) via `--report kind:path`.
+   P5.7 exit codes doc + example GitHub Actions workflow running the fixture collection and a flow.
+3. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build` instead of
+   `Session` (works, but duplicates the --var secret handling).
+
+## Run notes (P5.4)
+- `snapreq_test::run`: `Unit::{Flow(&FlowItem), Requests(keys)}`, `Plan { collection, environment, secrets, client,
+  overrides, hidden, rows, iterations }`, `execute(plan, unit, adjust) -> Vec<Iteration { number, data, result:
+  UnitRun::{Flow, Requests} }>`; a fresh `Session` per iteration. `request_keys(collection, folder)`.
+- `Session::data` layer (data row): below `--var` and step vars, above captures.
+- `snapreq_test::data::{load, from_csv, from_json}`: own RFC 4180 reader (BOM, quotes, CRLF, multi-line fields).
+- CLI `run` targets: flow file, collection/folder directory, `-c DIR [KEY]`, `--folder`, none (cwd's collection);
+  `-n`, `--data` (conflict). JSON is uniform: `{ format, target { kind, key, name }, passed, iterations: [{ number,
+  data, passed, total, skipped, steps: [...] }] }`. Exit code = worst problem (3 > 5 > 6 > 7).
 
 ## Flow notes (P5.3)
 - Format (ADR-017): `snapreq_collection::flow::{FlowFile, StepSpec, RetrySpec, FLOW_SUFFIX}`; loader collects
@@ -337,6 +347,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.1 — 2026-11-03 — Declarative `[assert]` checks (status, duration, body, headers, JSONPath, JSON Schema) evaluated by `snapreq-test`; `snapreq send` reports them, exit code 7; ADR-016. 293 tests total.
 - P5.2 — 2026-11-03 — `[capture]` (JSONPath, header, cookie, regex, status, body; secret captures) and `snapreq_test::Session` passing captured values to later requests. 297 tests total.
 - P5.3 — 2026-11-03 — Flows (`*.flow.toml`): chained steps (collection or inline requests) with captures, checks, delays and retry-until polling; `snapreq run FLOW`; ADR-017. 302 tests total.
+- P5.4 — 2026-11-03 — `snapreq run` for collections and folders, `--iterations`, data-driven runs (`--data` CSV/JSON). 306 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -353,4 +364,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
-- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1, P5.2 and P5.3 (flows) done.
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.4 done (assertions, captures, flows, collection/data runs).

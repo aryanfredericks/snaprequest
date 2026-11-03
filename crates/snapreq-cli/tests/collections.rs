@@ -712,11 +712,14 @@ contains = "{{expect}}"
     let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
     assert_eq!(doc["passed"], false);
     assert_eq!(
-        doc["steps"][0]["captures"][0]["value"],
+        doc["iterations"][0]["steps"][0]["captures"][0]["value"],
         "/first/flow-default"
     );
-    assert_eq!(doc["steps"][2]["assertions"][0]["passed"], false);
-    assert_eq!(doc["steps"][1]["response"]["status"], 200);
+    assert_eq!(
+        doc["iterations"][0]["steps"][2]["assertions"][0]["passed"],
+        false
+    );
+    assert_eq!(doc["iterations"][0]["steps"][1]["response"]["status"], 200);
 
     // Undefined variables: the step is not sent, exit 3.
     let o = run(
@@ -742,7 +745,123 @@ contains = "{{expect}}"
     .await;
     assert_eq!(o.status.code(), Some(3));
     assert!(
-        err(&o).contains("no flow `nope` in the collection (flows: users/onboard)"),
+        err(&o).contains("no flow or folder `nope` in the collection (flows: users/onboard)"),
+        "{}",
+        err(&o)
+    );
+}
+
+#[tokio::test]
+async fn run_a_collection_a_folder_and_data_rows() {
+    let addr = server().await;
+    let dir = collection("run-all");
+    std::fs::write(
+        dir.join("users/hello.toml"),
+        "url = \"{{base_url}}/hello/{{who}}\"\n[vars]\nwho = \"nobody\"\n[assert.body]\nnot_contains = \"/hello/bob\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("people.csv"), "who\nalice\nbob\n").unwrap();
+    let base = format!("base_url=http://{addr}");
+    let d = dir.to_str().unwrap();
+    let common = [
+        "--var",
+        base.as_str(),
+        "--var",
+        "token=t",
+        "--color",
+        "never",
+    ];
+
+    let o = run(&[&["run", d][..], &common].concat(), None, None, &[]).await;
+    let text = out(&o);
+    assert!(text.starts_with("Basic API  collection\n"), "{text}");
+    for key in [
+        "health",
+        "users/list-users",
+        "users/create-user",
+        "users/hello",
+        "zeta",
+    ] {
+        assert!(text.contains(&format!("  {key}")), "{key}: {text}");
+    }
+
+    let users = dir.join("users");
+    let o = run(
+        &[&["run", users.to_str().unwrap()][..], &common].concat(),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let text = out(&o);
+    assert!(text.starts_with("Basic API  users\n"), "{text}");
+    assert!(!text.contains("health"), "{text}");
+
+    // One iteration per CSV row; the row beats the request's own variable.
+    let csv = dir.join("people.csv");
+    let o = run(
+        &[
+            &[
+                "run",
+                "-c",
+                d,
+                "--folder",
+                "users",
+                "--data",
+                csv.to_str().unwrap(),
+            ][..],
+            &common,
+        ]
+        .concat(),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let text = out(&o);
+    assert!(text.contains("iteration 1/2  who=alice\n"), "{text}");
+    assert!(text.contains("iteration 2/2  who=bob\n"), "{text}");
+    assert!(
+        text.contains("✗ body not contains \"/hello/bob\""),
+        "{text}"
+    );
+    assert!(text.ends_with("of 2 iterations failed\n"), "{text}");
+    assert_ne!(o.status.code(), Some(0));
+
+    let o = run(
+        &[
+            &["run", "-c", d, "users", "-n", "3", "--format", "json"][..],
+            &common[..4],
+        ]
+        .concat(),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(
+        doc["target"],
+        serde_json::json!({"kind": "folder", "key": "users", "name": "Basic API"})
+    );
+    assert_eq!(doc["iterations"].as_array().unwrap().len(), 3);
+
+    let o = run(
+        &["run", "-c", d, "--data", "x.csv", "-n", "2"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(
+        o.status.code(),
+        Some(2),
+        "conflicting options are a usage error"
+    );
+    let o = run(&["run", "-c", d, "--folder", "nope"], None, None, &[]).await;
+    assert_eq!(o.status.code(), Some(3));
+    assert!(
+        err(&o).contains("no requests in folder `nope`"),
         "{}",
         err(&o)
     );
