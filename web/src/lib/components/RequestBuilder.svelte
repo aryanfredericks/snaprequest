@@ -39,7 +39,7 @@
   });
 
   export function save() {
-    if (tab.collection && tab.key) void app.save(tab);
+    if (tab.collection && tab.key) void app.saveRequest(tab);
     else saving = true;
   }
 </script>

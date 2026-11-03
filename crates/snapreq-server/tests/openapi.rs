@@ -40,6 +40,11 @@ fn every_route_is_described() {
         "PUT /api/v1/collections/{id}/environments/{name}",
         "DELETE /api/v1/collections/{id}/environments/{name}",
         "GET /api/v1/collections/{id}/variables",
+        "GET /api/v1/collections/{id}/folders/{key}",
+        "PUT /api/v1/collections/{id}/folders/{key}",
+        "DELETE /api/v1/collections/{id}/folders/{key}",
+        "POST /api/v1/collections/{id}/move",
+        "PUT /api/v1/collections/{id}/secrets/{scope}/{name}",
     ]
     .into_iter()
     .map(str::to_owned)

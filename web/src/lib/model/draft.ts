@@ -288,7 +288,7 @@ function bodyToSpec(b: BodyDraft): BodySpec | undefined {
   }
 }
 
-function authFromSpec(spec: AuthSpec | undefined): AuthDraft {
+export function authFromSpec(spec: AuthSpec | undefined): AuthDraft {
   if (!spec) return { type: "inherit", fields: {}, params: [] };
   const { type, ...rest } = spec as AuthSpec & Record<string, unknown>;
   const fields: Record<string, string> = {};
@@ -313,7 +313,7 @@ function authValues(a: AuthDraft): Record<string, string> {
   return out;
 }
 
-function authToSpec(a: AuthDraft): AuthSpec | undefined {
+export function authToSpec(a: AuthDraft): AuthSpec | undefined {
   if (a.type === "inherit") return undefined;
   const values = authValues(a);
   if (a.type === "api_key" && values.location === "header") delete values.location;

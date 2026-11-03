@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.5, collections sidebar and environments (P7.1–P7.4 done)
+- **Current checkpoint:** P7.6, history (P7.1–P7.5 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,7 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.5 collections sidebar (tree, drag and drop), environment switcher and editor, then P7.6–P7.8.
+1. P7.6 history (search, filters, re-run, compare two responses), then P7.7–P7.8.
+
+## Web UI notes (P7.5)
+- Server `tree.rs`: `GET/PUT/DELETE /collections/{id}/folders/{key}` (folder.toml; PUT creates the dir),
+  `POST /collections/{id}/move` (`kind`, `from`, `to`, `name`, `place.before` → rename on disk + parent
+  `order` rewritten; rename in place keeps the position), `PUT /collections/{id}/secrets/{env|shared}/{name}`
+  (`secrets::store`, never returned). Deleting a request or folder drops it from the parent's `order`.
+- UI: `state/tabs.svelte.ts` (`RequestTab`, `ScopeTab` for collection/folder settings, `EnvTab`),
+  `state/prompt.svelte.ts` + `PromptDialog` (promise dialogs), `state/tree.svelte.ts` (expanded nodes,
+  drag item, `canDrop`), `ItemMenu` (menu button), `CollectionTree` (HTML5 drag and drop: top 30% of a
+  row = before it, rest of a folder row = into it; collection row = root), menu Move up/down/to folder as
+  the keyboard alternative, `VarsEditor`, `ScopeView`, `EnvView`. Open tabs follow moved items.
 
 ## Web UI notes (P7.4)
 - `model/trace.ts`: `hops()` (same rules as the CLI waterfall: split at redirect/auth challenge, segment =
@@ -490,6 +501,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.2 — 2026-11-03 — Request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth, settings, checks; unsaved edits sent in collection context; save / save as; Playwright e2e tests.
 - P7.3 — 2026-11-03 — Response viewer: pretty/raw/preview/hex, headers, cookies, checks, search in the body, virtualized large bodies.
 - P7.4 — 2026-11-03 — Debug view: live timing waterfall per redirect hop, event list with headers, connection and redirect chain, TLS and certificate chain, raw wire log (text/hex).
+- P7.5 — 2026-11-03 — Collections sidebar: tree with drag and drop and menus (create, rename, duplicate, move, delete), collection/folder settings, environment editor with secret values, environment switcher.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

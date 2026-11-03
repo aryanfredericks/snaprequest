@@ -2,6 +2,7 @@
 //   #/c/<collection>/r/<request key>   a collection request
 //   #/c/<collection>/f/<flow key>      a flow
 //   #/c/<collection>/e/<environment>   an environment
+//   #/c/<collection>/d/<folder key>    a folder's settings
 //   #/c/<collection>                   a collection's settings
 //   #/history/<id>   #/runs/<id>   #/new
 export type Route =
@@ -9,6 +10,7 @@ export type Route =
   | { kind: "flow"; collection: string; key: string }
   | { kind: "environment"; collection: string; name: string }
   | { kind: "collection"; collection: string }
+  | { kind: "folder"; collection: string; key: string }
   | { kind: "history"; id: number }
   | { kind: "run"; id: number }
   | { kind: "new" }
@@ -26,6 +28,8 @@ export function formatRoute(r: Route): string {
       return `#/c/${encodeURIComponent(r.collection)}/e/${encodeURIComponent(r.name)}`;
     case "collection":
       return `#/c/${encodeURIComponent(r.collection)}`;
+    case "folder":
+      return `#/c/${encodeURIComponent(r.collection)}/d/${enc(r.key)}`;
     case "history":
       return `#/history/${r.id}`;
     case "run":
@@ -49,6 +53,7 @@ export function parseRoute(hash: string): Route {
     if (c === "r" && key) return { kind: "request", collection: b, key };
     if (c === "f" && key) return { kind: "flow", collection: b, key };
     if (c === "e" && key) return { kind: "environment", collection: b, name: key };
+    if (c === "d" && key) return { kind: "folder", collection: b, key };
     if (!c) return { kind: "collection", collection: b };
   }
   return { kind: "home" };

@@ -3,9 +3,12 @@
 
   function close(e: Event, tab: Tab) {
     e.stopPropagation();
-    if (tab.dirty && !confirm(`Close "${tab.title}" without saving?`)) return;
     app.close(tab);
   }
+  const where = (tab: Tab) =>
+    tab.kind === "request"
+      ? tab.collection ? `${tab.collection}/${tab.key}` : tab.title
+      : tab.kind === "environment" ? `${tab.collection}: environment ${tab.name}` : `${tab.collection}${tab.key ? `/${tab.key}` : ""} settings`;
 </script>
 
 <div class="bar" role="tablist" aria-label="Open requests">
@@ -18,9 +21,11 @@
         class="open"
         onclick={() => app.activate(tab)}
         onauxclick={(e) => e.button === 1 && close(e, tab)}
-        title={tab.collection ? `${tab.collection}/${tab.key}` : tab.title}
+        title={where(tab)}
       >
-        {#if tab.kind === "request"}<span class="method m-{tab.draft.method.toLowerCase()}">{tab.draft.method}</span>{/if}
+        {#if tab.kind === "request"}<span class="method m-{tab.draft.method.toLowerCase()}">{tab.draft.method}</span>
+        {:else if tab.kind === "environment"}<span class="kind" aria-hidden="true">◎</span>
+        {:else}<span class="kind" aria-hidden="true">⚙</span>{/if}
         <span class="label">{tab.title}</span>
         {#if tab.dirty}<span class="dirty" aria-label="unsaved changes">●</span>{/if}
       </button>
@@ -66,6 +71,9 @@
     font-family: var(--mono);
     font-size: 0.68rem;
     font-weight: 700;
+  }
+  .kind {
+    color: var(--muted);
   }
   .dirty {
     color: var(--accent);

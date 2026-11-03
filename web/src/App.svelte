@@ -1,6 +1,9 @@
 <script lang="ts">
   import { api, serverVersion, type ServerVersion } from "./lib/api/client";
+  import EnvView from "./lib/components/EnvView.svelte";
+  import PromptDialog from "./lib/components/PromptDialog.svelte";
   import RequestView from "./lib/components/RequestView.svelte";
+  import ScopeView from "./lib/components/ScopeView.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import TabBar from "./lib/components/TabBar.svelte";
   import { app } from "./lib/state/app.svelte";
@@ -23,7 +26,10 @@
   async function openRoute(hash: string) {
     const r = parseRoute(hash);
     if (r.kind === "request") await app.openRequest(r.collection, r.key);
-    else if (r.kind === "new" && !app.tabs.some((t) => t.collection === null)) app.newRequest();
+    else if (r.kind === "environment") await app.openEnvironment(r.collection, r.name);
+    else if (r.kind === "folder") await app.openScope(r.collection, r.key);
+    else if (r.kind === "collection") await app.openScope(r.collection, "");
+    else if (r.kind === "new" && !app.tabs.some((t) => t.kind === "request" && t.collection === null)) app.newRequest();
   }
 
   const tab = $derived(app.active);
@@ -37,13 +43,14 @@
       void app.send(tab);
     } else if (mod && e.key.toLowerCase() === "s" && tab) {
       e.preventDefault();
-      view?.save();
+      if (tab.kind === "request") view?.save();
+      else void app.save(tab);
     } else if (e.altKey && e.key.toLowerCase() === "n") {
       e.preventDefault();
       app.newRequest();
     } else if (e.altKey && e.key.toLowerCase() === "w" && tab) {
       e.preventDefault();
-      if (!tab.dirty || confirm(`Close "${tab.title}" without saving?`)) app.close(tab);
+      app.close(tab);
     }
   }
 </script>
@@ -56,7 +63,7 @@
     {#if collection && doc}
       <label class="env">
         Environment
-        <select value={app.envs[collection] ?? ""} onchange={(e) => app.selectEnv(collection, e.currentTarget.value || null)}>
+        <select aria-label="Environment" value={app.envs[collection] ?? ""} onchange={(e) => app.selectEnv(collection, e.currentTarget.value || null)}>
           <option value="">none</option>
           {#each doc.environments as env (env)}<option value={env}>{env}</option>{/each}
         </select>
@@ -75,7 +82,13 @@
     <TabBar />
     {#if tab}
       {#key tab.id}
-        <RequestView {tab} bind:this={view} />
+        {#if tab.kind === "request"}
+          <RequestView {tab} bind:this={view} />
+        {:else if tab.kind === "scope"}
+          <ScopeView {tab} />
+        {:else}
+          <EnvView {tab} />
+        {/if}
       {/key}
     {:else}
       <div class="empty">
@@ -85,6 +98,7 @@
       </div>
     {/if}
   </main>
+  <PromptDialog />
   <div class="notices" aria-live="polite">
     {#each app.notices as n (n.id)}
       <div class="notice {n.kind}" role={n.kind === "error" ? "alert" : "status"}>

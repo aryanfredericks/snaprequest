@@ -663,3 +663,178 @@ async fn unsaved_edits_wire_capture_and_variables() {
         .await;
     assert_eq!(status, 404);
 }
+
+#[tokio::test]
+async fn folders_moves_order_and_secrets() {
+    let api = Api::start("tree").await;
+    api.call("POST", "/collections", Some(json!({ "id": "app" })))
+        .await;
+    for key in ["a", "b", "c", "users/list"] {
+        api.call(
+            "PUT",
+            &format!("/collections/app/requests/{key}"),
+            Some(json!({ "url": "http://x/{{token}}" })),
+        )
+        .await;
+    }
+    let keys = |doc: &Value| -> Vec<String> {
+        doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // Folders: create with settings, read back, refuse a clash with a request.
+    let (status, doc) = api
+        .call(
+            "PUT",
+            "/collections/app/folders/admin",
+            Some(json!({ "name": "Admin", "headers": { "X-Admin": "1" } })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    let (_, doc) = api
+        .call("GET", "/collections/app/folders/admin", None)
+        .await;
+    assert_eq!(doc["file"]["name"], "Admin");
+    let (status, _) = api
+        .call("PUT", "/collections/app/folders/a", Some(json!({})))
+        .await;
+    assert_eq!(status, 409);
+    let (status, _) = api.call("GET", "/collections/app/folders/nope", None).await;
+    assert_eq!(status, 404);
+
+    // Reorder at the root: `c` before `a`.
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/collections/app/move",
+            Some(json!({ "kind": "request", "from": "c", "place": { "before": "a" } })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    let (_, doc) = api.call("GET", "/collections/app", None).await;
+    assert_eq!(keys(&doc), ["c", "a", "admin", "b", "users"]);
+
+    // Move into a folder (renaming it), first among its items.
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/collections/app/move",
+            Some(json!({ "kind": "request", "from": "a", "to": "users", "name": "first", "place": { "before": "list" } })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    assert_eq!(doc["key"], "users/first");
+    let (_, doc) = api.call("GET", "/collections/app", None).await;
+    assert_eq!(keys(&doc), ["c", "admin", "b", "users"]);
+    let users = &doc["items"][3]["items"];
+    assert_eq!(users[0]["key"], "users/first");
+    assert_eq!(users[1]["key"], "users/list");
+
+    // A rename in place keeps the position.
+    api.call(
+        "POST",
+        "/collections/app/move",
+        Some(json!({ "kind": "request", "from": "c", "name": "cc" })),
+    )
+    .await;
+    let (_, doc) = api.call("GET", "/collections/app", None).await;
+    assert_eq!(keys(&doc), ["cc", "admin", "b", "users"]);
+
+    // Folders move with their contents; not into themselves; clashes are refused.
+    let (status, _) = api
+        .call(
+            "POST",
+            "/collections/app/move",
+            Some(json!({ "kind": "folder", "from": "users", "to": "users" })),
+        )
+        .await;
+    assert_eq!(status, 400);
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/collections/app/move",
+            Some(json!({ "kind": "folder", "from": "users", "to": "admin" })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    let (status, _) = api
+        .call("GET", "/collections/app/requests/admin/users/list", None)
+        .await;
+    assert_eq!(status, 200);
+    let (status, _) = api
+        .call(
+            "POST",
+            "/collections/app/move",
+            Some(json!({ "kind": "request", "from": "b", "name": "cc" })),
+        )
+        .await;
+    assert_eq!(status, 409);
+
+    // Deleting removes the item from the order too.
+    let (status, _) = api
+        .call("DELETE", "/collections/app/requests/cc", None)
+        .await;
+    assert_eq!(status, 204);
+    let (_, doc) = api.call("GET", "/collections/app", None).await;
+    assert_eq!(doc["file"]["order"], json!(["admin", "b"]));
+    let (status, _) = api
+        .call("DELETE", "/collections/app/folders/admin", None)
+        .await;
+    assert_eq!(status, 204);
+    let (_, doc) = api.call("GET", "/collections/app", None).await;
+    assert_eq!(keys(&doc), ["b"]);
+
+    // Secrets: stored in .secrets/, reported as set, never returned.
+    api.call(
+        "PUT",
+        "/collections/app",
+        Some(json!({ "format": 1, "name": "App", "vars": { "token": { "secret": true } } })),
+    )
+    .await;
+    api.call("PUT", "/collections/app/environments/dev", Some(json!({})))
+        .await;
+    let (status, doc) = api
+        .call(
+            "PUT",
+            "/collections/app/secrets/dev/token",
+            Some(json!({ "value": "s3cr3t-value" })),
+        )
+        .await;
+    assert_eq!(status, 204, "{doc}");
+    let stored = std::fs::read_to_string(api.workspace.join("app/.secrets/dev.toml")).unwrap();
+    assert!(stored.contains("s3cr3t-value"));
+    assert!(api.workspace.join("app/.secrets/.gitignore").is_file());
+    let (_, doc) = api
+        .call("GET", "/collections/app/variables?env=dev", None)
+        .await;
+    let token = doc["variables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["name"] == "token")
+        .unwrap()
+        .clone();
+    assert_eq!(token["has_value"], true);
+    assert_eq!(token["value"], Value::Null);
+    assert!(!doc.to_string().contains("s3cr3t"));
+    let (status, _) = api
+        .call(
+            "PUT",
+            "/collections/app/secrets/nope/token",
+            Some(json!({ "value": "x" })),
+        )
+        .await;
+    assert_eq!(status, 404);
+    let (status, _) = api
+        .call(
+            "PUT",
+            "/collections/app/secrets/shared/token",
+            Some(json!({ "value": "" })),
+        )
+        .await;
+    assert_eq!(status, 400);
+}

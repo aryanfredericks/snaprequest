@@ -28,7 +28,7 @@ use utoipa_axum::routes;
 use crate::AppState;
 use crate::store::{HistoryEntry, HistoryQuery, RunEntry};
 
-type Shared = State<Arc<AppState>>;
+pub(crate) type Shared = State<Arc<AppState>>;
 
 /// An error as JSON: `{ "error": { "kind", "message" } }`.
 #[derive(Debug)]
@@ -47,19 +47,19 @@ impl ApiError {
         }
     }
 
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, "bad_request", message)
     }
 
-    fn not_found(message: impl Into<String>) -> Self {
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, "not_found", message)
     }
 
-    fn invalid(message: impl Into<String>) -> Self {
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid", message)
     }
 
-    fn internal(message: impl Into<String>) -> Self {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", message)
     }
 }
@@ -80,7 +80,7 @@ impl From<crate::Error> for ApiError {
     }
 }
 
-type ApiResult<T> = Result<T, ApiError>;
+pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
 /// The `/api/v1` routes with their OpenAPI description.
 pub fn router() -> OpenApiRouter<Arc<AppState>> {
@@ -100,6 +100,7 @@ pub fn router() -> OpenApiRouter<Arc<AppState>> {
             delete_environment
         ))
         .routes(routes!(list_variables))
+        .merge(crate::tree::router())
 }
 
 /// `{ "error": { "kind", "message" } }`
@@ -133,7 +134,7 @@ pub struct RunList {
 // --- Names and paths -------------------------------------------------------------
 
 /// One path segment: letters, digits, `_`, `-`, `.`; not starting with `.`.
-fn valid_segment(s: &str) -> bool {
+pub(crate) fn valid_segment(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('.')
         && s.chars()
@@ -141,7 +142,7 @@ fn valid_segment(s: &str) -> bool {
 }
 
 /// The directory of collection `id`, which must be a plain name.
-fn collection_dir(state: &AppState, id: &str) -> ApiResult<PathBuf> {
+pub(crate) fn collection_dir(state: &AppState, id: &str) -> ApiResult<PathBuf> {
     if !valid_segment(id) {
         return Err(ApiError::bad_request(format!(
             "invalid collection id `{id}` (letters, digits, `_`, `-`, `.`)"
@@ -150,7 +151,7 @@ fn collection_dir(state: &AppState, id: &str) -> ApiResult<PathBuf> {
     Ok(state.config.workspace.join(id))
 }
 
-fn load_collection(state: &AppState, id: &str) -> ApiResult<Collection> {
+pub(crate) fn load_collection(state: &AppState, id: &str) -> ApiResult<Collection> {
     let dir = collection_dir(state, id)?;
     if !dir.join(COLLECTION_FILE).is_file() {
         return Err(ApiError::not_found(format!("no collection `{id}`")));
@@ -162,7 +163,7 @@ fn load_collection(state: &AppState, id: &str) -> ApiResult<Collection> {
 
 /// A request or flow key (`users/create-user`) as a relative path, or an error. Keys must
 /// not leave the collection or collide with collection files.
-fn key_path(key: &str, suffix: &str) -> ApiResult<PathBuf> {
+pub(crate) fn key_path(key: &str, suffix: &str) -> ApiResult<PathBuf> {
     let key = key.trim_matches('/');
     let parts: Vec<&str> = key.split('/').collect();
     if key.is_empty() || !parts.iter().all(|p| valid_segment(p)) {
@@ -183,7 +184,7 @@ fn key_path(key: &str, suffix: &str) -> ApiResult<PathBuf> {
     Ok(path)
 }
 
-fn remove_file(path: &Path, what: &str) -> ApiResult<StatusCode> {
+pub(crate) fn remove_file(path: &Path, what: &str) -> ApiResult<StatusCode> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -742,8 +743,13 @@ async fn delete_request(
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<StatusCode> {
     load_collection(&state, &id)?;
-    let path = collection_dir(&state, &id)?.join(key_path(&key, ".toml")?);
-    remove_file(&path, &format!("request `{key}`"))
+    let root = collection_dir(&state, &id)?;
+    let path = root.join(key_path(&key, ".toml")?);
+    let status = remove_file(&path, &format!("request `{key}`"))?;
+    let key = key.trim_matches('/');
+    let (parent, name) = key.rsplit_once('/').unwrap_or(("", key));
+    crate::tree::forget_in_order(&root, parent, name)?;
+    Ok(status)
 }
 
 #[utoipa::path(get, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), responses((status = 200, description = "The flow file as JSON", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]

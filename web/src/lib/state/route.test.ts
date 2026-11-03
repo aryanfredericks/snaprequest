@@ -8,6 +8,7 @@ describe("routes", () => {
       { kind: "flow", collection: "my shop", key: "orders/checkout" },
       { kind: "environment", collection: "shop", name: "dev" },
       { kind: "collection", collection: "shop" },
+      { kind: "folder", collection: "shop", key: "orders/admin" },
       { kind: "history", id: 42 },
       { kind: "run", id: 7 },
       { kind: "new" },

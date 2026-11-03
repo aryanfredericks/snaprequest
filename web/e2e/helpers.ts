@@ -15,14 +15,15 @@ export async function fill(page: Page, label: string, text: string) {
 
 export async function openShopRequest(page: Page, folder: string | null, name: string) {
   const tree = page.getByRole("tree", { name: "Collections" });
-  if (!(await tree.getByRole("button", { name, exact: false }).isVisible().catch(() => false))) {
-    await tree.getByRole("button", { name: "Shop API" }).click();
-    if (folder) await tree.getByRole("button", { name: folder }).click();
+  const row = tree.getByRole("button", { name: new RegExp(`^[A-Z]+ ${name}$`) });
+  if (!(await row.isVisible().catch(() => false))) {
+    await tree.getByRole("button", { name: "Shop API", exact: true }).click();
+    if (folder) await tree.getByRole("button", { name: folder, exact: true }).click();
   }
-  await tree.getByRole("button", { name }).click();
+  await row.click();
   await expect(page.getByRole("textbox", { name: "Request name" })).toHaveValue(name);
 }
 
 export async function selectEnv(page: Page, env: string) {
-  await page.getByLabel("Environment").selectOption(env);
+  await page.getByRole("combobox", { name: "Environment", exact: true }).selectOption(env);
 }

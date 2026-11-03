@@ -7,6 +7,7 @@ pub mod api;
 pub mod config;
 pub mod outbound;
 pub mod store;
+pub mod tree;
 pub mod ui;
 pub mod ws;
 

@@ -146,6 +146,9 @@ A summary is `{ "id", "created_at" (Unix ms), "method", "url", "status", "durati
 | `DELETE /api/v1/collections/{id}/requests/{key}` | | 204 |
 | `GET` / `PUT` / `DELETE /api/v1/collections/{id}/flows/{key}` | a flow file as JSON | `{key}.flow.toml` |
 | `GET` / `PUT` / `DELETE /api/v1/collections/{id}/environments/{name}` | `{ "var": "value", "token": { "secret": true } }` | `environments/{name}.toml`; secret values are never returned or written |
+| `GET` / `PUT` / `DELETE /api/v1/collections/{id}/folders/{key}` | `folder.toml` as JSON (`{}` for a plain folder) | `{ "key", "file" }`; `PUT` creates the directory; `DELETE` removes it with its contents |
+| `POST /api/v1/collections/{id}/move` | `{ "kind": "request" \| "folder" \| "flow", "from", "to"?, "name"?, "place"?: { "before"? } }` | `{ "key" }`: moves into folder `to` (`""` = root), renames to `name`, and with `place` puts it before sibling `before` (or last) by writing the folder's `order`; 409 if the target exists |
+| `PUT /api/v1/collections/{id}/secrets/{env or shared}/{name}` | `{ "value" }` | 204; like `snapreq secret set`: written to `.secrets/<env>.toml` (or `shared.toml`), never returned |
 | `GET /api/v1/collections/{id}/variables?key=&env=` | | `{ "variables": [{ "name", "value", "secret", "has_value", "scope" }] }`: the variables the request at `key` sees with `env`, winning definition first-seen; `value` is `null` for secrets |
 
 Tree items are `{ "type": "request", "key", "name", "method" }` or
