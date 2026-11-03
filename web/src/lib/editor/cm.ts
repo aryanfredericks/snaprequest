@@ -74,6 +74,8 @@ const highlight = HighlightStyle.define([
 export const theme = EditorView.theme({
   "&": { color: "var(--fg)", backgroundColor: "var(--bg-input)", fontSize: "0.85rem" },
   ".cm-content": { fontFamily: "var(--mono)", caretColor: "var(--fg)" },
+  // CodeMirror's default placeholder grey is below 4.5:1 on the active-line background.
+  ".cm-placeholder": { color: "var(--muted)" },
   ".cm-gutters": { backgroundColor: "var(--bg-soft)", color: "var(--muted)", border: "none" },
   ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--bg-hover)" },
   "&.cm-focused": { outline: "2px solid var(--focus)", outlineOffset: "-1px" },
