@@ -19,6 +19,13 @@ Configuration (bind address, data directory, workspace, retention) is described 
 - Collection ids, request and flow keys use letters, digits, `_`, `-` and `.` per segment and cannot
   leave the collection or name collection files (`snapreq`, `folder`, `environments/…`, `.…`).
 
+## OpenAPI
+
+`GET /api/v1/openapi.json` returns an OpenAPI 3.1 description of every endpoint below (except the
+WebSocket, which OpenAPI cannot describe). It is generated from the route handlers (`utoipa`), so it
+always matches the server. Request and response models of the core (requests, responses, collection
+files) are described as free-form objects; their fields are in `docs/FORMAT.md` and `docs/CLI.md`.
+
 ## Health
 
 | Method and path | Result |

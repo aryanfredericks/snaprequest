@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
+use utoipa::OpenApi as _;
 
 pub use config::{Config, Overrides};
 
@@ -59,13 +60,60 @@ pub struct AppState {
 /// How often history is pruned while the server runs.
 const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
+/// The OpenAPI description of the API (also served at `/api/v1/openapi.json`).
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    routes().1
+}
+
+/// The routes and their OpenAPI description.
+fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
+    use utoipa_axum::router::OpenApiRouter;
+    use utoipa_axum::routes;
+    let (router, mut doc) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(health))
+        .routes(routes!(version))
+        .nest("/api/v1", api::router())
+        .split_for_parts();
+    // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.
+    let paths = std::mem::take(&mut doc.paths.paths);
+    doc.paths.paths = paths
+        .into_iter()
+        .map(|(path, item)| (path.replace("{*", "{"), item))
+        .collect();
+    (router, doc)
+}
+
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    info(
+        title = "SnapRequest API",
+        description = "Execute requests, run flows and collections, browse history and edit collections. See docs/SERVER.md.",
+        license(name = "MIT")
+    ),
+    tags(
+        (name = "server", description = "Health and version"),
+        (name = "requests", description = "Executing requests"),
+        (name = "history", description = "Stored requests"),
+        (name = "runs", description = "Flow, folder and collection runs"),
+        (name = "collections", description = "Collections, requests, flows and environments in the workspace")
+    )
+)]
+struct ApiDoc;
+
 /// The HTTP routes.
 pub fn app(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/healthz", get(health))
-        .route("/api/v1/version", get(version))
+    let (router, mut doc) = routes();
+    doc.info.version = snapreq_core::VERSION.to_owned();
+    let doc = Arc::new(doc);
+    router
         .route("/api/v1/ws", get(ws::upgrade))
-        .nest("/api/v1", api::routes())
+        .route(
+            "/api/v1/openapi.json",
+            get(move || {
+                let doc = doc.clone();
+                async move { Json((*doc).clone()) }
+            }),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -74,10 +122,14 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// `{ "status": "ok" }`
+#[utoipa::path(get, path = "/healthz", tag = "server", responses((status = 200, description = "The server is up", body = api::JsonDocument)))]
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// Name, version and API version.
+#[utoipa::path(get, path = "/api/v1/version", tag = "server", responses((status = 200, description = "Version information", body = api::JsonDocument)))]
 async fn version(State(_state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "name": "snapreq",

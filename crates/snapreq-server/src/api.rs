@@ -8,11 +8,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use snapreq_collection::load::COLLECTION_FILE;
@@ -23,6 +22,8 @@ use snapreq_collection::{
 use snapreq_core::Request;
 use snapreq_test::report::{captures_json, scrub_outcomes, secrets_of};
 use snapreq_test::{Plan, Report, RunOptions, RunOutcome, Session, execute, resolve_unit};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::AppState;
 use crate::store::{HistoryEntry, HistoryQuery, RunEntry};
@@ -81,37 +82,51 @@ impl From<crate::Error> for ApiError {
 
 type ApiResult<T> = Result<T, ApiError>;
 
-pub fn routes() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/requests/execute", post(execute_request))
-        .route("/history", get(list_history))
-        .route("/history/{id}", get(get_history))
-        .route("/runs", get(list_runs).post(start_run))
-        .route("/runs/{id}", get(get_run))
-        .route(
-            "/collections",
-            get(list_collections).post(create_collection),
-        )
-        .route(
-            "/collections/{id}",
-            get(get_collection)
-                .put(put_collection)
-                .delete(delete_collection),
-        )
-        .route(
-            "/collections/{id}/requests/{*key}",
-            get(get_request).put(put_request).delete(delete_request),
-        )
-        .route(
-            "/collections/{id}/flows/{*key}",
-            get(get_flow).put(put_flow).delete(delete_flow),
-        )
-        .route(
-            "/collections/{id}/environments/{name}",
-            get(get_environment)
-                .put(put_environment)
-                .delete(delete_environment),
-        )
+/// The `/api/v1` routes with their OpenAPI description.
+pub fn router() -> OpenApiRouter<Arc<AppState>> {
+    OpenApiRouter::new()
+        .routes(routes!(execute_request))
+        .routes(routes!(list_history))
+        .routes(routes!(get_history))
+        .routes(routes!(list_runs, start_run))
+        .routes(routes!(get_run))
+        .routes(routes!(list_collections, create_collection))
+        .routes(routes!(get_collection, put_collection, delete_collection))
+        .routes(routes!(get_request, put_request, delete_request))
+        .routes(routes!(get_flow, put_flow, delete_flow))
+        .routes(routes!(
+            get_environment,
+            put_environment,
+            delete_environment
+        ))
+}
+
+/// `{ "error": { "kind", "message" } }`
+#[derive(Debug, utoipa::ToSchema)]
+pub struct ErrorBody {
+    pub error: ErrorDetail,
+}
+
+#[derive(Debug, utoipa::ToSchema)]
+pub struct ErrorDetail {
+    /// `bad_request`, `not_found`, `conflict`, `invalid` or `internal`.
+    pub kind: String,
+    pub message: String,
+}
+
+/// A JSON document; its shape is described in `docs/SERVER.md`.
+#[derive(Debug, utoipa::ToSchema)]
+#[schema(value_type = Object)]
+pub struct JsonDocument(pub Value);
+
+#[derive(Debug, utoipa::ToSchema)]
+pub struct HistoryList {
+    pub entries: Vec<crate::store::HistorySummary>,
+}
+
+#[derive(Debug, utoipa::ToSchema)]
+pub struct RunList {
+    pub runs: Vec<crate::store::RunSummary>,
 }
 
 // --- Names and paths -------------------------------------------------------------
@@ -179,10 +194,11 @@ fn remove_file(path: &Path, what: &str) -> ApiResult<StatusCode> {
 
 // --- Executing ---------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecuteBody {
-    /// A complete request.
+    /// A complete request (the core JSON model).
+    #[schema(value_type = Option<Object>)]
     pub request: Option<Request>,
     /// Or a collection request: collection id and request key.
     pub collection: Option<String>,
@@ -236,6 +252,7 @@ fn error_json(e: &snapreq_core::Error) -> Value {
     }
 }
 
+#[utoipa::path(post, path = "/requests/execute", tag = "requests", request_body = ExecuteBody, responses((status = 200, description = "The exchange (`response` or `error`), stored in history", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 /// `POST /api/v1/requests/execute`
 async fn execute_request(
     State(state): Shared,
@@ -347,9 +364,11 @@ fn hide_declared(session: &mut Session<'_>, key: &str) {
 
 // --- History -----------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
 struct HistoryParams {
+    /// Substring of the URL (case-insensitive).
     url: Option<String>,
     method: Option<String>,
     status: Option<u16>,
@@ -357,6 +376,7 @@ struct HistoryParams {
     limit: Option<usize>,
 }
 
+#[utoipa::path(get, path = "/history", tag = "history", params(HistoryParams), responses((status = 200, description = "History summaries, newest first", body = HistoryList)))]
 /// `GET /api/v1/history?url=&method=&status=&before=&limit=`
 async fn list_history(
     State(state): Shared,
@@ -375,6 +395,7 @@ async fn list_history(
     Ok(Json(json!({ "entries": entries })))
 }
 
+#[utoipa::path(get, path = "/history/{id}", tag = "history", params(("id" = i64, Path, description = "History entry id")), responses((status = 200, description = "Summary with stored request and response", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<Json<Value>> {
     match state.store.history_entry(id).await? {
         Some(e) => Ok(Json(json!(e))),
@@ -384,7 +405,7 @@ async fn get_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResu
 
 // --- Runs --------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunBody {
     pub collection: String,
@@ -395,6 +416,7 @@ pub struct RunBody {
     pub vars: BTreeMap<String, String>,
     /// One iteration per row.
     #[serde(default)]
+    #[schema(value_type = Vec<Object>)]
     pub data: Vec<BTreeMap<String, Value>>,
     pub iterations: Option<usize>,
     #[serde(default)]
@@ -403,6 +425,7 @@ pub struct RunBody {
     pub parallel: Option<usize>,
 }
 
+#[utoipa::path(post, path = "/runs", tag = "runs", request_body = RunBody, responses((status = 200, description = "The run document plus its stored `id`", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 /// `POST /api/v1/runs`: runs to completion, stores the result and returns its summary.
 async fn start_run(State(state): Shared, Json(body): Json<RunBody>) -> ApiResult<Json<Value>> {
     Ok(Json(run_body(&state, body, None).await?))
@@ -509,18 +532,21 @@ pub(crate) async fn run_body(
     Ok(summary)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 #[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
 struct LimitParams {
     limit: Option<usize>,
 }
 
+#[utoipa::path(get, path = "/runs", tag = "runs", params(LimitParams), responses((status = 200, description = "Run summaries, newest first", body = RunList)))]
 async fn list_runs(State(state): Shared, Query(p): Query<LimitParams>) -> ApiResult<Json<Value>> {
     Ok(Json(
         json!({ "runs": state.store.runs(p.limit.unwrap_or(50)).await? }),
     ))
 }
 
+#[utoipa::path(get, path = "/runs/{id}", tag = "runs", params(("id" = i64, Path, description = "Run id")), responses((status = 200, description = "The stored detailed report", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_run(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<Json<Value>> {
     match state.store.run_report(id).await? {
         Some(r) => Ok(Json(r)),
@@ -530,6 +556,7 @@ async fn get_run(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<J
 
 // --- Collections -------------------------------------------------------------
 
+#[utoipa::path(get, path = "/collections", tag = "collections", responses((status = 200, description = "Collections in the workspace", body = JsonDocument)))]
 async fn list_collections(State(state): Shared) -> ApiResult<Json<Value>> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&state.config.workspace) {
@@ -556,13 +583,14 @@ async fn list_collections(State(state): Shared) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "collections": out })))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 struct NewCollection {
     id: String,
     name: Option<String>,
 }
 
+#[utoipa::path(post, path = "/collections", tag = "collections", request_body = NewCollection, responses((status = 201, description = "Created", body = JsonDocument), (status = 409, description = "Exists", body = ErrorBody), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn create_collection(
     State(state): Shared,
     Json(body): Json<NewCollection>,
@@ -611,6 +639,7 @@ fn tree(items: &[Item], prefix: &str) -> Vec<Value> {
         .collect()
 }
 
+#[utoipa::path(get, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), responses((status = 200, description = "File, tree, flows and environments", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_collection(
     State(state): Shared,
     UrlPath(id): UrlPath<String>,
@@ -626,6 +655,7 @@ async fn get_collection(
     })))
 }
 
+#[utoipa::path(put, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), request_body(content = Object, description = "`snapreq.toml` as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_collection(
     State(state): Shared,
     UrlPath(id): UrlPath<String>,
@@ -646,6 +676,7 @@ async fn put_collection(
     Ok(Json(json!({ "id": id, "file": file })))
 }
 
+#[utoipa::path(delete, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_collection(
     State(state): Shared,
     UrlPath(id): UrlPath<String>,
@@ -658,6 +689,7 @@ async fn delete_collection(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(get, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key, e.g. `users/create`")), responses((status = 200, description = "The request file as JSON", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_request(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -671,6 +703,7 @@ async fn get_request(
     ))
 }
 
+#[utoipa::path(put, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key")), request_body(content = Object, description = "A request file as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_request(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -683,6 +716,7 @@ async fn put_request(
     Ok(Json(json!({ "key": key.trim_matches('/'), "file": file })))
 }
 
+#[utoipa::path(delete, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_request(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -692,6 +726,7 @@ async fn delete_request(
     remove_file(&path, &format!("request `{key}`"))
 }
 
+#[utoipa::path(get, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), responses((status = 200, description = "The flow file as JSON", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_flow(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -703,6 +738,7 @@ async fn get_flow(
     Ok(Json(json!({ "key": flow.key, "file": flow.file })))
 }
 
+#[utoipa::path(put, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), request_body(content = Object, description = "A flow file as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_flow(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -715,6 +751,7 @@ async fn put_flow(
     Ok(Json(json!({ "key": key.trim_matches('/'), "file": file })))
 }
 
+#[utoipa::path(delete, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_flow(
     State(state): Shared,
     UrlPath((id, key)): UrlPath<(String, String)>,
@@ -735,6 +772,7 @@ fn environment_path(state: &AppState, id: &str, name: &str) -> ApiResult<PathBuf
         .join(format!("{name}.toml")))
 }
 
+#[utoipa::path(get, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), responses((status = 200, description = "Variables (secret values never returned)", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_environment(
     State(state): Shared,
     UrlPath((id, name)): UrlPath<(String, String)>,
@@ -746,6 +784,7 @@ async fn get_environment(
     Ok(Json(json!({ "name": name, "vars": env.vars })))
 }
 
+#[utoipa::path(put, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), request_body(content = Object, description = "Variables: `{ \"name\": \"value\", \"token\": { \"secret\": true } }`"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_environment(
     State(state): Shared,
     UrlPath((id, name)): UrlPath<(String, String)>,
@@ -767,6 +806,7 @@ async fn put_environment(
     Ok(Json(json!({ "name": name, "vars": vars })))
 }
 
+#[utoipa::path(delete, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_environment(
     State(state): Shared,
     UrlPath((id, name)): UrlPath<(String, String)>,

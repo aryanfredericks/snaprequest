@@ -107,7 +107,7 @@ pub struct HistoryEntry {
 }
 
 /// A row of the history list (without the large JSON columns).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct HistorySummary {
     pub id: i64,
     /// Unix milliseconds.
@@ -152,7 +152,7 @@ pub struct RunEntry {
     pub report: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct RunSummary {
     pub id: i64,
     pub created_at: i64,

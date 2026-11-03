@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.5, OpenAPI description
+- **Current checkpoint:** P6.6, outbound request policy (SSRF protection)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.5 OpenAPI: `GET /api/v1/openapi.json` describing every endpoint (utoipa derive on handlers + DTOs; core
-   types as free-form objects to keep utoipa out of snapreq-core). Test: the document parses and lists every
-   route of `api::routes()`.
-2. P6.6 SSRF policy (connect-time IP check in core; defaults per ADR-018 mode), P6.7 Docker.
+1. P6.6 SSRF policy: core `ClientConfig::connect_policy` checked on every resolved address before connecting
+   (so DNS rebinding and redirects are covered), plus proxy targets by host name. Server config `[outbound]`
+   allow/deny lists (CIDRs, host names, `*.suffix`), `block_private`; defaults: nothing blocked on loopback-only
+   servers, cloud metadata (169.254.169.254, fd00:ec2::254, metadata.google.internal …) and link-local blocked when
+   `allow_remote` is on. Errors name the rule.
+2. P6.7 Docker (distroless, non-root) + docker-compose.yml; test with podman/docker if available.
+
+## OpenAPI notes (P6.5)
+- `utoipa` 6 + `utoipa-axum` 0.3: `api::router()` is an `OpenApiRouter` built with `routes!(...)` from
+  `#[utoipa::path]`-annotated handlers, so routes and docs cannot drift; `lib::routes()` splits router and document
+  and rewrites `{*key}` to `{key}`. `snapreq_server::openapi()`; served at `/api/v1/openapi.json` (version filled in).
+  Core types are `value_type = Object` (utoipa stays out of snapreq-core). Test checks every method+path.
 
 ## WebSocket notes (P6.4)
 - `snapreq_server::ws` (`GET /api/v1/ws`): per message `{type: execute|run, id?, ...body}`; events forwarded from an
@@ -422,6 +430,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.2 — 2026-11-03 — SQLite storage (rusqlite, ADR-019, MSRV 1.89): redacted request history and run results, migrations, retention by age and size. 325 tests total.
 - P6.3 — 2026-11-03 — REST API: execute, history, runs, collections/requests/flows/environments CRUD over the workspace; docs/SERVER.md. 329 tests total.
 - P6.4 — 2026-11-03 — WebSocket endpoint streaming live trace events and run progress, then the stored result. 330 tests total.
+- P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
