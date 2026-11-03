@@ -3,7 +3,7 @@ import { fill, MOCK } from "./helpers";
 
 async function send(page: Page, url: string, method = "GET") {
   await page.getByRole("button", { name: "New request" }).first().click();
-  if (method !== "GET") await page.getByLabel("Method").fill(method);
+  if (method !== "GET") await page.getByLabel("Method").selectOption(method);
   await fill(page, "URL", url);
   await page.keyboard.press("ControlOrMeta+Enter");
   const response = page.getByRole("region", { name: "Response" });

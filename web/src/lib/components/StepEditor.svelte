@@ -1,13 +1,13 @@
 <script lang="ts">
   import type { TreeItem, VariableInfo } from "../api/types";
   import type { StepDraft } from "../model/flow";
-  import { METHODS } from "../model/draft";
   import { HEADER_NAMES } from "../model/headers";
   import AuthEditor from "./AuthEditor.svelte";
   import BodyEditor from "./BodyEditor.svelte";
   import CodeEditor from "./CodeEditor.svelte";
   import JsonField from "./JsonField.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
+  import MethodSelect from "./MethodSelect.svelte";
   import SettingsEditor from "./SettingsEditor.svelte";
   import Tabs from "./Tabs.svelte";
 
@@ -63,8 +63,7 @@
     <p class="muted small">The request is sent as its file says; checks and captures below are added to its own.</p>
   {:else}
     <div class="line">
-      <input class="method" bind:value={d.method} list="step-methods" aria-label="Step {number} method" size="7" oninput={(e) => (d.method = e.currentTarget.value.toUpperCase())} />
-      <datalist id="step-methods">{#each METHODS as m (m)}<option value={m}></option>{/each}</datalist>
+      <MethodSelect bind:value={d.method} label="Step {number} method" />
       <CodeEditor value={d.url} singleLine highlightVars {vars} label="Step {number} URL" onchange={(v) => (d.url = v)} class="url" />
     </div>
   {/if}
@@ -146,11 +145,6 @@
   }
   .line :global(.url) {
     flex: 1;
-  }
-  .method {
-    font-family: var(--mono);
-    font-weight: 600;
-    text-align: center;
   }
   .retry,
   .checks {

@@ -1,12 +1,12 @@
 <script lang="ts">
   import { app, type RequestTab } from "../state/app.svelte";
-  import { METHODS } from "../model/draft";
   import { HEADER_NAMES } from "../model/headers";
   import AuthEditor from "./AuthEditor.svelte";
   import BodyEditor from "./BodyEditor.svelte";
   import CodeEditor from "./CodeEditor.svelte";
   import JsonField from "./JsonField.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
+  import MethodSelect from "./MethodSelect.svelte";
   import SaveDialog from "./SaveDialog.svelte";
   import SettingsEditor from "./SettingsEditor.svelte";
   import Tabs from "./Tabs.svelte";
@@ -54,15 +54,7 @@
     {/if}
   </div>
   <form class="line" onsubmit={(e) => (e.preventDefault(), app.send(tab))}>
-    <input
-      class="method m-{d.method.toLowerCase()}"
-      bind:value={d.method}
-      list="methods"
-      aria-label="Method"
-      oninput={(e) => (d.method = e.currentTarget.value.toUpperCase())}
-      size="7"
-    />
-    <datalist id="methods">{#each METHODS as m (m)}<option value={m}></option>{/each}</datalist>
+    <MethodSelect bind:value={d.method} label="Method" />
     <CodeEditor
       value={d.url}
       singleLine
@@ -144,11 +136,6 @@
     gap: 0.4rem;
     align-items: stretch;
   }
-  .method {
-    font-family: var(--mono);
-    font-weight: 600;
-    text-align: center;
-  }
   .line :global(.url) {
     flex: 1;
   }
@@ -172,10 +159,5 @@
   }
   .small {
     font-size: 0.78rem;
-  }
-  .error {
-    color: var(--danger);
-    margin: 0;
-    font-size: 0.85rem;
   }
 </style>

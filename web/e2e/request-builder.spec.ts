@@ -41,7 +41,7 @@ test("edits are sent unsaved and saved with Ctrl+S", async ({ page }) => {
 test("a scratch request can be saved into a collection", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New request" }).first().click();
-  await page.getByLabel("Method").fill("POST");
+  await page.getByLabel("Method").selectOption("POST");
   await fill(page, "URL", `${MOCK}/login`);
   await page.getByRole("tab", { name: /Body/ }).click();
   await page.getByLabel("JSON").check();
@@ -61,7 +61,7 @@ test("a scratch request can be saved into a collection", async ({ page }) => {
 test("Ctrl+Enter in an editor sends without changing the text", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New request" }).first().click();
-  await page.getByLabel("Method").fill("POST");
+  await page.getByLabel("Method").selectOption("POST");
   await fill(page, "URL", `${MOCK}/health`);
   await page.getByRole("tab", { name: /Body/ }).click();
   await page.getByLabel("JSON").check();
@@ -72,4 +72,14 @@ test("Ctrl+Enter in an editor sends without changing the text", async ({ page })
   await page.getByRole("textbox", { name: "URL", exact: true }).click();
   await page.keyboard.press("ControlOrMeta+Enter");
   await expect(page.getByRole("textbox", { name: "URL", exact: true })).toHaveText(`${MOCK}/health`);
+});
+
+test("the method is chosen from a fixed list", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "New request" }).first().click();
+  const method = page.getByRole("combobox", { name: "Method", exact: true });
+  expect(await method.evaluate((el) => el.tagName)).toBe("SELECT");
+  expect(await method.locator("option").allTextContents()).toEqual(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+  await method.selectOption("DELETE");
+  await expect(method).toHaveValue("DELETE");
 });
