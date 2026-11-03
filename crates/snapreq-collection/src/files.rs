@@ -8,6 +8,7 @@ use snapreq_core::model::{
 };
 
 use crate::assert::AssertSpec;
+use crate::capture::Captures;
 use crate::kv::KeyValues;
 use crate::vars::Variables;
 
@@ -97,6 +98,9 @@ pub struct RequestFile {
     pub body: Option<BodySpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
+    /// Values taken from the response into variables for later requests.
+    #[serde(default, skip_serializing_if = "Captures::is_empty")]
+    pub capture: Captures,
     /// Checks run on the response (boxed: most requests have none, and it is large).
     #[serde(default, skip_serializing_if = "no_checks")]
     pub assert: Box<AssertSpec>,
@@ -116,6 +120,7 @@ impl RequestFile {
             auth: None,
             body: None,
             settings: Settings::default(),
+            capture: Captures::default(),
             assert: Box::default(),
         }
     }
@@ -159,6 +164,7 @@ impl RequestFile {
             }
             _ => {}
         }
+        self.capture.validate()?;
         self.settings.validate()
     }
 }

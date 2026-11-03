@@ -151,19 +151,23 @@ async fn run_send(args: &SendArgs) -> u8 {
 
     let built = collection_cmd::resolve_target(args).and_then(|target| match target {
         collection_cmd::Target::Url => {
-            send::build_request(args).map(|r| (r, snapreq_collection::AssertSpec::default()))
+            send::build_request(args).map(|r| (r, Default::default(), Default::default()))
         }
         collection_cmd::Target::Collection { root, key } => {
             collection_cmd::build(&root, &key, args)
         }
     });
-    let (mut request, checks) = match built {
+    let (mut request, checks, capture_spec) = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
     };
     // Invalid JSONPaths, patterns or schema files are reported before anything is sent.
     let assertions = match snapreq_test::Assertions::compile(&checks) {
         Ok(a) => a,
+        Err(e) => return invalid(e),
+    };
+    let capturer = match snapreq_test::Capturer::compile(&capture_spec) {
+        Ok(c) => c,
         Err(e) => return invalid(e),
     };
     if send::needs_password_prompt(args)
@@ -229,10 +233,14 @@ async fn run_send(args: &SendArgs) -> u8 {
             }
             let mut outcomes = assertions.evaluate(&response);
             assert_view::scrub(&mut outcomes, &request.secrets());
+            let captures = capturer.extract(&response);
             if json {
                 let mut doc = json_out::success(&request, &response, args.output.as_deref());
                 if !outcomes.is_empty() {
                     doc["assertions"] = serde_json::to_value(&outcomes).unwrap_or_default();
+                }
+                if !captures.is_empty() {
+                    doc["captures"] = assert_view::captures_json(&captures, &request.secrets());
                 }
                 emit_json(&doc);
             } else {
@@ -244,6 +252,10 @@ async fn run_send(args: &SendArgs) -> u8 {
                         return exit::INTERNAL;
                     }
                 }
+            }
+            if !json && args.verbose > 0 && !captures.is_empty() {
+                let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);
+                let _ = assert_view::render_captures(&mut err, &captures, &request.secrets());
             }
             if !json && !outcomes.is_empty() {
                 let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);

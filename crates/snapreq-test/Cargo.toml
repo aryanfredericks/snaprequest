@@ -21,6 +21,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util.workspace = true
+tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }
 toml.workspace = true
 

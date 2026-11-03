@@ -37,6 +37,23 @@ impl Variables {
         self.0.iter().find(|v| v.name == name)
     }
 
+    /// Sets (or replaces) a secret variable with a value (a secret capture, say).
+    pub fn set_secret(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let name = name.into();
+        let value = Some(value.into());
+        match self.0.iter_mut().find(|v| v.name == name) {
+            Some(v) => {
+                v.value = value;
+                v.secret = true;
+            }
+            None => self.0.push(Variable {
+                name,
+                value,
+                secret: true,
+            }),
+        }
+    }
+
     /// Sets (or replaces) a plain variable.
     pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) {
         let name = name.into();

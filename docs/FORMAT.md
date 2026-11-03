@@ -236,6 +236,28 @@ A check is a plain value (shorthand for `equals`) or a table of operators:
 - Invalid JSONPaths, regular expressions and schema files are reported before the request is sent.
 - Assertions belong to the request file; they are not inherited from folders or the collection.
 
+### Captures
+
+`[capture]` takes values from the response into variables. Within one run (`snapreq run`, a flow) later
+requests see them as runtime variables, the highest-precedence scope.
+
+```toml
+[capture]
+user_id = "$.user.id"                               # a plain string is a JSONPath into the body
+token = { json = "$.access_token", secret = true }  # hidden in every later trace and report
+next = { header = "Location" }                      # first value, name case-insensitive
+session = { cookie = "sid" }                        # from Set-Cookie
+csrf = { regex = 'name="csrf" value="([^"]+)"' }    # group 1 if the pattern has groups, else the match
+code = { status = true }
+raw = { body = true }
+```
+
+- Each capture has exactly one source; `group = N` picks a regex group.
+- JSON strings are captured as their text; other JSON values (numbers, arrays, objects) as compact JSON.
+  A JSONPath matching several values captures them as an array.
+- A source that is missing fails the capture (the run reports it); the variable stays undefined, so a
+  later request that uses it fails with "variable is not defined".
+
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,

@@ -1,8 +1,12 @@
 //! SnapRequest assertions, collection runner and reporters.
 
 pub mod assert;
+pub mod capture;
+pub mod session;
 
 pub use assert::{Assertions, Outcome};
+pub use capture::{Captured, Capturer};
+pub use session::{RequestRun, RunOutcome, Session};
 
 /// Errors produced by `snapreq-test`.
 #[derive(Debug, thiserror::Error)]

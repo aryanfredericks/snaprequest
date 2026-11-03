@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
-- **Current checkpoint:** P5.2, chaining (captures)
+- **Current checkpoint:** P5.3, flows (chain testing)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,16 +25,24 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.2 chaining: a `[capture]` table in request files, `name = { json = "$.id" }` / `{ header = "location" }` /
-   `{ regex = "...", group = 1 }` / `{ cookie = "sid" }` / `{ status = true }`, optional `secret = true`. Captured
-   values go into the runtime scope for later requests in the same run (the runner and flows use this; for a
-   single `snapreq send` print them with -v). Captured secrets join `settings.secrets` of later requests.
-   Design it so flow steps can use the same table as `[step.capture]`.
-2. P5.3 flows (`*.flow.toml`, added to PLAN on 2026-11-03 at the maintainer's request): ordered `[[step]]`s that
-   reference collection requests (`request = "auth/login"`) or define inline ones, with `vars`, `[step.capture]`,
-   `[step.assert]`, `retry = { until, every_ms, max }`, `delay_ms`; stop at the first failing step. Needs an ADR
-   for the flow file format (reuse `RequestFile` fields for inline steps).
-3. P5.4 `snapreq run` (collection | folder | flow), then run control, reporters, CI (P5.5–P5.7).
+1. P5.3 flows (`*.flow.toml`, maintainer request 2026-11-03): ordered `[[step]]`s that reference collection
+   requests (`request = "auth/login"`) or define inline ones (reuse `RequestFile` fields), with step `vars`,
+   `[step.capture]`, `[step.assert]` (same types as request files: `Captures`, `AssertSpec`), `retry = { until,
+   every_ms, max }` (until = an assertion-style check?) and `delay_ms`; stop at the first failing step. Build on
+   `snapreq_test::Session` (add a way to send an inline `RequestFile` with the collection's inheritance). Where
+   flows live: inside a collection (e.g. `flows/` dir, excluded from the request tree) so they share envs and
+   secrets. Needs an ADR for the flow format. CLI: `snapreq run x.flow.toml` can come with P5.4.
+2. P5.4 `snapreq run` (collection | folder | flow) on top of `Session`; unify `snapreq send` on `Session` too.
+
+## Capture notes (P5.2)
+- Format: `snapreq_collection::capture::{Captures, CaptureSpec, CaptureSource}`; `RequestFile::capture`; plain string =
+  JSONPath; exactly one source (json/header/cookie/regex+group/status/body), `secret`; validated at load.
+- `snapreq_test::Capturer::{compile, extract}` → `Captured { name, value, secret, error }` (`shown()` redacts).
+- `snapreq_test::Session` (collection, env, secrets, client; `runtime`/`globals` Variables): `send(key, adjust)` builds
+  with the runtime scope, hides earlier secret values, evaluates assertions, stores captures
+  (`Variables::set_secret` for secret ones). `RequestRun { request, outcome: Response | Invalid | Failed, assertions,
+  captures }`, `passed()`.
+- CLI `send`: captures listed with `-v` and in JSON `captures`; invalid capture specs exit 3 before sending.
 
 ## Assertion notes (P5.1)
 - Format (ADR-016): `snapreq_collection::assert::{AssertSpec, Check, Checks, JsonType}`; `RequestFile::assert` is a
@@ -312,6 +320,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P4.4 — 2026-11-03 — AWS Signature V4 (every hop signed, strict query encoding, S3 payload hash), verified against botocore vectors and a re-verifying mock. 281 tests total.
 - P4.5 — 2026-11-03 — `effective_auth` and auth markers in `snapreq ls`. Phase 4 complete. 282 tests total.
 - P5.1 — 2026-11-03 — Declarative `[assert]` checks (status, duration, body, headers, JSONPath, JSON Schema) evaluated by `snapreq-test`; `snapreq send` reports them, exit code 7; ADR-016. 293 tests total.
+- P5.2 — 2026-11-03 — `[capture]` (JSONPath, header, cookie, regex, status, body; secret captures) and `snapreq_test::Session` passing captured values to later requests. 297 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -328,4 +337,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
-- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1 done.
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1 and P5.2 done.

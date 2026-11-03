@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use snapreq_collection::load::COLLECTION_FILE;
 use snapreq_collection::save::{save_collection, save_request};
 use snapreq_collection::{
-    AssertSpec, Collection, CollectionFile, Environment, Item, RequestFile, Scopes, Secrets,
-    Variables, build_assertions, build_request, secrets,
+    AssertSpec, Captures, Collection, CollectionFile, Environment, Item, RequestFile, Scopes,
+    Secrets, Variables, build_assertions, build_request, secrets,
 };
 use snapreq_core::Request;
 
@@ -103,12 +103,12 @@ fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
 
 /// Builds the collection request `key`, then applies command-line overrides.
 /// Collection warnings are printed to stderr.
-/// Builds the request and its `[assert]` checks (empty with `--no-assert`).
+/// Builds the request, its `[assert]` checks (empty with `--no-assert`) and its captures.
 pub(crate) fn build(
     root: &Path,
     key: &str,
     args: &SendArgs,
-) -> Result<(Request, AssertSpec), ArgError> {
+) -> Result<(Request, AssertSpec, Captures), ArgError> {
     let (collection, warnings) = Collection::load(root).map_err(|e| ArgError(e.to_string()))?;
     for w in &warnings {
         eprintln!("warning: {w}");
@@ -147,7 +147,11 @@ pub(crate) fn build(
     } else {
         build_assertions(&collection, key, &scopes).map_err(|e| ArgError(e.to_string()))?
     };
-    Ok((req, checks))
+    let captures = collection
+        .find(key)
+        .map(|item| item.file.capture.clone())
+        .unwrap_or_default();
+    Ok((req, checks, captures))
 }
 
 /// `snapreq ls`.

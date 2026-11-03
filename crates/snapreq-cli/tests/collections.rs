@@ -522,3 +522,73 @@ async fn request_file_assertions_run_after_the_response() {
     assert_eq!(o.status.code(), Some(3), "{}", err(&o));
     assert!(err(&o).contains("invalid JSONPath `$.[`"), "{}", err(&o));
 }
+
+#[tokio::test]
+async fn request_file_captures_are_shown_with_v_and_in_json() {
+    let addr = server().await;
+    let dir = collection("captures");
+    let file = dir.join("cap.toml");
+    std::fs::write(
+        &file,
+        "url = \"{{base_url}}/cap\"\n[capture]\nline = { regex = '^(\\w+) (\\S+)', group = 2 }\nstatus = { status = true }\nsecret = { body = true, secret = true }\nmissing = { header = \"x-nope\" }\n",
+    )
+    .unwrap();
+    let base = format!("base_url=http://{addr}");
+    let o = run(
+        &["send", file.to_str().unwrap(), "--var", &base, "-v"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let e = err(&o);
+    assert!(e.contains("captured line = /cap\n"), "{e}");
+    assert!(e.contains("captured status = 200\n"), "{e}");
+    assert!(e.contains("captured secret = <redacted>\n"), "{e}");
+    assert!(
+        e.contains("not captured missing: no `x-nope` header\n"),
+        "{e}"
+    );
+
+    let o = run(
+        &[
+            "send",
+            file.to_str().unwrap(),
+            "--var",
+            &base,
+            "--format",
+            "json",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(
+        doc["captures"][0],
+        serde_json::json!({"name": "line", "value": "/cap", "secret": false})
+    );
+    assert_eq!(doc["captures"][2]["value"], "<redacted>");
+    assert_eq!(doc["captures"][3]["error"], "no `x-nope` header");
+
+    std::fs::write(
+        &file,
+        "url = \"{{base_url}}/cap\"\n[capture]\nx = { regex = \"(\" }\n",
+    )
+    .unwrap();
+    let o = run(
+        &["send", file.to_str().unwrap(), "--var", &base],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(3), "{}", err(&o));
+    assert!(
+        err(&o).contains("capture `x`: invalid regular expression"),
+        "{}",
+        err(&o)
+    );
+}

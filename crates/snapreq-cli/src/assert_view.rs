@@ -3,7 +3,7 @@
 use std::io::{self, Write};
 
 use anstyle::{AnsiColor, Style};
-use snapreq_test::Outcome;
+use snapreq_test::{Captured, Outcome};
 
 const PASS: Style = AnsiColor::Green.on_default();
 const FAIL: Style = AnsiColor::Red.on_default().bold();
@@ -66,6 +66,51 @@ pub(crate) fn render(out: &mut dyn Write, outcomes: &[Outcome]) -> io::Result<()
             "{FAIL}assertions: {passed} passed, {failed} failed{FAIL:#}"
         )
     }
+}
+
+/// The value of a capture as shown: secret captures and known secrets hidden.
+fn shown(c: &Captured, secrets: &[String]) -> Option<String> {
+    let mut v = c.shown()?.to_owned();
+    for s in secrets.iter().filter(|s| !s.is_empty()) {
+        v = v.replace(s.as_str(), "<redacted>");
+    }
+    Some(v)
+}
+
+/// `captured name = value` lines (with `-v`).
+pub(crate) fn render_captures(
+    out: &mut dyn Write,
+    captures: &[Captured],
+    secrets: &[String],
+) -> io::Result<()> {
+    for c in captures {
+        match (shown(c, secrets), &c.error) {
+            (Some(v), _) => writeln!(out, "{DIM}captured{DIM:#} {} = {v}", c.name)?,
+            (None, Some(e)) => writeln!(out, "{FAIL}not captured{FAIL:#} {}: {e}", c.name)?,
+            (None, None) => {}
+        }
+    }
+    Ok(())
+}
+
+/// `[{ "name", "value", "secret", "error"? }]` for `--format json`.
+pub(crate) fn captures_json(captures: &[Captured], secrets: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        captures
+            .iter()
+            .map(|c| {
+                let mut v = serde_json::json!({
+                    "name": c.name,
+                    "value": shown(c, secrets),
+                    "secret": c.secret,
+                });
+                if let Some(e) = &c.error {
+                    v["error"] = serde_json::json!(e);
+                }
+                v
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

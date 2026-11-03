@@ -3,6 +3,7 @@
 
 pub mod assert;
 pub mod build;
+pub mod capture;
 pub mod error;
 pub mod files;
 pub mod interp;
@@ -14,6 +15,7 @@ pub mod vars;
 
 pub use assert::{AssertSpec, Check, Checks, JsonType};
 pub use build::{build_assertions, build_request, effective_auth};
+pub use capture::{CaptureSource, CaptureSpec, Captures};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,

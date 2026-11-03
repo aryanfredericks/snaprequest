@@ -64,6 +64,9 @@ A request file's `[assert]` checks (see `docs/FORMAT.md`) run after the response
 stderr, one line per check, then a summary; the exit code is 7 if any check failed. `--no-assert`
 skips them. Credential and secret values are hidden in the reported actual values.
 
+With `-v`, the request file's `[capture]` values are listed (`captured user_id = 7`; secret captures as
+`<redacted>`). A single `send` does not keep them; `snapreq run` and flows pass them to later requests.
+
 ```text
 ✓ status equals 201
 ✗ json $.id type integer  (actual: "abc")
@@ -244,6 +247,8 @@ One JSON document is written to stdout, for success and failure alike. Exit code
 - When the request file has `[assert]` checks, `assertions` lists them:
   `[{ "subject": "json $.id", "check": "type integer", "passed": false, "actual": "\"abc\"" }]`
   (`message` explains checks that could not be applied, and schema errors).
+- When it has `[capture]` entries, `captures` lists them:
+  `[{ "name": "user_id", "value": "7", "secret": false }]` (secret values `"<redacted>"`, `error` when missing).
 - On failure `response` is `null` and `error` is
   `{ "kind": "execution", "phase": "connect", "timed_out": false, "message": "…", "trace": […] }`, or
   `{ "kind": "invalid_request", "message": "…" }` when nothing was sent.
