@@ -935,3 +935,114 @@ async fn run_bail_parallel_and_delay_options() {
         err(&o)
     );
 }
+
+#[tokio::test]
+async fn run_writes_junit_html_and_json_reports_without_secrets() {
+    let addr = server().await;
+    let dir = collection("reports");
+    std::fs::write(
+        dir.join("users/hello.toml"),
+        "url = \"{{base_url}}/hello/{{who}}\"\n[assert.body]\nnot_contains = \"/hello/bob\"\n",
+    )
+    .unwrap();
+    let csv = dir.join("people.csv");
+    std::fs::write(&csv, "who\nalice\nbob\n").unwrap();
+    let out_dir = dir.join("reports");
+    let junit = out_dir.join("junit.xml");
+    let html = out_dir.join("report.html");
+    let json = out_dir.join("run.json");
+    let base = format!("base_url=http://{addr}");
+    let o = run(
+        &[
+            "run",
+            "-c",
+            dir.to_str().unwrap(),
+            "users",
+            "-e",
+            "dev",
+            "--data",
+            csv.to_str().unwrap(),
+            "--var",
+            &base,
+            "--var",
+            "token=sup3r-secret-tok",
+            "--report",
+            &format!("junit:{}", junit.display()),
+            "--report",
+            &format!("html:{}", html.display()),
+            "--report",
+            &format!("json:{}", json.display()),
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(7), "{}{}", out(&o), err(&o));
+    assert!(
+        err(&o).contains(&format!("report written to {}", junit.display())),
+        "{}",
+        err(&o)
+    );
+
+    let xml = std::fs::read_to_string(&junit).unwrap();
+    assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"Basic API\" tests=\"8\" failures=\"1\" errors=\"0\" skipped=\"0\""), "{xml}");
+    assert_eq!(xml.matches("<testsuite ").count(), 2, "{xml}");
+    assert!(
+        xml.contains("name=\"Basic API (users) [iteration 2: who=bob]\""),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<testcase classname=\"users\" name=\"3. users/hello\""),
+        "{xml}"
+    );
+    assert!(xml.contains("<failure type=\"assertion\" message=\"body not contains &quot;/hello/bob&quot; (actual: "), "{xml}");
+
+    let page = std::fs::read_to_string(&html).unwrap();
+    assert!(page.starts_with("<!DOCTYPE html>"), "{page}");
+    assert!(
+        page.contains("users/create-user") && page.contains("Iteration 2"),
+        "self-contained page"
+    );
+    assert!(
+        !page.contains("<script") && !page.contains("http-equiv") && !page.contains("<link"),
+        "no external assets"
+    );
+    // The echo server sends the Authorization header back in the body.
+    assert!(
+        page.contains("authorization: Bearer &lt;redacted&gt;"),
+        "body secrets hidden"
+    );
+
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+    let step = &doc["iterations"][0]["steps"][1];
+    assert_eq!(step["key"], "users/create-user");
+    assert!(step["response"]["trace"].as_array().unwrap().len() > 3);
+    assert!(step["response"]["headers"].is_array());
+
+    for text in [xml, page, doc.to_string()] {
+        assert!(!text.contains("sup3r-secret-tok"), "secret leaked: {text}");
+    }
+
+    let o = run(
+        &[
+            "run",
+            "-c",
+            dir.to_str().unwrap(),
+            "users",
+            "--report",
+            "pdf:x.pdf",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(o.status.code(), Some(3));
+    assert!(
+        err(&o).contains("unknown report format `pdf`"),
+        "{}",
+        err(&o)
+    );
+}

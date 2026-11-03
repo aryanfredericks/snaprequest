@@ -134,6 +134,18 @@ pub(crate) struct RunArgs {
     /// Value to hide in all output. Repeatable.
     #[arg(long = "secret", value_name = "VALUE")]
     pub secrets: Vec<String>,
+
+    /// Write a report: `junit:FILE`, `html:FILE` or `json:FILE` (with full traces). Repeatable.
+    #[arg(long = "report", value_name = "FORMAT:FILE")]
+    pub reports: Vec<String>,
+}
+
+/// Report formats of `snapreq run --report`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReportFormat {
+    Junit,
+    Html,
+    Json,
 }
 
 #[derive(Debug, Args)]

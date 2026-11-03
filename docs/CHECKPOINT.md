@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
-- **Current checkpoint:** P5.6, reporters (JUnit XML, HTML, JSON)
+- **Current checkpoint:** P5.7, CI exit codes and example GitHub Actions workflow
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,15 +25,22 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.6 reporters: `snapreq run --report junit:out.xml --report html:report.html --report json:run.json`
-   (repeatable). JUnit: one testsuite per iteration (or per run), one testcase per request/step, failures with
-   expected vs actual, `<system-out>` with the redacted trace summary. HTML: single self-contained file (inline CSS,
-   no external assets), per step request/response headers, checks, captures and the waterfall/trace (redacted).
-   JSON: the `--format json` document plus full (redacted) traces. Put the report builders in `snapreq-test`
-   (`report` module) so the server can reuse them; the CLI only writes files.
-2. P5.7: exit codes doc + example GitHub Actions workflow (fixture collection + a fixture flow against a mock,
-   publishing the JUnit report) → Phase 5 acceptance.
-3. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+1. P5.7 (closes Phase 5): document exit codes for CI in one place; add `examples/ci/` with a small fixture
+   collection + flow and a mock server the workflow can start (or run against a public echo API? prefer a local
+   mock: e.g. a tiny `snapreq-mock` dev binary or a Python `http.server`-free option; decide), and
+   `.github/workflows/api-tests.yml` running `snapreq run ... --report junit:...` and publishing the JUnit report
+   (e.g. `mikepenz/action-junit-report` or uploading the HTML as an artifact). Phase 5 acceptance: CI job runs a
+   fixture collection and a fixture flow and publishes a JUnit report.
+2. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+
+## Report notes (P5.6)
+- `snapreq_test::report`: `Report::new(collection, unit, iterations, planned, secret_vars)` → `json(details)`,
+  `junit()`, `html()`; helpers `hide`, `hide_url`, `scrub_outcomes`, `captures_json`, `lines`, `counts`,
+  `request_line`, `secrets_of` (the CLI's run output and `assert_view` now use these).
+- Reports hide known secrets in response bodies too (64 KiB body cap); HTML is self-contained (inline CSS, no
+  scripts), failures expanded, waterfall bars from `Timings`, readable trace lines.
+- CLI `--report junit:FILE|html:FILE|json:FILE` (repeatable, creates directories, "report written to" on stderr;
+  write failure → exit 1).
 
 ## Run control notes (P5.5)
 - `RunOptions { bail, delay, parallel }` on `Plan`. `execute` drives iterations with
@@ -358,6 +365,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.3 — 2026-11-03 — Flows (`*.flow.toml`): chained steps (collection or inline requests) with captures, checks, delays and retry-until polling; `snapreq run FLOW`; ADR-017. 302 tests total.
 - P5.4 — 2026-11-03 — `snapreq run` for collections and folders, `--iterations`, data-driven runs (`--data` CSV/JSON). 306 tests total.
 - P5.5 — 2026-11-03 — Run control: `--bail`, `--delay`, `--parallel` (concurrent iterations, ordered results). 308 tests total.
+- P5.6 — 2026-11-03 — Reports: JUnit XML, self-contained HTML and detailed JSON (`snapreq run --report`), secrets hidden everywhere including bodies. 309 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -374,4 +382,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
-- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.5 done (assertions, captures, flows, collection/data runs, run control).
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.6 done (assertions, captures, flows, collection/data runs, run control, reports).

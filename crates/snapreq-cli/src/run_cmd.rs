@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
-use serde_json::{Value, json};
 use snapreq_collection::{Collection, Environment, FLOW_SUFFIX, Scopes, Secrets};
 use snapreq_core::{Error, Request};
+use snapreq_test::report::{counts, lines, request_line, secrets_of};
 use snapreq_test::{
-    Iteration, Plan, RequestRun, RunOptions, RunOutcome, Unit, UnitRun, data, execute, request_keys,
+    Iteration, Plan, Report, RequestRun, RunOptions, RunOutcome, Unit, data, execute, request_keys,
 };
 
-use crate::cli::{ColorArg, FormatArg, RunArgs};
+use crate::cli::{ColorArg, FormatArg, ReportFormat, RunArgs};
 use crate::collection_cmd::{find_root, parse_vars};
 use crate::send::ArgError;
 use crate::{assert_view, exit, json_out, trace_view};
@@ -175,6 +175,14 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
         None => None,
     };
 
+    let mut reports = Vec::new();
+    for spec in &args.reports {
+        match parse_report(spec) {
+            Ok(r) => reports.push(r),
+            Err(e) => return invalid(e),
+        }
+    }
+
     // Values of variables declared secret are hidden, whether they come from --var or data.
     let scope_key = match &unit {
         Unit::Flow(f) => f.key.clone(),
@@ -227,10 +235,44 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
         }
     };
     let iterations = execute(&plan, &unit, adjust).await;
-    let info = Info::new(&collection, &unit);
+    let secret_vars: Vec<String> = plan
+        .overrides
+        .0
+        .iter()
+        .chain(plan.rows.iter().flat_map(|r| &r.0))
+        .map(|v| v.name.clone())
+        .filter(|n| declared.is_declared_secret(n))
+        .collect();
+    let report = Report::new(&collection, &unit, &iterations, planned, secret_vars);
+
+    let mut code = exit_code(&iterations);
+    for (format, path) in &reports {
+        let text = match format {
+            ReportFormat::Junit => report.junit(),
+            ReportFormat::Html => report.html(),
+            ReportFormat::Json => {
+                serde_json::to_string_pretty(&report.json(true)).unwrap_or_default() + "\n"
+            }
+        };
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
+            && let Err(e) = std::fs::create_dir_all(dir)
+        {
+            eprintln!("error: cannot create `{}`: {e}", dir.display());
+            code = exit::INTERNAL;
+            continue;
+        }
+        match std::fs::write(path, text) {
+            Ok(()) if !json => eprintln!("report written to {}", path.display()),
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("error: cannot write `{}`: {e}", path.display());
+                code = exit::INTERNAL;
+            }
+        }
+    }
 
     if json {
-        crate::emit_json(&json_doc(&info, &iterations, planned, &declared));
+        crate::emit_json(&report.json(false));
     } else {
         let color = match args.color {
             ColorArg::Auto => anstream::ColorChoice::Auto,
@@ -238,59 +280,14 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             ColorArg::Never => anstream::ColorChoice::Never,
         };
         let mut out = anstream::AutoStream::new(io::stdout().lock(), color);
-        if let Err(e) = render(
-            &mut out,
-            &info,
-            &iterations,
-            planned,
-            args.verbose,
-            &declared,
-        ) && e.kind() != io::ErrorKind::BrokenPipe
+        if let Err(e) = render(&mut out, &report, args.verbose)
+            && e.kind() != io::ErrorKind::BrokenPipe
         {
             eprintln!("error: {e}");
             return exit::INTERNAL;
         }
     }
-    exit_code(&iterations)
-}
-
-/// Header information about the unit.
-struct Info {
-    kind: &'static str,
-    key: String,
-    name: String,
-}
-
-impl Info {
-    fn new(c: &Collection, unit: &Unit<'_>) -> Self {
-        match unit {
-            Unit::Flow(f) => Self {
-                kind: "flow",
-                key: f.key.clone(),
-                name: f.name().to_owned(),
-            },
-            Unit::Requests(keys) => {
-                let all = c.requests().len();
-                let folder = if keys.len() == all {
-                    String::new()
-                } else {
-                    keys[0]
-                        .rsplit_once('/')
-                        .map(|(f, _)| f.to_owned())
-                        .unwrap_or_default()
-                };
-                Self {
-                    kind: if folder.is_empty() {
-                        "collection"
-                    } else {
-                        "folder"
-                    },
-                    name: c.file.name.clone(),
-                    key: folder,
-                }
-            }
-        }
-    }
+    code
 }
 
 /// The worst failure decides: a request that could not be built, then network trouble,
@@ -321,108 +318,29 @@ fn exit_code(iterations: &[Iteration]) -> u8 {
     }
 }
 
-/// One line of output: a flow step or a request.
-struct Line<'a> {
-    number: usize,
-    title: &'a str,
-    attempts: u32,
-    run: &'a RequestRun,
-}
-
-fn lines(it: &Iteration) -> Vec<Line<'_>> {
-    match &it.result {
-        UnitRun::Flow(f) => f
-            .steps
-            .iter()
-            .map(|s| Line {
-                number: s.number,
-                title: &s.title,
-                attempts: s.attempts,
-                run: &s.run,
-            })
-            .collect(),
-        UnitRun::Requests { runs, .. } => runs
-            .iter()
-            .enumerate()
-            .map(|(i, r)| Line {
-                number: i + 1,
-                title: &r.key,
-                attempts: 1,
-                run: r,
-            })
-            .collect(),
-    }
-}
-
-/// Total and skipped lines of an iteration.
-fn counts(it: &Iteration) -> (usize, usize) {
-    match &it.result {
-        UnitRun::Flow(f) => (f.total, f.skipped()),
-        UnitRun::Requests { runs, total } => (*total, total - runs.len()),
-    }
-}
-
-/// `METHOD url` with secrets removed.
-fn request_line(run: &RequestRun) -> String {
-    match &run.request {
-        Some(req) => {
-            let url = req
-                .effective_url()
-                .map_or_else(|_| req.url.clone(), |u| u.to_string());
-            format!("{} {}", req.method, json_out::scrub(req, &url))
-        }
-        None => String::new(),
-    }
-}
-
-fn secrets_of(run: &RequestRun) -> Vec<String> {
-    run.request
-        .as_ref()
-        .map(Request::secrets)
-        .unwrap_or_default()
-}
-
-/// `user=alice, role=admin`, with declared secrets hidden.
-fn row_text(it: &Iteration, declared: &Scopes) -> Option<String> {
-    let row = it.data.as_ref()?;
-    Some(
-        row.0
-            .iter()
-            .map(|v| {
-                let value = if declared.is_declared_secret(&v.name) {
-                    "<redacted>"
-                } else {
-                    v.value.as_deref().unwrap_or_default()
-                };
-                format!("{}={value}", v.name)
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
-}
-
-fn render(
-    out: &mut dyn Write,
-    info: &Info,
-    iterations: &[Iteration],
-    planned: usize,
-    verbose: u8,
-    declared: &Scopes,
-) -> io::Result<()> {
-    let what = match info.kind {
+fn render(out: &mut dyn Write, report: &Report<'_>, verbose: u8) -> io::Result<()> {
+    let what = match report.kind {
         "collection" => "collection".to_owned(),
-        _ => info.key.clone(),
+        _ => report.key.clone(),
     };
-    writeln!(out, "{}  {DIM}{what}{DIM:#}", info.name)?;
+    writeln!(out, "{}  {DIM}{what}{DIM:#}", report.name)?;
+    let (iterations, planned) = (report.iterations, report.planned);
     let many = planned > 1;
     for it in iterations {
         if many {
-            let row = row_text(it, declared)
+            let row = report
+                .row(it)
+                .map(|r| {
+                    r.iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
                 .map(|r| format!("  {DIM}{r}{DIM:#}"))
                 .unwrap_or_default();
             writeln!(out, "iteration {}/{planned}{row}", it.number)?;
         }
-        render_iteration(out, info, it, verbose)?;
+        render_iteration(out, report, it, verbose)?;
     }
     if many {
         let failed = iterations.iter().filter(|i| !i.passed()).count();
@@ -446,7 +364,7 @@ fn render(
 
 fn render_iteration(
     out: &mut dyn Write,
-    info: &Info,
+    info: &Report<'_>,
     it: &Iteration,
     verbose: u8,
 ) -> io::Result<()> {
@@ -585,84 +503,23 @@ impl Write for Indented<'_> {
     }
 }
 
-fn step_json(line: &Line<'_>) -> Value {
-    let run = line.run;
-    let secrets = secrets_of(run);
-    let mut assertions = run.assertions.clone();
-    let mut until = run.until.clone();
-    assert_view::scrub(&mut assertions, &secrets);
-    assert_view::scrub(&mut until, &secrets);
-    let (response, error) = match &run.outcome {
-        RunOutcome::Response(r) => (
-            json!({
-                "status": r.status,
-                "duration_ms": (r.timings.total.as_secs_f64() * 1_000_000.0).round() / 1000.0,
-            }),
-            Value::Null,
-        ),
-        RunOutcome::Invalid(why) => (
-            Value::Null,
-            json!({ "kind": "invalid_request", "message": why }),
-        ),
-        RunOutcome::Failed(e) => (
-            Value::Null,
-            json!({ "kind": "execution", "message": e.to_string() }),
-        ),
+/// `junit:out.xml`, `html:report.html` or `json:run.json`.
+fn parse_report(spec: &str) -> Result<(ReportFormat, PathBuf), String> {
+    let (kind, path) = spec
+        .split_once(':')
+        .filter(|(_, p)| !p.is_empty())
+        .ok_or_else(|| {
+            format!("invalid --report `{spec}`, expected FORMAT:PATH (junit, html or json)")
+        })?;
+    let format = match kind {
+        "junit" => ReportFormat::Junit,
+        "html" => ReportFormat::Html,
+        "json" => ReportFormat::Json,
+        other => {
+            return Err(format!(
+                "unknown report format `{other}` (junit, html or json)"
+            ));
+        }
     };
-    json!({
-        "number": line.number,
-        "title": line.title,
-        "key": run.key,
-        "passed": run.passed(),
-        "attempts": line.attempts,
-        "request": run.request.as_ref().map(|r| {
-            let url = r.effective_url().map_or_else(|_| r.url.clone(), |u| u.to_string());
-            json!({ "method": r.method.as_str(), "url": json_out::scrub(r, &url) })
-        }),
-        "response": response,
-        "error": error,
-        "assertions": assertions,
-        "until": until,
-        "captures": assert_view::captures_json(&run.captures, &secrets),
-    })
-}
-
-/// `--format json`.
-fn json_doc(info: &Info, iterations: &[Iteration], planned: usize, declared: &Scopes) -> Value {
-    let its: Vec<Value> = iterations
-        .iter()
-        .map(|it| {
-            let (total, skipped) = counts(it);
-            let data = it.data.as_ref().map(|row| {
-                Value::Object(
-                    row.0
-                        .iter()
-                        .map(|v| {
-                            let value = if declared.is_declared_secret(&v.name) {
-                                "<redacted>".to_owned()
-                            } else {
-                                v.value.clone().unwrap_or_default()
-                            };
-                            (v.name.clone(), Value::String(value))
-                        })
-                        .collect(),
-                )
-            });
-            json!({
-                "number": it.number,
-                "data": data,
-                "passed": it.passed(),
-                "total": total,
-                "skipped": skipped,
-                "steps": lines(it).iter().map(step_json).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-    json!({
-        "format": 1,
-        "target": { "kind": info.kind, "key": info.key, "name": info.name },
-        "passed": iterations.len() == planned && iterations.iter().all(Iteration::passed),
-        "planned_iterations": planned,
-        "iterations": its,
-    })
+    Ok((format, PathBuf::from(path)))
 }

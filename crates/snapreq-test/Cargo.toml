@@ -20,6 +20,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 serde_json_path.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time"] }
+url.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true

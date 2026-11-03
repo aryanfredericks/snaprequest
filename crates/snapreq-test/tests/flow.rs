@@ -246,6 +246,32 @@ async fn variables_layer_and_failures_stop_the_flow() {
         ]
     );
 
+    // The JUnit report shows the failure and the skipped steps.
+    let flow = c.find_flow("checkout").unwrap();
+    let its = [snapreq_test::Iteration {
+        number: 1,
+        data: None,
+        result: snapreq_test::UnitRun::Flow(run),
+    }];
+    let report =
+        snapreq_test::Report::new(&c, &snapreq_test::Unit::Flow(flow), &its, 1, Vec::new());
+    let xml = report.junit();
+    assert!(
+        xml.contains("tests=\"4\" failures=\"1\" errors=\"0\" skipped=\"2\""),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("name=\"3. orders/get\" time=\"0\">\n      <skipped/>"),
+        "{xml}"
+    );
+    assert!(xml.contains("<failure type=\"assertion\" message=\"status equals 202 (actual: 400)\">status equals 202 (actual: 400)\njson $.item equals &quot;sku-42&quot; (missing)\ncapture order_id: `$.id` matched nothing</failure>"), "{xml}");
+    assert!(!report.passed());
+    assert!(
+        report
+            .html()
+            .contains("<span class=\"muted\">skipped</span>")
+    );
+
     // --var overrides win over flow variables.
     let mut session = snapreq_test::Session::new(&c, None, &secrets, Client::default());
     session.overrides.set("item", "from-cli");

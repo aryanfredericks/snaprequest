@@ -97,8 +97,26 @@ flow failed: 2 of 4 steps passed, 1 skipped
 ```
 
 Options: `-e ENV`, `--var name=value` (wins over everything), `--folder`, `-n N`, `--data FILE`, `--bail`,
-`--delay MS`, `--parallel N`, `-v`/`-vv`,
+`--delay MS`, `--parallel N`, `--report FORMAT:FILE`, `-v`/`-vv`,
 `--format pretty|json`, `--color`, `-k` (no TLS verification), `-t SECONDS` (per request), `--secret VALUE`.
+
+### Reports
+
+`--report FORMAT:FILE` (repeatable) writes a report after the run; parent directories are created.
+
+| Format | Contents |
+|---|---|
+| `junit` | JUnit XML for CI: one `<testsuite>` per iteration, one `<testcase>` per request or step. Failed checks and captures are `<failure>`s (expected vs actual), requests that could not be built or sent are `<error>`s, requests not run are `<skipped/>`. |
+| `html` | One self-contained page (no scripts or external files; light and dark themes): per request the checks, captures, timing bars, response headers and body (up to 64 KiB) and the trace. Failures are expanded. |
+| `json` | The `--format json` document plus each response's version, headers, body, timings and full trace. |
+
+Reports hide every known secret (credentials, secret variables, secret captures, `--secret` values) in
+traces, URLs, checks **and response bodies**, since they are meant to be shared. Values of data columns
+named like declared secret variables are shown as `<redacted>`.
+
+```sh
+snapreq run my-api -e ci --report junit:reports/junit.xml --report html:reports/run.html
+```
 
 Exit codes: 0 everything passed; otherwise the worst problem: 3 a request could not be built, 5 a network
 failure, 6 a timeout, 7 a check or capture failed.

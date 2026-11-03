@@ -11,24 +11,7 @@ const DIM: Style = Style::new().dimmed();
 
 /// Hides `secrets` in what the checks report (actual values can echo credentials).
 pub(crate) fn scrub(outcomes: &mut [Outcome], secrets: &[String]) {
-    let mut secrets: Vec<&String> = secrets.iter().filter(|s| !s.is_empty()).collect();
-    secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
-    let hide = |s: &mut String| {
-        for secret in &secrets {
-            if s.contains(secret.as_str()) {
-                *s = s.replace(secret.as_str(), "<redacted>");
-            }
-        }
-    };
-    for o in outcomes {
-        hide(&mut o.check);
-        if let Some(a) = &mut o.actual {
-            hide(a);
-        }
-        if let Some(m) = &mut o.message {
-            hide(m);
-        }
-    }
+    snapreq_test::report::scrub_outcomes(outcomes, secrets);
 }
 
 /// One line per check, then a summary:
@@ -68,13 +51,8 @@ pub(crate) fn render(out: &mut dyn Write, outcomes: &[Outcome]) -> io::Result<()
     }
 }
 
-/// The value of a capture as shown: secret captures and known secrets hidden.
 fn shown(c: &Captured, secrets: &[String]) -> Option<String> {
-    let mut v = c.shown()?.to_owned();
-    for s in secrets.iter().filter(|s| !s.is_empty()) {
-        v = v.replace(s.as_str(), "<redacted>");
-    }
-    Some(v)
+    snapreq_test::report::shown_capture(c, secrets)
 }
 
 /// `captured name = value` lines (with `-v`).
@@ -95,22 +73,7 @@ pub(crate) fn render_captures(
 
 /// `[{ "name", "value", "secret", "error"? }]` for `--format json`.
 pub(crate) fn captures_json(captures: &[Captured], secrets: &[String]) -> serde_json::Value {
-    serde_json::Value::Array(
-        captures
-            .iter()
-            .map(|c| {
-                let mut v = serde_json::json!({
-                    "name": c.name,
-                    "value": shown(c, secrets),
-                    "secret": c.secret,
-                });
-                if let Some(e) = &c.error {
-                    v["error"] = serde_json::json!(e);
-                }
-                v
-            })
-            .collect(),
-    )
+    snapreq_test::report::captures_json(captures, secrets)
 }
 
 #[cfg(test)]
