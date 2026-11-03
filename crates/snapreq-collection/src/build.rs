@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use snapreq_core::Request;
 use snapreq_core::model::{
-    Auth, Body, ClientCertificate, KeyValue, MultipartPart, PartValue, RequestSettings,
+    Auth, Body, ClientCertificate, KeyValue, MultipartPart, OAuth2, OAuth2Grant, PartValue,
+    RequestSettings,
 };
 
 use crate::error::{Error, Result};
@@ -200,6 +201,31 @@ impl Builder<'_> {
                     value: self.text("auth.value", value)?,
                     location: *location,
                 }
+            }
+            AuthSpec::OAuth2(o) => {
+                let opt = |b: &mut Self, field: &str, v: &Option<String>| {
+                    v.as_deref().map(|v| b.text(field, v)).transpose()
+                };
+                let mut out = OAuth2::new(
+                    o.grant,
+                    self.text("auth.token_url", &o.token_url)?,
+                    self.text("auth.client_id", &o.client_id)?,
+                );
+                out.auth_url = opt(self, "auth.auth_url", &o.auth_url)?;
+                out.client_secret = self.text("auth.client_secret", &o.client_secret)?;
+                out.scope = self.text("auth.scope", &o.scope)?;
+                out.username = self.text("auth.username", &o.username)?;
+                out.password = self.text("auth.password", &o.password)?;
+                out.redirect_uri = opt(self, "auth.redirect_uri", &o.redirect_uri)?;
+                out.client_auth = o.client_auth.unwrap_or_default();
+                out.params = self.key_values("auth.params", &o.params)?;
+                if o.grant == OAuth2Grant::AuthorizationCode && out.auth_url.is_none() {
+                    return Err(Error::invalid(
+                        &self.file,
+                        "auth: the authorization_code grant needs `auth_url`",
+                    ));
+                }
+                Auth::OAuth2(out)
             }
         })
     }

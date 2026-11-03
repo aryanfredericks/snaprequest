@@ -382,3 +382,114 @@ async fn auth_flags_send_credentials_and_hide_them() {
     let out = snapreq(&["send", "http://x.test", "--bearer", "a", "-u", "b:c"]).await;
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
 }
+
+/// A token endpoint that counts the tokens it hands out, and `/api`, which echoes the
+/// `Authorization` header.
+async fn oauth_server() -> (SocketAddr, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let issued = std::sync::Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let counter = issued.clone();
+    tokio::spawn(async move {
+        loop {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let counter = counter.clone();
+            tokio::spawn(async move {
+                let service = service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                    let counter = counter.clone();
+                    async move {
+                        let body = if req.uri().path() == "/token" {
+                            let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                            format!(
+                                r#"{{"access_token":"tok-{n}-xyz","token_type":"Bearer","expires_in":3600}}"#
+                            )
+                        } else {
+                            req.headers()
+                                .get("authorization")
+                                .map(|v| v.to_str().unwrap().to_owned())
+                                .unwrap_or_default()
+                        };
+                        Ok::<_, Infallible>(hyper::Response::new(Full::new(Bytes::from(body))))
+                    }
+                });
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(tcp), service)
+                    .await;
+            });
+        }
+    });
+    (addr, issued)
+}
+
+async fn snapreq_with_cache(args: &[&str], cache: &std::path::Path) -> Output {
+    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    let cache = cache.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_snapreq"))
+            .args(&args)
+            .env_remove("SNAPREQ_LOG")
+            .env("SNAPREQ_CACHE_DIR", cache)
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn oauth2_tokens_are_cached_between_runs() {
+    use std::sync::atomic::Ordering;
+    let (addr, issued) = oauth_server().await;
+    let cache = std::env::temp_dir().join(format!("snapreq-cli-oauth-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let token_url = format!("http://{addr}/token");
+    let api = format!("http://{addr}/api");
+    let args = [
+        "send",
+        api.as_str(),
+        "--oauth2",
+        "client-credentials",
+        "--token-url",
+        token_url.as_str(),
+        "--client-id",
+        "app",
+        "--client-secret",
+        "shh-secret",
+        "-v",
+    ];
+
+    let first = snapreq_with_cache(&args, &cache).await;
+    assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
+    assert_eq!(stdout(&first).trim_end(), "Bearer tok-1-xyz");
+    assert!(
+        stderr(&first).contains("oauth2: got an access token"),
+        "{}",
+        stderr(&first)
+    );
+    assert!(!stderr(&first).contains("tok-1-xyz"), "{}", stderr(&first));
+
+    let second = snapreq_with_cache(&args, &cache).await;
+    assert_eq!(stdout(&second).trim_end(), "Bearer tok-1-xyz");
+    assert!(
+        stderr(&second).contains("using the cached access token"),
+        "{}",
+        stderr(&second)
+    );
+    assert_eq!(issued.load(Ordering::SeqCst), 1);
+
+    let path = snapreq_with_cache(&["tokens", "path"], &cache).await;
+    let file = std::path::PathBuf::from(stdout(&path).trim());
+    assert_eq!(file, cache.join("oauth-tokens.json"));
+    let stored = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        stored.contains("tok-1-xyz") && !stored.contains("shh-secret"),
+        "{stored}"
+    );
+
+    let clear = snapreq_with_cache(&["tokens", "clear"], &cache).await;
+    assert_eq!(clear.status.code(), Some(0));
+    assert!(!file.exists());
+    let third = snapreq_with_cache(&args, &cache).await;
+    assert_eq!(stdout(&third).trim_end(), "Bearer tok-2-xyz");
+}

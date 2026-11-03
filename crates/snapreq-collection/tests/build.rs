@@ -405,3 +405,74 @@ fn bad_auth_tables_are_errors() {
     let err = build(&dir, "r", &[]).unwrap_err().to_string();
     assert!(err.contains("auth.name: must not be empty"), "{err}");
 }
+
+#[test]
+fn oauth2_auth_tables() {
+    use snapreq_core::model::{Auth, ClientAuth, OAuth2Grant};
+    let dir = temp_collection(
+        "oauth2",
+        &[
+            (
+                "snapreq.toml",
+                r#"format = 1
+name = "O"
+[vars]
+issuer = "https://login.test"
+secret = { secret = true }
+
+[auth]
+type = "oauth2"
+grant = "client_credentials"
+token_url = "{{issuer}}/token"
+client_id = "app"
+client_secret = "{{secret}}"
+scope = "read write"
+client_auth = "body"
+
+[auth.params]
+audience = "https://api.test"
+"#,
+            ),
+            ("r.toml", "url = \"http://a.test\"\n"),
+            (
+                "code.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"oauth2\"\ngrant = \"authorization_code\"\ntoken_url = \"t\"\nclient_id = \"c\"\n",
+            ),
+        ],
+    );
+    let req = build(&dir, "r", &[("secret", "s3")]).unwrap();
+    let Auth::OAuth2(o) = &req.auth else {
+        panic!("oauth2 expected, got {:?}", req.auth)
+    };
+    assert_eq!(o.grant, OAuth2Grant::ClientCredentials);
+    assert_eq!(o.token_url, "https://login.test/token");
+    assert_eq!(o.client_secret, "s3");
+    assert_eq!(o.client_auth, ClientAuth::Body);
+    assert_eq!(
+        (o.params[0].name.as_str(), o.params[0].value.as_str()),
+        ("audience", "https://api.test")
+    );
+    assert!(req.secrets().contains(&"s3".to_owned()));
+
+    let err = build(&dir, "code", &[("secret", "s3")])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("code.toml: auth: the authorization_code grant needs `auth_url`"),
+        "{err}"
+    );
+
+    // Saving keeps the layout readable.
+    let (c, _) = Collection::load(&dir).unwrap();
+    let text = snapreq_collection::save::to_toml(&c.file).unwrap();
+    assert!(
+        text.contains("[auth]\ntype = \"oauth2\"\ngrant = \"client_credentials\"\ntoken_url = \"{{issuer}}/token\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("[auth.params]\naudience = \"https://api.test\"\n"),
+        "{text}"
+    );
+    let back: snapreq_collection::CollectionFile = toml::from_str(&text).unwrap();
+    assert_eq!(back, c.file);
+}

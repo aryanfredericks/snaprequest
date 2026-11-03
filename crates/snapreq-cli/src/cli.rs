@@ -42,6 +42,18 @@ pub(crate) enum Command {
     /// Manage secret values (stored outside the collection, never committed).
     #[command(subcommand)]
     Secret(SecretCommand),
+
+    /// Manage cached OAuth 2.0 tokens.
+    #[command(subcommand)]
+    Tokens(TokensCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TokensCommand {
+    /// Delete every cached OAuth 2.0 token (sign out everywhere).
+    Clear,
+    /// Print the path of the token cache file.
+    Path,
 }
 
 #[derive(Debug, Args)]
@@ -163,6 +175,72 @@ pub(crate) struct SendArgs {
         help_heading = "Auth"
     )]
     pub api_key_in: ApiKeyInArg,
+
+    /// OAuth 2.0 with this grant; needs `--token-url` and `--client-id`. The password grant
+    /// takes the user's credentials from `-u`. Tokens are cached and refreshed (see
+    /// `snapreq tokens`).
+    #[arg(
+        long = "oauth2",
+        value_name = "GRANT",
+        help_heading = "Auth",
+        conflicts_with_all = ["bearer", "api_key", "no_auth", "digest"]
+    )]
+    pub oauth2: Option<OAuth2GrantArg>,
+
+    /// OAuth 2.0 token endpoint.
+    #[arg(
+        long = "token-url",
+        value_name = "URL",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub token_url: Option<String>,
+
+    /// OAuth 2.0 authorization endpoint (authorization code grant).
+    #[arg(
+        long = "auth-url",
+        value_name = "URL",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub auth_url: Option<String>,
+
+    /// OAuth 2.0 client id.
+    #[arg(
+        long = "client-id",
+        value_name = "ID",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub client_id: Option<String>,
+
+    /// OAuth 2.0 client secret (omit for public clients).
+    #[arg(
+        long = "client-secret",
+        value_name = "SECRET",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub client_secret: Option<String>,
+
+    /// OAuth 2.0 scopes, space-separated.
+    #[arg(
+        long = "scope",
+        value_name = "SCOPES",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub scope: Option<String>,
+
+    /// Loopback redirect URI for the authorization code grant
+    /// (default `http://127.0.0.1:<random port>/callback`).
+    #[arg(
+        long = "redirect-uri",
+        value_name = "URI",
+        requires = "oauth2",
+        help_heading = "Auth"
+    )]
+    pub redirect_uri: Option<String>,
 
     /// Send no auth, even if the collection or folder defines one.
     #[arg(long = "no-auth", help_heading = "Auth")]
@@ -355,6 +433,13 @@ pub(crate) struct SendArgs {
     /// Value to hide in all output (for example a token). Repeatable.
     #[arg(long = "secret", value_name = "VALUE", help_heading = "Output")]
     pub secrets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OAuth2GrantArg {
+    ClientCredentials,
+    Password,
+    AuthorizationCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

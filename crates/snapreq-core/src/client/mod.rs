@@ -6,6 +6,7 @@ mod conn;
 mod cookies;
 mod decode;
 mod meter;
+mod oauth;
 mod proxy;
 mod recorder;
 mod redact;
@@ -27,7 +28,9 @@ use self::build::Prepared;
 use self::conn::{Conn, Pool, PoolKey};
 use self::recorder::{Recorder, SendTiming};
 use self::tls::{RequestTls, TlsContext};
-use crate::model::{Header, HttpVersion, Phase, Request, Response, Sizes, Timings, TraceEvent};
+use crate::model::{
+    Auth, Header, HttpVersion, Phase, Request, Response, Sizes, Timings, TraceEvent,
+};
 use crate::{Error, Result};
 
 /// Client-wide configuration. Per-request options live in
@@ -47,6 +50,11 @@ pub struct ClientConfig {
     pub sensitive_headers: Vec<String>,
     /// Maximum bytes captured per direction when wire capture is on.
     pub wire_capture_limit: usize,
+    /// Where OAuth 2.0 tokens are cached. Default: in memory, per client.
+    pub token_store: Arc<dyn crate::auth::TokenStore>,
+    /// Shows the authorization URL of the OAuth 2.0 authorization code grant to the user.
+    /// Without one, that grant fails with an explanation.
+    pub authorization_prompt: Option<Arc<dyn crate::auth::AuthorizationPrompt>>,
 }
 
 impl Default for ClientConfig {
@@ -61,6 +69,8 @@ impl Default for ClientConfig {
                 .map(|h| (*h).to_owned())
                 .collect(),
             wire_capture_limit: 1024 * 1024,
+            token_store: Arc::new(crate::auth::MemoryTokenStore::default()),
+            authorization_prompt: None,
         }
     }
 }
@@ -150,13 +160,9 @@ impl Client {
     /// carries the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
-        let first = self.prepare_hop(req, &url, None).await?;
-
-        let mut rec = Recorder::new(redact::Redactor::new(
-            &self.inner.config.sensitive_headers,
-            &req.secrets(),
-        ));
-        if let Some(name) = crate::auth::shadowed_by_header(req) {
+        let mut rec = self.recorder(req);
+        let shadowed = crate::auth::shadowed_by_header(req);
+        if let Some(name) = &shadowed {
             rec.record(TraceEvent::Info {
                 message: format!(
                     "{} auth not applied: the request sets the {name} header itself",
@@ -164,9 +170,65 @@ impl Client {
                 ),
             });
         }
-        let result = match req.settings.timeout {
+        let (Auth::OAuth2(o), None) = (&req.auth, &shadowed) else {
+            let resp = self.send_recorded(req, url, None, &mut rec).await?;
+            return Ok(Self::finish_trace(resp, &mut rec));
+        };
+
+        let token = self.oauth_token(req, o, &mut rec, false).await?;
+        let mut resp = self
+            .send_recorded(req, url.clone(), Some(token.header()), &mut rec)
+            .await?;
+        if resp.status == 401 && token.from_cache {
+            // The cached token was rejected (revoked, or expired early): get another
+            // and send the request again.
+            rec.record(TraceEvent::AuthChallenge {
+                status: resp.status,
+                scheme: "oauth2".into(),
+            });
+            let fresh = self.oauth_token(req, o, &mut rec, true).await?;
+            resp = self
+                .send_recorded(req, url, Some(fresh.header()), &mut rec)
+                .await?;
+        }
+        Ok(Self::finish_trace(resp, &mut rec))
+    }
+
+    /// Like [`execute`](Self::execute) for requests whose auth needs no token (token
+    /// requests themselves). Kept separate so the futures are not recursive.
+    pub(crate) async fn execute_plain(&self, req: &Request) -> Result<Response> {
+        let url = req.effective_url()?;
+        let mut rec = self.recorder(req);
+        let resp = self.send_recorded(req, url, None, &mut rec).await?;
+        Ok(Self::finish_trace(resp, &mut rec))
+    }
+
+    fn recorder(&self, req: &Request) -> Recorder {
+        Recorder::new(redact::Redactor::new(
+            &self.inner.config.sensitive_headers,
+            &req.secrets(),
+        ))
+    }
+
+    fn finish_trace(mut resp: Response, rec: &mut Recorder) -> Response {
+        resp.trace = rec.take_entries();
+        resp.timings = Timings::from_trace(&resp.trace);
+        resp
+    }
+
+    /// Sends `req` (following redirects) into an existing recorder. `token` is an
+    /// `Authorization` value from OAuth, sent on every hop that keeps the auth.
+    async fn send_recorded(
+        &self,
+        req: &Request,
+        url: url::Url,
+        token: Option<String>,
+        rec: &mut Recorder,
+    ) -> Result<Response> {
+        let first = self.prepare_hop(req, &url, token.clone()).await?;
+        match req.settings.timeout {
             Some(limit) => {
-                match tokio::time::timeout(limit, self.follow(req, url, first, &mut rec)).await {
+                match tokio::time::timeout(limit, self.follow(req, url, first, token, rec)).await {
                     Ok(result) => result,
                     Err(_) => Err(rec.fail(
                         format!("request did not complete within {} ms", limit.as_millis()),
@@ -174,16 +236,12 @@ impl Client {
                     )),
                 }
             }
-            None => self.follow(req, url, first, &mut rec).await,
-        };
-        let mut resp = result?;
-        resp.trace = rec.take_entries();
-        resp.timings = Timings::from_trace(&resp.trace);
-        Ok(resp)
+            None => self.follow(req, url, first, token, rec).await,
+        }
     }
 
     /// Encodes the body and picks the TLS configuration for one hop. `challenge_answer` is
-    /// the `Authorization` value answering an auth challenge (Digest).
+    /// the `Authorization` value computed by the engine (a Digest answer, an OAuth token).
     async fn prepare_hop(
         &self,
         req: &Request,
@@ -232,6 +290,7 @@ impl Client {
         req: &Request,
         mut url: url::Url,
         mut hop: Hop,
+        token: Option<String>,
         rec: &mut Recorder,
     ) -> Result<Response> {
         let mut current = req.clone();
@@ -317,7 +376,12 @@ impl Client {
             }
             let mut next_url = next.url;
             crate::auth::apply_to_url(&next.request.auth, &mut next_url);
-            hop = match self.prepare_hop(&next.request, &next_url, None).await {
+            // An OAuth token goes along on the same origin; `next_hop` drops the auth otherwise.
+            let hop_token = match &next.request.auth {
+                Auth::OAuth2(_) => token.clone(),
+                _ => None,
+            };
+            hop = match self.prepare_hop(&next.request, &next_url, hop_token).await {
                 Ok(hop) => hop,
                 Err(e) => return Err(rec.fail(format!("cannot follow redirect: {e}"), false)),
             };

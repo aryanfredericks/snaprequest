@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use snapreq_core::model::{ApiKeyLocation, HttpVersionPref, ProxyMode, TlsVersion};
+use snapreq_core::model::{
+    ApiKeyLocation, ClientAuth, HttpVersionPref, OAuth2Grant, ProxyMode, TlsVersion,
+};
 
 use crate::kv::KeyValues;
 use crate::vars::Variables;
@@ -191,6 +193,34 @@ pub enum AuthSpec {
         #[serde(default, skip_serializing_if = "is_header")]
         location: ApiKeyLocation,
     },
+    #[serde(rename = "oauth2")]
+    OAuth2(OAuth2Spec),
+}
+
+/// `type = "oauth2"` in an `[auth]` table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuth2Spec {
+    pub grant: OAuth2Grant,
+    pub token_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_url: Option<String>,
+    pub client_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub client_secret: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub username: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub password: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_auth: Option<ClientAuth>,
+    /// Extra authorization and token request parameters (for example `audience`).
+    #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
+    pub params: KeyValues,
 }
 
 fn is_header(l: &ApiKeyLocation) -> bool {

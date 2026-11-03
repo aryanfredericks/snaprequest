@@ -113,3 +113,18 @@ RustCrypto's `md-5` (MIT/Apache-2.0, no other new dependencies of note). The ret
 hashed before sending, which conflicts with streamed file bodies); it can be added for in-memory
 bodies later. Each challenge uses `nc=00000001`; nonce reuse across requests is a possible
 optimization.
+
+## ADR-015: OAuth 2.0 tokens behind a TokenStore; the CLI caches them on disk
+**Status:** Accepted (2026-11-03)
+**Context:** OAuth 2.0 tokens must survive between requests (and, for the CLI, between runs) so users
+are not sent through a token request or browser sign-in every time. `snapreq-core` must stay free of
+storage and UI concerns, and the server (P6) will want its own storage.
+**Decision:** The core engine runs the grants (client credentials, password, authorization code with
+PKCE on a loopback listener, refresh) through the same `Client`, so traces, proxies and TLS settings
+apply. Tokens go through a `TokenStore` trait (default: in memory per client); showing the sign-in
+URL goes through an `AuthorizationPrompt` trait. The CLI implements both: a JSON file in the user cache
+directory (atomic writes, mode 0600, no client secrets or passwords) and printing the URL plus opening
+the browser. Approved by the maintainer.
+**Consequences:** Access and refresh tokens are stored on disk outside the collection; `snapreq tokens
+clear` deletes them. The server can plug in SQLite-backed storage later. Token requests go through
+`Client::execute_plain`, which keeps the request futures non-recursive and `Send`.

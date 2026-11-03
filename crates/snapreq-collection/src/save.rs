@@ -27,7 +27,10 @@ pub fn to_toml<T: Serialize>(value: &T) -> Result<String> {
 fn layout(table: &mut toml_edit::Table) {
     use toml_edit::{ArrayOfTables, Item, Value};
     for (key, item) in table.iter_mut() {
-        let key_value_table = matches!(key.get(), "headers" | "query" | "fields" | "vars");
+        let key_value_table = matches!(
+            key.get(),
+            "headers" | "query" | "fields" | "vars" | "params"
+        );
         if let Item::Value(Value::InlineTable(t)) = item {
             *item = Item::Table(std::mem::take(t).into_table());
         }

@@ -11,7 +11,7 @@ mod response;
 mod settings;
 mod trace;
 
-pub use auth::{ApiKeyLocation, Auth};
+pub use auth::{ApiKeyLocation, Auth, ClientAuth, OAuth2, OAuth2Grant};
 pub(crate) use body::guess_content_type;
 pub use body::{Body, KeyValue, MultipartPart, PartValue};
 pub use request::Request;

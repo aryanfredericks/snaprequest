@@ -129,6 +129,7 @@ enabled = true                     # optional
 | `"basic"` | `username`, optional `password` | `Authorization: Basic base64(username:password)` (UTF-8) |
 | `"bearer"` | `token` | `Authorization: Bearer <token>` |
 | `"digest"` | `username`, optional `password` | Digest (RFC 7616): sent without credentials first, then again answering the server's `401` challenge (MD5, SHA-256, SHA-512-256, `-sess`, `qop=auth`) |
+| `"oauth2"` | see below | `Authorization: Bearer <access token>`, fetched, cached and refreshed |
 | `"api_key"` | `name`, `value`, optional `location` | header `name: value`, or with `location = "query"` the query parameter `name=value` |
 
 ```toml
@@ -138,6 +139,30 @@ name = "X-API-Key"
 value = "{{api_key}}"
 location = "header"                # "header" (default) | "query"
 ```
+
+OAuth 2.0:
+
+```toml
+[auth]
+type = "oauth2"
+grant = "authorization_code"       # "client_credentials" | "password" | "authorization_code"
+token_url = "https://login.example.com/oauth/token"
+auth_url = "https://login.example.com/authorize"   # authorization_code only
+client_id = "{{client_id}}"
+client_secret = "{{client_secret}}"  # optional; omit for public clients
+scope = "openid profile"             # optional, space-separated
+username = "{{user}}"                # password grant only
+password = "{{password}}"
+redirect_uri = "http://127.0.0.1:8765/callback"  # optional; loopback http only
+client_auth = "basic"                # "basic" (default) | "body": how the client authenticates
+
+[auth.params]                        # optional extra parameters, e.g. for Auth0
+audience = "https://api.example.com"
+```
+
+The authorization code grant always uses PKCE (S256) and a random `state`. Tokens are shared by every
+request with the same grant, token URL, client id, scope and user; how they are cached depends on the
+front end (the CLI keeps them in the user cache directory, see `docs/CLI.md`).
 
 Auth is applied to every hop of a redirect chain on the same origin and dropped on a redirect to
 another origin. A header with the same name set in `[headers]` wins over `[auth]`. Credential values

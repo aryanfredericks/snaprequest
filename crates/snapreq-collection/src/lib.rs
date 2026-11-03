@@ -14,7 +14,8 @@ pub mod vars;
 pub use build::build_request;
 pub use error::{Error, Result, Warning};
 pub use files::{
-    AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, PartSpec, RequestFile, Settings,
+    AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,
+    RequestFile, Settings,
 };
 pub use kv::KeyValues;
 pub use load::{Collection, Folder, Item, RequestItem};

@@ -126,6 +126,8 @@ pub enum Phase {
     Wait,
     Download,
     Redirect,
+    /// Getting an access token (OAuth 2.0).
+    Auth,
 }
 
 impl Phase {
@@ -140,6 +142,7 @@ impl Phase {
             Self::Wait => "waiting for response",
             Self::Download => "downloading response",
             Self::Redirect => "following redirect",
+            Self::Auth => "getting an access token",
         }
     }
 }

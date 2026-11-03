@@ -1,10 +1,15 @@
-//! Applying a request's [`Auth`] to the hop being sent.
+//! Authentication helpers: applying a request's [`Auth`] to the hop being sent, Digest
+//! and OAuth 2.0. Front ends plug in a [`TokenStore`] and an [`AuthorizationPrompt`]
+//! through [`ClientConfig`](crate::ClientConfig).
 
 use crate::model::Response;
 
 use url::Url;
 
 pub(crate) mod digest;
+pub(crate) mod oauth2;
+
+pub use oauth2::{AuthorizationPrompt, MemoryTokenStore, Token, TokenStore};
 
 use crate::model::{ApiKeyLocation, Auth, Request, auth::basic_credentials};
 
@@ -22,14 +27,14 @@ pub(crate) fn header(auth: &Auth) -> Option<(&str, String)> {
             value,
             location: ApiKeyLocation::Header,
         } => Some((name.trim(), value.clone())),
-        Auth::ApiKey { .. } | Auth::Digest { .. } => None,
+        Auth::ApiKey { .. } | Auth::Digest { .. } | Auth::OAuth2(_) => None,
     }
 }
 
 /// The header `auth` sets (now or after a challenge), if any.
 fn header_name(auth: &Auth) -> Option<&str> {
     match auth {
-        Auth::Digest { .. } => Some("Authorization"),
+        Auth::Digest { .. } | Auth::OAuth2(_) => Some("Authorization"),
         other => header(other).map(|(name, _)| name),
     }
 }

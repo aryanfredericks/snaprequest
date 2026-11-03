@@ -9,6 +9,7 @@ mod output;
 mod send;
 #[cfg(test)]
 mod snapshot_tests;
+mod tokens;
 mod trace_view;
 mod waterfall;
 
@@ -16,10 +17,12 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use clap::Parser;
-use snapreq_core::{Client, Error};
+use snapreq_core::{Client, ClientConfig, Error};
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, ColorArg, Command, FormatArg, NewCommand, SecretCommand, SendArgs};
+use crate::cli::{
+    Cli, ColorArg, Command, FormatArg, NewCommand, SecretCommand, SendArgs, TokensCommand,
+};
 use crate::output::Parts;
 
 /// Process exit codes. Documented in `docs/CLI.md`; keep both in sync.
@@ -71,6 +74,19 @@ async fn main() -> ExitCode {
             collection_cmd::new_request(&path, &target, name.as_deref())
                 .map(|p| eprintln!("created {}", p.display())),
         ),
+        Command::Tokens(TokensCommand::Clear) => {
+            report(tokens::clear().map_err(send::ArgError).map(|p| match p {
+                Some(p) => eprintln!("removed {}", p.display()),
+                None => eprintln!("no cached tokens"),
+            }))
+        }
+        Command::Tokens(TokensCommand::Path) => report(
+            tokens::token_file()
+                .map(|p| println!("{}", p.display()))
+                .ok_or_else(|| {
+                    send::ArgError("no cache directory (set SNAPREQ_CACHE_DIR or HOME)".into())
+                }),
+        ),
         Command::Secret(SecretCommand::Set {
             name,
             env,
@@ -81,6 +97,36 @@ async fn main() -> ExitCode {
         ),
     };
     ExitCode::from(code)
+}
+
+/// The credentials `-u USER` without a password fills in.
+fn prompt_target(auth: &mut snapreq_core::model::Auth) -> Option<(&mut String, &mut String)> {
+    use snapreq_core::model::{Auth, OAuth2Grant};
+    match auth {
+        Auth::Basic { username, password } | Auth::Digest { username, password } => {
+            Some((username, password))
+        }
+        Auth::OAuth2(o) if o.grant == OAuth2Grant::Password => {
+            Some((&mut o.username, &mut o.password))
+        }
+        _ => None,
+    }
+}
+
+/// The client: tokens cached in the user's cache directory, sign-in through the browser.
+fn client() -> Client {
+    let token_store: std::sync::Arc<dyn snapreq_core::auth::TokenStore> = match tokens::token_file()
+    {
+        Some(path) => std::sync::Arc::new(tokens::FileTokenStore::new(path)),
+        None => std::sync::Arc::new(snapreq_core::auth::MemoryTokenStore::default()),
+    };
+    let config = ClientConfig {
+        token_store,
+        authorization_prompt: Some(std::sync::Arc::new(tokens::BrowserPrompt)),
+        ..ClientConfig::default()
+    };
+    // Only extra root certificates can make this fail, and none are configured.
+    Client::new(config).unwrap_or_default()
 }
 
 async fn run_send(args: &SendArgs) -> u8 {
@@ -112,8 +158,7 @@ async fn run_send(args: &SendArgs) -> u8 {
     };
     if send::needs_password_prompt(args)
         && std::io::stdin().is_terminal()
-        && let snapreq_core::model::Auth::Basic { username, password }
-        | snapreq_core::model::Auth::Digest { username, password } = &mut request.auth
+        && let Some((username, password)) = prompt_target(&mut request.auth)
     {
         match rpassword::prompt_password(format!("Password for `{username}`: ")) {
             Ok(p) => *password = p,
@@ -156,7 +201,7 @@ async fn run_send(args: &SendArgs) -> u8 {
         }
     };
 
-    match Client::default().execute(&request).await {
+    match client().execute(&request).await {
         Ok(response) => {
             show_trace(&response.trace);
             if let Some(path) = &args.output {

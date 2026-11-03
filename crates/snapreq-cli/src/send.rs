@@ -7,10 +7,10 @@ use http::Method;
 use snapreq_core::Request;
 use snapreq_core::model::{
     ApiKeyLocation, Auth, Body, ClientCertificate, HttpVersionPref, KeyValue, MultipartPart,
-    PartValue, ProxyMode, ResolveOverride, TlsVersion,
+    OAuth2, OAuth2Grant, PartValue, ProxyMode, ResolveOverride, TlsVersion,
 };
 
-use crate::cli::{ApiKeyInArg, SendArgs, TlsVersionArg};
+use crate::cli::{ApiKeyInArg, OAuth2GrantArg, SendArgs, TlsVersionArg};
 
 /// A problem with the arguments, reported before anything is sent.
 #[derive(Debug, PartialEq, Eq)]
@@ -140,6 +140,9 @@ pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), 
 
 /// The auth given on the command line, if any.
 fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
+    if let Some(grant) = args.oauth2 {
+        return oauth2(args, grant).map(Some);
+    }
     if let Some(user) = &args.user {
         let (username, password) = user.split_once(':').unwrap_or((user, ""));
         let (username, password) = (username.to_owned(), password.to_owned());
@@ -174,6 +177,44 @@ fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
         }));
     }
     Ok(args.no_auth.then_some(Auth::None))
+}
+
+fn oauth2(args: &SendArgs, grant: OAuth2GrantArg) -> Result<Auth, ArgError> {
+    let grant = match grant {
+        OAuth2GrantArg::ClientCredentials => OAuth2Grant::ClientCredentials,
+        OAuth2GrantArg::Password => OAuth2Grant::Password,
+        OAuth2GrantArg::AuthorizationCode => OAuth2Grant::AuthorizationCode,
+    };
+    let need = |v: &Option<String>, flag: &str| {
+        v.clone()
+            .filter(|v| !v.trim().is_empty())
+            .ok_or_else(|| ArgError(format!("--oauth2 {} needs {flag}", grant.as_str())))
+    };
+    let mut o = OAuth2::new(
+        grant,
+        need(&args.token_url, "--token-url")?,
+        need(&args.client_id, "--client-id")?,
+    );
+    o.client_secret = args.client_secret.clone().unwrap_or_default();
+    o.scope = args.scope.clone().unwrap_or_default();
+    o.auth_url = args.auth_url.clone();
+    o.redirect_uri = args.redirect_uri.clone();
+    match grant {
+        OAuth2Grant::Password => {
+            let user = need(&args.user, "-u USER[:PASSWORD]")?;
+            let (u, p) = user.split_once(':').unwrap_or((&user, ""));
+            o.username = u.to_owned();
+            o.password = p.to_owned();
+        }
+        OAuth2Grant::AuthorizationCode => {
+            need(&args.auth_url, "--auth-url")?;
+        }
+        OAuth2Grant::ClientCredentials => {}
+    }
+    if args.user.is_some() && grant != OAuth2Grant::Password {
+        return err("-u is only used by the OAuth 2.0 password grant");
+    }
+    Ok(Auth::OAuth2(o))
 }
 
 /// `-u USER` without a password: whether to ask for one.
@@ -554,6 +595,83 @@ mod tests {
     }
 
     #[test]
+    fn oauth2_options() {
+        use snapreq_core::model::{Auth, OAuth2Grant};
+        let auth = |args: &[&str]| parse(&[&["http://a.test"], args].concat()).map(|r| r.auth);
+        let cc = auth(&[
+            "--oauth2",
+            "client-credentials",
+            "--token-url",
+            "https://t/token",
+            "--client-id",
+            "app",
+            "--client-secret",
+            "s",
+            "--scope",
+            "read",
+        ])
+        .unwrap();
+        let Auth::OAuth2(o) = cc else { panic!() };
+        assert_eq!(o.grant, OAuth2Grant::ClientCredentials);
+        assert_eq!((o.client_secret.as_str(), o.scope.as_str()), ("s", "read"));
+
+        let pw = auth(&[
+            "--oauth2",
+            "password",
+            "--token-url",
+            "t",
+            "--client-id",
+            "c",
+            "-u",
+            "al:ice",
+        ])
+        .unwrap();
+        let Auth::OAuth2(o) = pw else { panic!() };
+        assert_eq!((o.username.as_str(), o.password.as_str()), ("al", "ice"));
+
+        let e = |args: &[&str]| auth(args).unwrap_err().0;
+        assert_eq!(
+            e(&["--oauth2", "client-credentials", "--client-id", "c"]),
+            "--oauth2 client_credentials needs --token-url"
+        );
+        assert_eq!(
+            e(&[
+                "--oauth2",
+                "password",
+                "--token-url",
+                "t",
+                "--client-id",
+                "c"
+            ]),
+            "--oauth2 password needs -u USER[:PASSWORD]"
+        );
+        assert_eq!(
+            e(&[
+                "--oauth2",
+                "authorization-code",
+                "--token-url",
+                "t",
+                "--client-id",
+                "c"
+            ]),
+            "--oauth2 authorization_code needs --auth-url"
+        );
+        assert!(
+            e(&[
+                "--oauth2",
+                "client-credentials",
+                "--token-url",
+                "t",
+                "--client-id",
+                "c",
+                "-u",
+                "x"
+            ])
+            .contains("only used")
+        );
+    }
+
+    #[test]
     fn auth_options_conflict() {
         for args in [
             &["-u", "a:b", "--bearer", "t"][..],
@@ -561,6 +679,8 @@ mod tests {
             &["--api-key", "k=v", "--no-auth"],
             &["--api-key-in", "query"],
             &["--digest"],
+            &["--token-url", "t"],
+            &["--oauth2", "password", "--bearer", "t"],
         ] {
             let full: Vec<&str> = ["snapreq", "send", "x"]
                 .iter()

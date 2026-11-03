@@ -136,6 +136,11 @@ Only one kind of body can be given per request.
 | `--bearer TOKEN` | `Authorization: Bearer TOKEN`. |
 | `--api-key NAME=VALUE` | API key in the header `NAME`, or in the query parameter `NAME` with `--api-key-in query`. |
 | `--api-key-in header\|query` | Where `--api-key` goes (default `header`). |
+| `--oauth2 GRANT` | OAuth 2.0: `client-credentials`, `password` (user credentials from `-u`) or `authorization-code` (PKCE, signs in through the browser). Needs `--token-url` and `--client-id`. |
+| `--token-url URL`, `--auth-url URL` | Token endpoint; authorization endpoint (authorization code grant). |
+| `--client-id ID`, `--client-secret SECRET` | Client credentials; omit the secret for public clients. Sent with HTTP Basic. |
+| `--scope SCOPES` | Space-separated scopes. |
+| `--redirect-uri URI` | Loopback redirect URI for the authorization code grant (default `http://127.0.0.1:<random port>/callback`). Register it with the provider. |
 | `--no-auth` | Send no auth, even if the collection defines one. |
 
 Only one auth option can be given. With a collection request, an auth option replaces the
@@ -144,6 +149,25 @@ dropped when a redirect goes to another origin. A Digest challenge splits the tr
 like a redirect: phase timings describe the final, authenticated exchange. A header given with `-H` (or in the request file)
 with the same name wins over the auth option; the trace says so. Credential values are hidden in
 all output, including a query API key in URLs.
+
+### OAuth 2.0 tokens
+
+Access tokens are cached in `oauth-tokens.json` in the user cache directory (`$SNAPREQ_CACHE_DIR`,
+else `$XDG_CACHE_HOME/snapreq` or `~/.cache/snapreq` on Linux, `~/Library/Caches/snapreq` on macOS,
+`%LOCALAPPDATA%\snapreq` on Windows). The file is readable by its owner only on Unix and never holds
+client secrets or passwords. A token is reused until 10 s before it expires, then refreshed with its
+refresh token (or requested again). If the API rejects a cached token with `401`, a new one is
+fetched and the request sent once more (an `auth_challenge` event in the trace). Token requests use
+the request's proxy, TLS and timeout settings; problems with them fail in the phase "getting an
+access token" (exit code 5).
+
+For the authorization code grant SnapRequest prints the sign-in URL, opens the browser (unless
+`SNAPREQ_NO_BROWSER` is set) and waits up to 5 minutes for the redirect on the loopback address.
+
+```sh
+snapreq tokens path     # where the cache file is
+snapreq tokens clear    # delete every cached token
+```
 
 ## Connection options
 
@@ -220,5 +244,5 @@ One JSON document is written to stdout, for success and failure alike. Exit code
 | 2 | Invalid command line (unknown option, missing URL). |
 | 3 | Invalid request: bad URL or option value, unreadable file. Nothing was sent. |
 | 4 | `--fail` was given and the status was 400 or higher. |
-| 5 | Network failure: DNS, connection, TLS or protocol error. |
+| 5 | Network failure: DNS, connection, TLS or protocol error, or no OAuth 2.0 token could be obtained. |
 | 6 | A connect or total timeout fired. |

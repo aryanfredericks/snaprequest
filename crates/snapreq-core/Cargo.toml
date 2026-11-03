@@ -28,6 +28,7 @@ rustls.workspace = true
 rustls-native-certs.workspace = true
 ruzstd.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "time", "rt"] }
@@ -44,7 +45,6 @@ brotli.workspace = true
 rcgen = { workspace = true, features = ["pem"] }
 rustls.workspace = true
 hyper = { workspace = true, features = ["server", "http1", "http2"] }
-serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [lints]

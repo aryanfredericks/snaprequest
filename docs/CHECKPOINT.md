@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 4 Authentication helpers, in progress (Phases 0–3 complete)
-- **Current checkpoint:** P4.3, OAuth 2.0
+- **Current checkpoint:** P4.4, AWS Signature V4
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,15 +25,35 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P4.3 OAuth 2.0: grant types client credentials, password, authorization code + PKCE (local callback
-   listener on 127.0.0.1, opens the browser in the CLI), refresh tokens. Token endpoint calls go through the
-   same `Client` (so traces/proxies/TLS settings apply). Token cache: in core keep it an in-memory trait-backed
-   store (`TokenStore`) so core stays storage-free; CLI persists to a user cache dir file (0600), keyed by
-   token URL + client id + scopes. Refresh when expired (with a small skew) or on 401. Tokens are secrets.
-   Collection `type = "oauth2"` with `grant`, `token_url`, `auth_url`, `client_id`, `client_secret`, `scope`,
-   `audience`?, `username`/`password`; probably needs an ADR on where token caching lives.
-2. Then P4.4 AWS SigV4, P4.5 inheritance details (OAuth token sharing across a collection; show effective auth
-   in `snapreq ls`/`-v`).
+1. P4.4 AWS SigV4: `Auth::AwsSigV4 { access_key, secret_key, session_token?, region, service }`. Sign per hop
+   in the engine (needs the final headers and the body hash: `x-amz-content-sha256`; in-memory bodies hashed,
+   file bodies hashed by reading the file, or `UNSIGNED-PAYLOAD` for S3). Canonical request per the AWS docs,
+   test against the AWS SigV4 test suite vectors (get-vanilla, post-x-www-form-urlencoded, ...). Date header
+   from the clock: make the clock injectable in tests. Collection `type = "aws_sigv4"`, CLI `--aws-sigv4
+   REGION/SERVICE` with credentials from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` (CLI
+   only reads env; core gets values).
+2. P4.5 inheritance details: show the effective auth (type and where it comes from) in `snapreq ls` and `-v`.
+   OAuth tokens are already shared across a collection through the cache key.
+
+## OAuth 2.0 notes (P4.3)
+- Model: `Auth::OAuth2(OAuth2 { grant, token_url, auth_url, client_id, client_secret, scope, username, password,
+  redirect_uri, client_auth: basic|body, params })`, JSON `"type": "oauth2"`. `Phase::Auth`.
+- `snapreq_core::auth` is public now: `Token`, `TokenStore` (+ `MemoryTokenStore`), `AuthorizationPrompt`;
+  `ClientConfig::token_store` / `authorization_prompt`. Cache key = grant + token URL + client id + scope + user.
+- `src/auth/oauth2.rs`: token request building (client id/secret form-encoded before Basic, RFC 6749 2.3.1),
+  response parsing (`expires_in` as number or string; error/error_description), PKCE (RFC 7636 vector tested),
+  loopback listener (`redirect_listener`, hand-written HTTP read; 404 for other paths; checks `state`).
+- `src/client/oauth.rs`: `oauth_token` (cache → refresh, keeping the old refresh token if none returned → grant).
+  Token calls use `Client::execute_plain` (no OAuth code path) so futures are not recursive and stay `Send`
+  (test `execute_futures_stay_send`). `execute` retries once with a new token when a *cached* token gets 401,
+  re-running the whole chain from the original URL. OAuth tokens are passed into `follow` and re-sent on
+  same-origin redirect hops. Expiry margin 10 s; authorization wait 300 s.
+- CLI `src/tokens.rs`: `FileTokenStore` (`oauth-tokens.json`, read on each get, atomic write via temp + rename,
+  0600), `cache_dir` (`SNAPREQ_CACHE_DIR` > platform), `BrowserPrompt` (`SNAPREQ_NO_BROWSER`), `snapreq tokens
+  clear|path`. Flags `--oauth2 GRANT --token-url --auth-url --client-id --client-secret --scope --redirect-uri`;
+  password grant takes `-u` (prompted like Basic).
+- Not done: OpenID discovery, device code grant, token introspection; nothing exercised against a real
+  provider yet (mock-tested only).
 
 ## Digest notes (P4.2)
 - `src/auth/digest.rs`: `parse_challenges` (several challenges per header, quoted strings, token68 skipped),
@@ -252,6 +272,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P3.6 — 2026-10-31 — CLI: send collection requests (-c/-e/--var), ls, new, secret set. Phase 3 complete. 227 tests total.
 - P4.1 — 2026-11-03 — Basic, Bearer and API-key auth in core, collections (`[auth]` with inherit/none) and CLI; URL-encoded secrets redacted. 247 tests total.
 - P4.2 — 2026-11-03 — Digest auth (RFC 7616) with challenge retry traced as `auth_challenge`; ADR-014 (md-5). 256 tests total.
+- P4.3 — 2026-11-03 — OAuth 2.0 (client credentials, password, authorization code + PKCE, refresh, 401 retry); `TokenStore`/`AuthorizationPrompt` in core, file cache + `snapreq tokens` in the CLI; ADR-015. 275 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -267,3 +288,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
+- **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3 done.
