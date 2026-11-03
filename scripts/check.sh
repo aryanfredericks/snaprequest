@@ -11,6 +11,13 @@ step "format";  cargo fmt --all --check
 step "clippy";  cargo clippy --workspace --all-targets -- -D warnings
 step "tests";   cargo test --workspace
 step "api tests (examples/shop)"; scripts/api-tests.sh
+if command -v npm >/dev/null; then
+  step "web UI"
+  (cd web && npm ci --no-audit --no-fund >/dev/null && npm run gen:api >/dev/null \
+    && git diff --exit-code -- src/lib/api/schema.d.ts && npm run check && npm test && npm run build)
+else
+  echo "skipping the web UI (needs Node.js 24 and npm)"
+fi
 if command -v cargo-deny >/dev/null; then
   step "cargo-deny"; cargo deny check
 else

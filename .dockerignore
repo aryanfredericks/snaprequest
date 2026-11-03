@@ -2,3 +2,5 @@ target/
 .git/
 **/*.db
 **/.secrets/
+web/node_modules/
+web/dist/

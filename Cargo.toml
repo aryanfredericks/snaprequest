@@ -47,6 +47,7 @@ rpassword = "7"
 rusqlite = { version = "0.41", features = ["bundled"] }
 ring = "0.17"
 ruzstd = "0.9"
+rust-embed = "8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke test of a running SnapRequest server (e.g. the Docker image).
 
-Checks /healthz, executes a request through the REST API and through the WebSocket endpoint
+Checks /healthz and the embedded web UI, executes a request through the REST API and through the WebSocket endpoint
 (live trace events, then the result), and reads it back from the history.
 
 Usage: scripts/docker-smoke.py [http://127.0.0.1:7878]
@@ -75,6 +75,10 @@ def main():
     assert api("GET", "/healthz") == {"status": "ok"}
     version = api("GET", "/api/v1/version")
     print(f"server {version['version']} is up")
+    with urllib.request.urlopen(BASE + "/", timeout=30) as resp:
+        page = resp.read().decode()
+    assert "<title>SnapRequest</title>" in page and "/assets/" in page, "the web UI is not embedded"
+    print("web UI is served")
 
     # The server itself, as seen from inside its container (SNAPREQ_SMOKE_TARGET overrides).
     target = os.environ.get("SNAPREQ_SMOKE_TARGET", "http://127.0.0.1:7878/healthz")

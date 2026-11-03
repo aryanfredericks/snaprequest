@@ -2,9 +2,18 @@
 # SnapRequest server: `docker build -t snapreq .` then
 # `docker run -p 127.0.0.1:7878:7878 -v snapreq-data:/data snapreq`.
 
+FROM docker.io/library/node:24-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM docker.io/library/rust:1-bookworm AS build
 WORKDIR /src
 COPY . .
+# The web UI is embedded into the binary (ADR-021).
+COPY --from=web /web/dist web/dist
 # Use the image's stable toolchain instead of installing the components pinned for development.
 RUN rm -f rust-toolchain.toml
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

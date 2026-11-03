@@ -45,9 +45,23 @@ async fn health_and_version_then_graceful_shutdown() {
     let doc: serde_json::Value = serde_json::from_slice(&version.body).unwrap();
     assert_eq!(doc["version"], snapreq_core::VERSION);
     assert_eq!(doc["api"], 1);
+    // Unknown API paths are JSON 404s; other paths belong to the web UI (built or not).
+    let missing = client
+        .execute(&Request::get(format!("http://{addr}/api/v1/nope")))
+        .await
+        .unwrap();
+    assert_eq!(missing.status, 404);
+    let error: serde_json::Value = serde_json::from_slice(&missing.body).unwrap();
+    assert_eq!(error["error"]["kind"], "not_found");
+    let ui = client
+        .execute(&Request::get(format!("http://{addr}/history")))
+        .await
+        .unwrap();
+    assert_eq!(ui.status, 200);
+    assert!(ui.text().unwrap_or_default().contains("SnapRequest"));
     assert_eq!(
         client
-            .execute(&Request::get(format!("http://{addr}/nope")))
+            .execute(&Request::get(format!("http://{addr}/nope.js")))
             .await
             .unwrap()
             .status,

@@ -1,4 +1,4 @@
-//! SnapRequest self-hosted server: REST and WebSocket API, storage and authentication.
+//! SnapRequest self-hosted server: REST and WebSocket API, storage, authentication and the web UI.
 //!
 //! [`serve`] runs the HTTP server for a [`Config`]; [`app`] is the router on its own (for
 //! tests and embedding).
@@ -7,6 +7,7 @@ pub mod api;
 pub mod config;
 pub mod outbound;
 pub mod store;
+pub mod ui;
 pub mod ws;
 
 use std::future::Future;
@@ -115,6 +116,7 @@ pub fn app(state: Arc<AppState>) -> Router {
                 async move { Json((*doc).clone()) }
             }),
         )
+        .fallback(ui::serve)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

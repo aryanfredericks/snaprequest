@@ -90,3 +90,24 @@ async fn the_document_is_served() {
     assert_eq!(doc["info"]["title"], "SnapRequest API");
     assert_eq!(doc["info"]["version"], snapreq_core::VERSION);
 }
+
+/// `web/openapi.json` is what the web UI's typed client is generated from (`npm run gen:api`).
+/// Regenerate it with `SNAPREQ_UPDATE_OPENAPI=1 cargo test -p snapreq-server --test openapi`.
+#[test]
+fn the_web_ui_copy_is_up_to_date() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/openapi.json");
+    let current = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&snapreq_server::openapi()).unwrap()
+    );
+    if std::env::var_os("SNAPREQ_UPDATE_OPENAPI").is_some() {
+        std::fs::write(&path, &current).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        committed.replace("\r\n", "\n") == current,
+        "web/openapi.json is out of date: run `SNAPREQ_UPDATE_OPENAPI=1 cargo test -p snapreq-server --test openapi`, \
+         then `npm --prefix web run gen:api`"
+    );
+}

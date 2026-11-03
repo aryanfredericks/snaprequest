@@ -13,7 +13,24 @@ Thanks for your interest in contributing!
    cargo test --workspace
    ```
 
-3. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and roadmap, and
+3. Optional, for the web UI (`web/`, Svelte 5 + TypeScript + Vite): Node.js 24 and npm.
+
+   ```sh
+   cd web
+   npm ci
+   npm run dev      # UI on http://localhost:5173, API forwarded to `snapreq serve` on :7878
+   npm run build    # web/dist, embedded into release builds of snapreq
+   ```
+
+   Without a build, `snapreq serve` shows a page explaining how to build the UI. When an API handler changes,
+   refresh the typed client:
+
+   ```sh
+   SNAPREQ_UPDATE_OPENAPI=1 cargo test -p snapreq-server --test openapi   # rewrites web/openapi.json
+   npm --prefix web run gen:api                                           # rewrites src/lib/api/schema.d.ts
+   ```
+
+4. Read [`docs/PLAN.md`](docs/PLAN.md) for the architecture and roadmap, and
    [`docs/DECISIONS.md`](docs/DECISIONS.md) for the design decisions behind it.
 
 ## Before opening a pull request
@@ -28,7 +45,9 @@ cargo deny check                                  # licenses and security adviso
 cargo +1.89 check --workspace --all-targets       # minimum supported Rust version
 ```
 
-The last two are skipped with a hint if `cargo-deny` or the MSRV toolchain is not installed.
+It also runs the web UI checks (`npm run check`, `npm test`, `npm run build`, generated types up to date).
+Those, cargo-deny and the MSRV build are skipped with a hint if npm, `cargo-deny` or the MSRV toolchain is not
+installed.
 
 ## Snapshot tests
 

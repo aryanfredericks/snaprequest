@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 7 Web UI, next (Phases 0–6 complete)
-- **Current checkpoint:** P7.1, web UI project setup
+- **Phase:** 7 Web UI (Phases 0–6 complete)
+- **Current checkpoint:** P7.2, request builder (P7.1 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,9 +25,22 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. Add a CI job that builds the Docker image and runs `scripts/docker-smoke.py` against it (verified locally with
-   podman on 2026-11-03; not yet in CI). Then `scripts/check.sh` + push.
-2. P7.1 web UI setup (Svelte 5 + TS + Vite, typed client from `/api/v1/openapi.json`, assets embedded).
+1. P7.2 request builder: method, URL with variable highlighting, params, headers, body editors (CodeMirror), auth
+   tab. Needs hand-written TS types for the core `Request`/response/trace JSON (they are `Object` in OpenAPI) and a
+   typed WebSocket client for `/api/v1/ws` (live traces).
+
+## Web UI notes (P7.1)
+- `web/`: Svelte 5 + TS 5.9 (openapi-typescript needs TS 5; TS 7 is out) + Vite 8 + Vitest 5. Scripts: `dev`
+  (proxy `/api` + ws and `/healthz` to :7878, `SNAPREQ_DEV_SERVER` overrides), `build` (→ `web/dist`), `check`
+  (svelte-check, warnings fail), `test`, `gen:api`.
+- Typed client: `web/openapi.json` (committed; server test `the_web_ui_copy_is_up_to_date`,
+  `SNAPREQ_UPDATE_OPENAPI=1` rewrites) → `src/lib/api/schema.d.ts` (`--empty-objects-unknown`, CI checks it is
+  current) → `src/lib/api/client.ts` (`createApi`, `unwrap` → `ApiError {status, kind}`, `serverVersion`).
+- `snapreq_server::ui` (ADR-021): rust-embed of `web/dist` (`allow_missing`; debug builds read from disk), router
+  `.fallback(ui::serve)`; `respond(assets, …)` testable with fake files; SPA fallback for extensionless paths,
+  unknown `/api/…` → JSON 404, ETag/304, `assets/` immutable, CSP + `X-Frame-Options` on HTML; "not built" page.
+- Dockerfile has a `node:24-bookworm-slim` stage; CI jobs `web` and `docker` (smoke test also checks the UI).
+- npm audit: advisories only in build tooling (deepmerge via vite-plugin-svelte, minimatch via openapi-typescript).
 
 ## Docker notes (P6.7)
 - `Dockerfile`: rust:1-bookworm builder (cache mounts; removes rust-toolchain.toml) → `gcr.io/distroless/cc-debian12:nonroot`,
@@ -446,6 +459,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
 - P6.6 — 2026-11-03 — Outbound request policy (SSRF): connect-time checks of every address in the engine, server allow/deny lists, private and cloud-metadata blocking (ADR-020). 339 tests total.
 - P6.7 — 2026-11-03 — Docker image (distroless, non-root), docker-compose example, smoke test passing against the image. Phase 6 complete.
+- P7.1 — 2026-11-03 — Web UI setup: Svelte 5 + TS + Vite in `web/`, typed API client generated from the OpenAPI document, UI embedded in the binary (ADR-021), Docker/CI updated. 345 Rust + 3 web tests.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -465,3 +479,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.7 done; Phase 5 complete.
 - **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done. Maintainer chose rusqlite over sqlx; P6.2 done.
 - **2026-11-03 (17):** Phase 6 complete (P6.3–P6.7). Docker CI job still to add. Session ended at the usage limit.
+- **2026-11-03 (18):** Added the Docker smoke-test CI job (da78f47). P7.1 done: web project, typed client, embedded UI, verified with a release binary and the podman-built image.

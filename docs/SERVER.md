@@ -1,6 +1,7 @@
 # SnapRequest server
 
-`snapreq serve` runs the self-hosted server: a JSON API (this document), and in Phase 7 the web UI.
+`snapreq serve` runs the self-hosted server: a JSON API (this document) and the web UI at `/`
+(built from `web/` and embedded into release binaries, ADR-021; every `GET` outside the API serves it).
 Configuration (bind address, data directory, workspace, retention) is described in `docs/CLI.md`,
 "Server".
 

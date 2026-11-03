@@ -196,3 +196,20 @@ The server implements it as `OutboundPolicy` from `[outbound]` (deny, allow, `bl
 with `block_metadata` on by default whenever `allow_remote` is on (PLAN P6.6).
 **Consequences:** No check can be bypassed by DNS or redirects. The CLI keeps an open policy (it runs as its user).
 Requests through an HTTP or SOCKS5h proxy rely on name rules for the target, because the proxy resolves it.
+
+## ADR-021: Web UI build, embedding and typed client
+**Status:** Accepted (2026-11-03)
+**Context:** The UI (ADR-005) must ship inside the single binary, but Rust-only contributors and `cargo test`
+should not need Node.js. The UI's API client should not drift from the server's handlers.
+**Decision:** Vite builds `web/` to `web/dist`, which `snapreq-server` embeds with `rust-embed`
+(`allow_missing`: without a build the server serves a page explaining how to build the UI; debug builds read the
+files from disk, so `npm run build` is picked up without recompiling). The server's router falls back to the UI
+for every unmatched `GET` (SPA routes get `index.html`, unknown `/api/…` stays a JSON 404); hashed `assets/` are
+cached as immutable, pages carry a strict CSP. `web/openapi.json` is a committed copy of the generated OpenAPI
+document, checked by a server test (`SNAPREQ_UPDATE_OPENAPI=1` rewrites it); `openapi-typescript` generates
+`web/src/lib/api/schema.d.ts` from it (CI checks it is current) and `openapi-fetch` is the typed client.
+**Consequences:** Release binaries and the Docker image need `npm run build` first (the Dockerfile has a Node
+stage). Core types are `Object` in the OpenAPI document, so their TypeScript shapes are written by hand in the UI.
+Publishing `snapreq-server` to crates.io will need the built files inside the crate (P11.2). npm audit reports
+advisories only in build-time tooling (vite-plugin-svelte's `deepmerge`, openapi-typescript's `minimatch`), none
+of which ships in the bundle.
