@@ -1373,7 +1373,7 @@
         "tags": [
           "history"
         ],
-        "summary": "`GET /api/v1/history?url=&method=&status=&before=&limit=`",
+        "summary": "`GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=`",
         "operationId": "list_history",
         "parameters": [
           {
@@ -1404,6 +1404,35 @@
             }
           },
           {
+            "name": "class",
+            "in": "query",
+            "description": "Status class, `1` to `5` (`4` = 400–499).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "failed",
+            "in": "query",
+            "description": "`true`: only failures without a response; `false`: only responses.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "collection",
+            "in": "query",
+            "description": "Only requests of this collection.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "before",
             "in": "query",
             "required": false,
@@ -1429,6 +1458,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HistoryList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "history"
+        ],
+        "operationId": "clear_history",
+        "responses": {
+          "200": {
+            "description": "`{ deleted }`: every entry is removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
                 }
               }
             }
@@ -1487,6 +1534,39 @@
           },
           "422": {
             "description": "Does not validate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "history"
+        ],
+        "operationId": "delete_history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "History entry id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {

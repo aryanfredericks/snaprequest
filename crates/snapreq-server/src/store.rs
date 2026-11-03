@@ -137,6 +137,12 @@ pub struct HistoryQuery {
     pub url_contains: Option<String>,
     pub method: Option<String>,
     pub status: Option<u16>,
+    /// Status class: `2` for 200–299 and so on.
+    pub status_class: Option<u16>,
+    /// `true`: only requests that failed without a response; `false`: only responses.
+    pub failed: Option<bool>,
+    /// Only requests of this collection.
+    pub collection: Option<String>,
     /// Only entries with an id below this (for paging).
     pub before_id: Option<i64>,
     pub limit: usize,
@@ -363,6 +369,20 @@ impl Store {
                 sql.push_str(" AND status = ?");
                 args.push(Box::new(s));
             }
+            if let Some(class) = q.status_class {
+                sql.push_str(" AND status BETWEEN ? AND ?");
+                args.push(Box::new(class * 100));
+                args.push(Box::new(class * 100 + 99));
+            }
+            match q.failed {
+                Some(true) => sql.push_str(" AND status IS NULL"),
+                Some(false) => sql.push_str(" AND status IS NOT NULL"),
+                None => {}
+            }
+            if let Some(coll) = q.collection {
+                sql.push_str(" AND collection = ?");
+                args.push(Box::new(coll));
+            }
             if let Some(b) = q.before_id {
                 sql.push_str(" AND id < ?");
                 args.push(Box::new(b));
@@ -374,6 +394,18 @@ impl Store {
                 .query_map(rusqlite::params_from_iter(args.iter()), summary_row)
                 .map_err(db_err)?;
             rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db_err)
+        })
+        .await
+    }
+
+    /// Deletes one entry (`id`) or every entry (`None`); returns how many were deleted.
+    pub async fn delete_history(&self, id: Option<i64>) -> Result<usize> {
+        self.with(move |c| {
+            match id {
+                Some(id) => c.execute("DELETE FROM history WHERE id = ?1", [id]),
+                None => c.execute("DELETE FROM history", []),
+            }
+            .map_err(db_err)
         })
         .await
     }

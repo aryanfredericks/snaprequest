@@ -86,8 +86,8 @@ pub(crate) type ApiResult<T> = Result<T, ApiError>;
 pub fn router() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::new()
         .routes(routes!(execute_request))
-        .routes(routes!(list_history))
-        .routes(routes!(get_history))
+        .routes(routes!(list_history, clear_history))
+        .routes(routes!(get_history, delete_history))
         .routes(routes!(list_runs, start_run))
         .routes(routes!(get_run))
         .routes(routes!(list_collections, create_collection))
@@ -393,12 +393,18 @@ struct HistoryParams {
     url: Option<String>,
     method: Option<String>,
     status: Option<u16>,
+    /// Status class, `1` to `5` (`4` = 400–499).
+    class: Option<u16>,
+    /// `true`: only failures without a response; `false`: only responses.
+    failed: Option<bool>,
+    /// Only requests of this collection.
+    collection: Option<String>,
     before: Option<i64>,
     limit: Option<usize>,
 }
 
 #[utoipa::path(get, path = "/history", tag = "history", params(HistoryParams), responses((status = 200, description = "History summaries, newest first", body = HistoryList)))]
-/// `GET /api/v1/history?url=&method=&status=&before=&limit=`
+/// `GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=`
 async fn list_history(
     State(state): Shared,
     Query(p): Query<HistoryParams>,
@@ -409,6 +415,9 @@ async fn list_history(
             url_contains: p.url,
             method: p.method,
             status: p.status,
+            status_class: p.class.filter(|c| (1..=5).contains(c)),
+            failed: p.failed,
+            collection: p.collection,
             before_id: p.before,
             limit: p.limit.unwrap_or(50),
         })
@@ -422,6 +431,20 @@ async fn get_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResu
         Some(e) => Ok(Json(json!(e))),
         None => Err(ApiError::not_found(format!("no history entry {id}"))),
     }
+}
+
+#[utoipa::path(delete, path = "/history/{id}", tag = "history", params(("id" = i64, Path, description = "History entry id")), responses((status = 204, description = "Deleted"), (status = 404, description = "Not found", body = ErrorBody)))]
+async fn delete_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<StatusCode> {
+    match state.store.delete_history(Some(id)).await? {
+        0 => Err(ApiError::not_found(format!("no history entry {id}"))),
+        _ => Ok(StatusCode::NO_CONTENT),
+    }
+}
+
+#[utoipa::path(delete, path = "/history", tag = "history", responses((status = 200, description = "`{ deleted }`: every entry is removed", body = JsonDocument)))]
+async fn clear_history(State(state): Shared) -> ApiResult<Json<Value>> {
+    let deleted = state.store.delete_history(None).await?;
+    Ok(Json(json!({ "deleted": deleted })))
 }
 
 // --- Runs --------------------------------------------------------------------

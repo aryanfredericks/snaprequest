@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.6, history (P7.1–P7.5 done)
+- **Current checkpoint:** P7.7, runner and flow editor (P7.1–P7.6 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,7 +25,19 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.6 history (search, filters, re-run, compare two responses), then P7.7–P7.8.
+1. P7.7 collection runner UI with live progress and reports; flow editor (reorder steps, step-by-step
+   runs with captured variables, re-run from step N, per-step waterfall and wire log). Then P7.8.
+
+## Web UI notes (P7.6)
+- Server: history filters `class` (status class), `failed`, `collection`; `DELETE /history/{id}` and
+  `DELETE /history` (`Store::delete_history`).
+- UI: sidebar switch Collections | History; `HistoryPanel` (debounced filters, `VirtualList` with
+  `onend` paging, select two to compare), `HistoryView` (stored request + `ResultView`), `DiffView`
+  (`@codemirror/merge`, JSON pretty-printed, headers sorted, timing table). `ResultView` is the response
+  display shared by requests, history (and runs). Re-run: collection requests are opened and sent as
+  they are now; other requests are rebuilt without credentials (`draftFromHistory`), with a notice.
+- GitHub macOS test jobs since 4d1e74d were cancelled after 15 min without running a step (no runner
+  picked them up); Ubuntu/Windows pass. Not a code failure; check the repository's Actions/billing.
 
 ## Web UI notes (P7.5)
 - Server `tree.rs`: `GET/PUT/DELETE /collections/{id}/folders/{key}` (folder.toml; PUT creates the dir),
@@ -502,6 +514,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.3 — 2026-11-03 — Response viewer: pretty/raw/preview/hex, headers, cookies, checks, search in the body, virtualized large bodies.
 - P7.4 — 2026-11-03 — Debug view: live timing waterfall per redirect hop, event list with headers, connection and redirect chain, TLS and certificate chain, raw wire log (text/hex).
 - P7.5 — 2026-11-03 — Collections sidebar: tree with drag and drop and menus (create, rename, duplicate, move, delete), collection/folder settings, environment editor with secret values, environment switcher.
+- P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

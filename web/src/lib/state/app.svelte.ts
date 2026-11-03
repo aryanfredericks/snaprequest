@@ -1,14 +1,31 @@
 // Application state: collections, the selected environment of each, and the open tabs.
 import { api, ApiError, unwrap } from "../api/client";
-import type { CollectionDoc, CollectionListEntry, RequestFile, VariableInfo, VarsTable } from "../api/types";
+import type {
+  CollectionDoc,
+  CollectionListEntry,
+  HistoryRecord,
+  HistorySummary,
+  RequestFile,
+  VariableInfo,
+  VarsTable,
+} from "../api/types";
 import { jobs } from "../api/ws";
 import { draftFromFile, draftToCore, draftToFile, uid } from "../model/draft";
+import { draftFromHistory } from "../model/history";
 import { scopeFromFile, scopeToFile, varsFromTable, varsToTable, type ScopeFile } from "../model/scope";
 import { prompt } from "./prompt.svelte";
 import { formatRoute } from "./route";
-import { EnvTab, RequestTab, ScopeTab, type Tab } from "./tabs.svelte";
+import { DiffTab, EnvTab, HistoryTab, RequestTab, ScopeTab, type Tab } from "./tabs.svelte";
 
-export { EnvTab, RequestTab, ScopeTab, type Tab };
+export { DiffTab, EnvTab, HistoryTab, RequestTab, ScopeTab, type Tab };
+
+export interface HistoryFilter {
+  url: string;
+  method: string;
+  /** "", "2" … "5", or "failed". */
+  status: string;
+  collection: string;
+}
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -31,6 +48,8 @@ class AppState {
   tabs = $state<Tab[]>([]);
   activeId = $state<number | null>(null);
   notices = $state<Notice[]>([]);
+  /** Bumped whenever something is added to the history (the history list reloads). */
+  historyVersion = $state(0);
 
   get active(): Tab | null {
     return this.tabs.find((t) => t.id === this.activeId) ?? null;
@@ -225,6 +244,7 @@ class AppState {
     }
     try {
       tab.result = await jobs.execute(body, { onTrace: (e) => tab.live.push(e) });
+      this.historyVersion++;
     } catch (e) {
       tab.result = null;
       tab.error = message(e);
@@ -241,6 +261,8 @@ class AppState {
         return this.saveScope(tab);
       case "environment":
         return this.saveEnvironment(tab);
+      default:
+        return false;
     }
   }
 
@@ -284,6 +306,80 @@ class AppState {
     }
     [tab.collection, tab.key] = previous;
     return false;
+  }
+
+  // --- History ----------------------------------------------------------------------------
+
+  async listHistory(f: HistoryFilter, before?: number, limit = 100): Promise<HistorySummary[]> {
+    const query: Record<string, string | number | boolean> = { limit };
+    if (f.url.trim()) query.url = f.url.trim();
+    if (f.method) query.method = f.method;
+    if (f.status === "failed") query.failed = true;
+    else if (f.status) query.class = Number(f.status);
+    if (f.collection) query.collection = f.collection;
+    if (before !== undefined) query.before = before;
+    const data = unwrap(await api.GET("/api/v1/history", { params: { query } }));
+    return (data.entries ?? []) as HistorySummary[];
+  }
+
+  private async historyRecord(id: number): Promise<HistoryRecord> {
+    return unwrap(await api.GET("/api/v1/history/{id}", { params: { path: { id } } })) as unknown as HistoryRecord;
+  }
+
+  async openHistory(id: number) {
+    const open = this.tabs.find((t) => t.kind === "history" && t.record.id === id);
+    if (open) return this.activate(open);
+    await this.attempt(`Opening history entry ${id}`, async () => this.open(new HistoryTab(await this.historyRecord(id))));
+  }
+
+  async compare(a: number, b: number) {
+    const [left, right] = a < b ? [a, b] : [b, a];
+    const open = this.tabs.find((t) => t.kind === "diff" && t.left.id === left && t.right.id === right);
+    if (open) return this.activate(open);
+    await this.attempt("Comparing", async () => {
+      const [l, r] = await Promise.all([this.historyRecord(left), this.historyRecord(right)]);
+      this.open(new DiffTab(l, r));
+    });
+  }
+
+  /**
+   * Sends a stored request again: a collection request is opened and sent as its file is now;
+   * any other request is rebuilt in a new tab (without the credentials, which were never stored).
+   */
+  async rerun(record: HistoryRecord) {
+    if (record.collection && record.request_key) {
+      const tab = await this.openRequest(record.collection, record.request_key);
+      if (tab) await this.send(tab);
+      return;
+    }
+    const { draft, redacted } = draftFromHistory(record);
+    const tab = new RequestTab();
+    tab.draft = draft;
+    this.open(tab);
+    if (redacted.length) {
+      this.notify(`Credentials are not kept in history: fill in ${redacted.join(", ")} before sending.`, "error");
+      return;
+    }
+    await this.send(tab);
+  }
+
+  async deleteHistory(id: number | null): Promise<boolean> {
+    if (id === null && !(await prompt.confirm("Clear the history?", "Every stored request and response is deleted.", "Clear"))) return false;
+    const ok = await this.attempt("Deleting history", async () => {
+      const r =
+        id === null
+          ? await api.DELETE("/api/v1/history")
+          : await api.DELETE("/api/v1/history/{id}", { params: { path: { id } } });
+      if (!r.response.ok) unwrap(r);
+      return true;
+    });
+    if (!ok) return false;
+    for (const t of [...this.tabs]) {
+      if (t.kind === "history" && (id === null || t.record.id === id)) this.close(t, true);
+      if (t.kind === "diff" && (id === null || t.left.id === id || t.right.id === id)) this.close(t, true);
+    }
+    this.historyVersion++;
+    return true;
   }
 
   // --- Tree changes -----------------------------------------------------------------------
@@ -407,7 +503,7 @@ class AppState {
     });
     if (!ok) return;
     for (const t of [...this.tabs]) {
-      if (t.collection !== collection) continue;
+      if (t.kind === "history" || t.kind === "diff" || t.collection !== collection) continue;
       const k = t.kind === "environment" ? null : t.key;
       if (k !== null && (k === key || (kind === "folder" && k.startsWith(`${key}/`)))) this.close(t, true);
     }

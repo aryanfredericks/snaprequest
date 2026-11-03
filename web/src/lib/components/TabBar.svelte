@@ -5,10 +5,20 @@
     e.stopPropagation();
     app.close(tab);
   }
-  const where = (tab: Tab) =>
-    tab.kind === "request"
-      ? tab.collection ? `${tab.collection}/${tab.key}` : tab.title
-      : tab.kind === "environment" ? `${tab.collection}: environment ${tab.name}` : `${tab.collection}${tab.key ? `/${tab.key}` : ""} settings`;
+  function where(tab: Tab): string {
+    switch (tab.kind) {
+      case "request":
+        return tab.collection ? `${tab.collection}/${tab.key}` : tab.title;
+      case "environment":
+        return `${tab.collection}: environment ${tab.name}`;
+      case "scope":
+        return `${tab.collection}${tab.key ? `/${tab.key}` : ""} settings`;
+      case "history":
+        return `History #${tab.record.id}: ${tab.record.method} ${tab.record.url}`;
+      case "diff":
+        return `Comparing history #${tab.left.id} and #${tab.right.id}`;
+    }
+  }
 </script>
 
 <div class="bar" role="tablist" aria-label="Open requests">
@@ -25,6 +35,8 @@
       >
         {#if tab.kind === "request"}<span class="method m-{tab.draft.method.toLowerCase()}">{tab.draft.method}</span>
         {:else if tab.kind === "environment"}<span class="kind" aria-hidden="true">◎</span>
+        {:else if tab.kind === "history"}<span class="kind" aria-hidden="true">↺</span>
+        {:else if tab.kind === "diff"}<span class="kind" aria-hidden="true">⇄</span>
         {:else}<span class="kind" aria-hidden="true">⚙</span>{/if}
         <span class="label">{tab.title}</span>
         {#if tab.dirty}<span class="dirty" aria-label="unsaved changes">●</span>{/if}

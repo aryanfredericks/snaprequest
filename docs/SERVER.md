@@ -107,8 +107,10 @@ Two optional fields:
 
 | Method and path | Result |
 |---|---|
-| `GET /api/v1/history?url=&method=&status=&before=&limit=` | `{ "entries": [summary…] }`, newest first. `url` matches a substring (case-insensitive); `before` is an id for paging; `limit` 1–1000 (default 50). |
+| `GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=` | `{ "entries": [summary…] }`, newest first. `url` matches a substring (case-insensitive); `class` is a status class (`4` = 400–499); `failed=true` lists only requests without a response (`false`: only responses); `before` is an id for paging; `limit` 1–1000 (default 50). |
 | `GET /api/v1/history/{id}` | The summary plus the stored `request` and `response` (redacted). |
+| `DELETE /api/v1/history/{id}` | 204 |
+| `DELETE /api/v1/history` | `{ "deleted": n }`: clears the history |
 
 A summary is `{ "id", "created_at" (Unix ms), "method", "url", "status", "duration_ms", "error",
 "collection", "request_key" }`.

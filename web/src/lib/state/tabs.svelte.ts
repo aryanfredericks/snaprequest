@@ -1,5 +1,5 @@
 // The kinds of tabs the main area shows.
-import type { ExecuteResult, RequestFile, TraceEntry, VariableInfo } from "../api/types";
+import type { ExecuteResult, HistoryRecord, RequestFile, TraceEntry, VariableInfo } from "../api/types";
 import { draftToFile, emptyDraft, sameFile, uid, type Draft } from "../model/draft";
 import { sameScope, scopeToFile, type ScopeDraft, type ScopeFile, type VarRow } from "../model/scope";
 import type { Route } from "./route";
@@ -113,4 +113,49 @@ export class EnvTab {
   }
 }
 
-export type Tab = RequestTab | ScopeTab | EnvTab;
+/** A stored request and its response. */
+export class HistoryTab {
+  readonly kind = "history" as const;
+  readonly id = uid();
+  readonly dirty = false;
+  readonly collection: string | null;
+  record: HistoryRecord;
+
+  constructor(record: HistoryRecord) {
+    this.record = record;
+    this.collection = record.collection;
+  }
+
+  get title(): string {
+    return `#${this.record.id} ${this.record.method} ${this.record.url.replace(/^\w+:\/\/[^/]+/, "") || "/"}`;
+  }
+
+  get route(): Route {
+    return { kind: "history", id: this.record.id };
+  }
+}
+
+/** Two stored responses side by side. */
+export class DiffTab {
+  readonly kind = "diff" as const;
+  readonly id = uid();
+  readonly dirty = false;
+  readonly collection = null;
+  left: HistoryRecord;
+  right: HistoryRecord;
+
+  constructor(left: HistoryRecord, right: HistoryRecord) {
+    this.left = left;
+    this.right = right;
+  }
+
+  get title(): string {
+    return `#${this.left.id} ↔ #${this.right.id}`;
+  }
+
+  get route(): Route {
+    return { kind: "compare", a: this.left.id, b: this.right.id };
+  }
+}
+
+export type Tab = RequestTab | ScopeTab | EnvTab | HistoryTab | DiffTab;

@@ -9,6 +9,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use serde_json::json;
 use snapreq_core::model::Auth;
 use snapreq_core::{Client, Request};
 use snapreq_server::store::{HistoryEntry, HistoryQuery, Retention, RunEntry, Store};
@@ -321,4 +322,76 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
         err.contains("created by a newer SnapRequest (schema 99"),
         "{err}"
     );
+}
+
+#[tokio::test]
+async fn history_filters_by_class_failure_and_collection_and_deletes() {
+    let store = Store::in_memory().await.unwrap();
+    let add = |method: &str, status: Option<u16>, collection: Option<&str>| HistoryEntry {
+        method: method.into(),
+        url: "http://x/".into(),
+        status,
+        duration_ms: Some(1.0),
+        error: status.is_none().then(|| "refused".into()),
+        collection: collection.map(Into::into),
+        request_key: collection.map(|_| "k".into()),
+        request: json!({}),
+        response: None,
+    };
+    for e in [
+        add("GET", Some(200), Some("shop")),
+        add("GET", Some(404), None),
+        add("POST", Some(201), None),
+        add("GET", None, Some("shop")),
+    ] {
+        store.add_history(e).await.unwrap();
+    }
+    let ids = |q: HistoryQuery| {
+        let store = store.clone();
+        async move {
+            store
+                .history(HistoryQuery { limit: 50, ..q })
+                .await
+                .unwrap()
+                .iter()
+                .map(|h| h.id)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(
+        ids(HistoryQuery {
+            status_class: Some(2),
+            ..Default::default()
+        })
+        .await,
+        [3, 1]
+    );
+    assert_eq!(
+        ids(HistoryQuery {
+            failed: Some(true),
+            ..Default::default()
+        })
+        .await,
+        [4]
+    );
+    assert_eq!(
+        ids(HistoryQuery {
+            failed: Some(false),
+            ..Default::default()
+        })
+        .await,
+        [3, 2, 1]
+    );
+    assert_eq!(
+        ids(HistoryQuery {
+            collection: Some("shop".into()),
+            ..Default::default()
+        })
+        .await,
+        [4, 1]
+    );
+    assert_eq!(store.delete_history(Some(2)).await.unwrap(), 1);
+    assert_eq!(store.delete_history(Some(2)).await.unwrap(), 0);
+    assert_eq!(store.delete_history(None).await.unwrap(), 3);
+    assert!(ids(HistoryQuery::default()).await.is_empty());
 }

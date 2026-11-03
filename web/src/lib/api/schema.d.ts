@@ -161,11 +161,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** `GET /api/v1/history?url=&method=&status=&before=&limit=` */
+        /** `GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=` */
         get: operations["list_history"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["clear_history"];
         options?: never;
         head?: never;
         patch?: never;
@@ -181,7 +181,7 @@ export interface paths {
         get: operations["get_history"];
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["delete_history"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1442,6 +1442,12 @@ export interface operations {
                 url?: string;
                 method?: string;
                 status?: number;
+                /** @description Status class, `1` to `5` (`4` = 400–499). */
+                class?: number;
+                /** @description `true`: only failures without a response; `false`: only responses. */
+                failed?: boolean;
+                /** @description Only requests of this collection. */
+                collection?: string;
                 before?: number;
                 limit?: number;
             };
@@ -1458,6 +1464,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HistoryList"];
+                };
+            };
+        };
+    };
+    clear_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `{ deleted }`: every entry is removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
                 };
             };
         };
@@ -1503,6 +1529,36 @@ export interface operations {
             };
             /** @description Does not validate */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description History entry id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

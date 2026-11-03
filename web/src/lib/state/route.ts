@@ -4,7 +4,7 @@
 //   #/c/<collection>/e/<environment>   an environment
 //   #/c/<collection>/d/<folder key>    a folder's settings
 //   #/c/<collection>                   a collection's settings
-//   #/history/<id>   #/runs/<id>   #/new
+//   #/history/<id>   #/compare/<id>/<id>   #/runs/<id>   #/new
 export type Route =
   | { kind: "request"; collection: string; key: string }
   | { kind: "flow"; collection: string; key: string }
@@ -12,6 +12,7 @@ export type Route =
   | { kind: "collection"; collection: string }
   | { kind: "folder"; collection: string; key: string }
   | { kind: "history"; id: number }
+  | { kind: "compare"; a: number; b: number }
   | { kind: "run"; id: number }
   | { kind: "new" }
   | { kind: "home" };
@@ -32,6 +33,8 @@ export function formatRoute(r: Route): string {
       return `#/c/${encodeURIComponent(r.collection)}/d/${enc(r.key)}`;
     case "history":
       return `#/history/${r.id}`;
+    case "compare":
+      return `#/compare/${r.a}/${r.b}`;
     case "run":
       return `#/runs/${r.id}`;
     case "new":
@@ -46,6 +49,7 @@ export function parseRoute(hash: string): Route {
   const [a, b, c, ...rest] = parts;
   const id = Number(b);
   if (a === "history" && Number.isInteger(id)) return { kind: "history", id };
+  if (a === "compare" && Number.isInteger(id) && Number.isInteger(Number(c))) return { kind: "compare", a: id, b: Number(c) };
   if (a === "runs" && Number.isInteger(id)) return { kind: "run", id };
   if (a === "new") return { kind: "new" };
   if (a === "c" && b) {

@@ -22,6 +22,8 @@ fn every_route_is_described() {
         "POST /api/v1/requests/execute",
         "GET /api/v1/history",
         "GET /api/v1/history/{id}",
+        "DELETE /api/v1/history/{id}",
+        "DELETE /api/v1/history",
         "GET /api/v1/runs",
         "POST /api/v1/runs",
         "GET /api/v1/runs/{id}",
@@ -69,7 +71,19 @@ fn every_route_is_described() {
         .iter()
         .map(|p| p["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["url", "method", "status", "before", "limit"]);
+    assert_eq!(
+        names,
+        [
+            "url",
+            "method",
+            "status",
+            "class",
+            "failed",
+            "collection",
+            "before",
+            "limit"
+        ]
+    );
 }
 
 #[tokio::test]

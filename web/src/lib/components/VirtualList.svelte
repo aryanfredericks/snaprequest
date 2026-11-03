@@ -8,8 +8,10 @@
     row: Snippet<[number]>;
     label: string;
     overscan?: number;
+    /** Called when the end of the list scrolls into view (for loading more). */
+    onend?: () => void;
   }
-  let { count, rowHeight, row, label, overscan = 10 }: Props = $props();
+  let { count, rowHeight, row, label, overscan = 10, onend }: Props = $props();
 
   let scrollTop = $state(0);
   let height = $state(400);
@@ -26,7 +28,11 @@
   aria-label={label}
   tabindex="0"
   bind:clientHeight={height}
-  onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
+  onscroll={(e) => {
+    const el = e.currentTarget;
+    scrollTop = el.scrollTop;
+    if (onend && el.scrollTop + el.clientHeight > el.scrollHeight - rowHeight * 5) onend();
+  }}
 >
   <div class="spacer" style="height: {count * rowHeight}px">
     <div class="rows" style="transform: translateY({first * rowHeight}px)">

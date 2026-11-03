@@ -1,6 +1,9 @@
 <script lang="ts">
   import { api, serverVersion, type ServerVersion } from "./lib/api/client";
+  import DiffView from "./lib/components/DiffView.svelte";
   import EnvView from "./lib/components/EnvView.svelte";
+  import HistoryPanel from "./lib/components/HistoryPanel.svelte";
+  import HistoryView from "./lib/components/HistoryView.svelte";
   import PromptDialog from "./lib/components/PromptDialog.svelte";
   import RequestView from "./lib/components/RequestView.svelte";
   import ScopeView from "./lib/components/ScopeView.svelte";
@@ -12,6 +15,9 @@
   let version = $state<ServerVersion | null>(null);
   let offline = $state<string | null>(null);
   let view: RequestView | undefined = $state();
+  type Side = "collections" | "history";
+  let side = $state<Side>((localStorage.getItem("snapreq.side") as Side | null) ?? "collections");
+  $effect(() => localStorage.setItem("snapreq.side", side));
 
   $effect(() => {
     serverVersion(api)
@@ -29,6 +35,8 @@
     else if (r.kind === "environment") await app.openEnvironment(r.collection, r.name);
     else if (r.kind === "folder") await app.openScope(r.collection, r.key);
     else if (r.kind === "collection") await app.openScope(r.collection, "");
+    else if (r.kind === "history") await app.openHistory(r.id);
+    else if (r.kind === "compare") await app.compare(r.a, r.b);
     else if (r.kind === "new" && !app.tabs.some((t) => t.kind === "request" && t.collection === null)) app.newRequest();
   }
 
@@ -77,7 +85,16 @@
       {/if}
     </span>
   </header>
-  <Sidebar />
+  <aside class="side">
+    <div class="switch" role="tablist" aria-label="Sidebar">
+      {#each [{ id: "collections", label: "Collections" }, { id: "history", label: "History" }] as s (s.id)}
+        <button type="button" role="tab" aria-selected={side === s.id} aria-controls="side-panel" onclick={() => (side = s.id as Side)}>{s.label}</button>
+      {/each}
+    </div>
+    <div class="side-panel" id="side-panel" role="tabpanel">
+      {#if side === "collections"}<Sidebar />{:else}<HistoryPanel />{/if}
+    </div>
+  </aside>
   <main>
     <TabBar />
     {#if tab}
@@ -86,8 +103,12 @@
           <RequestView {tab} bind:this={view} />
         {:else if tab.kind === "scope"}
           <ScopeView {tab} />
-        {:else}
+        {:else if tab.kind === "environment"}
           <EnvView {tab} />
+        {:else if tab.kind === "history"}
+          <HistoryView {tab} />
+        {:else}
+          <DiffView {tab} />
         {/if}
       {/key}
     {:else}
@@ -143,9 +164,43 @@
     color: var(--muted);
     font-size: 0.8rem;
   }
-  :global(.sidebar) {
+  .side {
+    display: flex;
+    flex-direction: column;
     border-right: 1px solid var(--border);
     background: var(--bg-soft);
+    min-height: 0;
+  }
+  .switch {
+    display: flex;
+    gap: 0.2rem;
+    padding: 0.4rem 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .switch button {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--muted);
+    padding: 0.3rem;
+  }
+  .switch button[aria-selected="true"] {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .side-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+  }
+  .side-panel > :global(.sidebar) {
+    padding: 0;
+    flex: 1;
     min-height: 0;
   }
   main {

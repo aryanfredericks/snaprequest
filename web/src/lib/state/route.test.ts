@@ -10,6 +10,7 @@ describe("routes", () => {
       { kind: "collection", collection: "shop" },
       { kind: "folder", collection: "shop", key: "orders/admin" },
       { kind: "history", id: 42 },
+      { kind: "compare", a: 3, b: 9 },
       { kind: "run", id: 7 },
       { kind: "new" },
       { kind: "home" },
