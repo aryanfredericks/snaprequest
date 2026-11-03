@@ -193,6 +193,49 @@ tls_min_version = "1.2"            # "1.2" | "1.3"
 tls_max_version = "1.3"
 ```
 
+### Assertions
+
+`[assert]` lists checks run on the response. Every check that is set must pass.
+
+```toml
+[assert]
+status = 201                       # or "2xx", or [200, 201]
+duration_ms = { lt = 800 }         # total time of the exchange
+body = { contains = "snap" }       # the body as text
+schema = "schemas/user.json"       # JSON Schema the body must match; relative to this file
+
+[assert.headers]                   # header name (case-insensitive) → check
+content-type = { starts_with = "application/json" }
+x-request-id = { exists = true }
+
+[assert.json]                      # JSONPath (RFC 9535) → check
+"$.id" = { type = "integer", gt = 0 }
+"$.name" = "{{name}}"              # a plain value means `equals`
+"$.tags" = { length = 2, contains = "admin" }
+"$.user" = { equals = { role = "owner" } }   # compare with a table through `equals`
+```
+
+A check is a plain value (shorthand for `equals`) or a table of operators:
+
+| Operator | Passes when the actual value … |
+|---|---|
+| `equals`, `not_equals` | is (not) equal. Numbers compare by value (`7` equals `7.0`); header and body text match unquoted numbers and booleans (`x-count = 3`). |
+| `one_of = [..]` | equals one of the values. |
+| `contains`, `not_contains` | (does not) contain a substring (strings), an element (arrays) or a key (objects). |
+| `starts_with`, `ends_with` | starts or ends with the text. |
+| `matches` | matches the regular expression somewhere (Rust `regex` syntax; use `'^...$'` to anchor). |
+| `exists` | is present (`true`) or absent (`false`). Every other operator fails on a missing value. |
+| `type` | is a `string`, `number`, `integer`, `boolean`, `array`, `object` or `null`. |
+| `length` | has this many characters, elements or keys. |
+| `lt`, `lte`, `gt`, `gte` | is a number (or numeric text) below / above the bound. |
+
+- `status` also accepts a class such as `"2xx"` and a list meaning "one of".
+- A JSONPath that matches one value is checked against that value; one that matches several is
+  checked against the array of them; one that matches nothing is missing.
+- Placeholders work in expected values, patterns and the schema path.
+- Invalid JSONPaths, regular expressions and schema files are reported before the request is sent.
+- Assertions belong to the request file; they are not inherited from folders or the collection.
+
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,

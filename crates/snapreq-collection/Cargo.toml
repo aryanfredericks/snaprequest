@@ -13,6 +13,7 @@ authors.workspace = true
 snapreq-core.workspace = true
 http.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 toml.workspace = true
@@ -20,7 +21,6 @@ toml_edit.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 
 [lints]
 workspace = true

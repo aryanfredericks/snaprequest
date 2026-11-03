@@ -7,6 +7,7 @@ use snapreq_core::model::{
     ApiKeyLocation, ClientAuth, HttpVersionPref, OAuth2Grant, ProxyMode, TlsVersion,
 };
 
+use crate::assert::AssertSpec;
 use crate::kv::KeyValues;
 use crate::vars::Variables;
 
@@ -96,6 +97,9 @@ pub struct RequestFile {
     pub body: Option<BodySpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
+    /// Checks run on the response (boxed: most requests have none, and it is large).
+    #[serde(default, skip_serializing_if = "no_checks")]
+    pub assert: Box<AssertSpec>,
 }
 
 impl RequestFile {
@@ -112,6 +116,7 @@ impl RequestFile {
             auth: None,
             body: None,
             settings: Settings::default(),
+            assert: Box::default(),
         }
     }
 
@@ -309,6 +314,12 @@ pub struct PartSpec {
     pub content_type: Option<String>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub enabled: bool,
+}
+
+// serde's `skip_serializing_if` passes a reference to the field.
+#[allow(clippy::borrowed_box)]
+fn no_checks(a: &Box<AssertSpec>) -> bool {
+    a.is_empty()
 }
 
 fn yes() -> bool {

@@ -128,3 +128,17 @@ the browser. Approved by the maintainer.
 **Consequences:** Access and refresh tokens are stored on disk outside the collection; `snapreq tokens
 clear` deletes them. The server can plug in SQLite-backed storage later. Token requests go through
 `Client::execute_plain`, which keeps the request futures non-recursive and `Send`.
+
+## ADR-016: Assertion format and libraries
+**Status:** Accepted (2026-11-03)
+**Context:** P5.1 needs declarative checks in request files that read well, diff cleanly, can be edited by the
+web UI and work unchanged inside flow steps (P5.3, `[step.assert]`). Alternatives considered: a list of
+`[[assert]]` tables (one check each: verbose), and Bruno-style strings (`"res.status" = "eq 200"`: compact but
+an extra mini-language with its own escaping).
+**Decision:** An `[assert]` table with fixed subjects (`status`, `duration_ms`, `body`, `schema`) and two keyed
+sub-tables, `[assert.headers]` and `[assert.json]` (JSONPath keys), mirroring `[headers]`. A plain value means
+`equals`; a table lists operators, all of which must pass. Evaluation lives in `snapreq-test`; the format in
+`snapreq-collection`. Libraries: `serde_json_path` (RFC 9535 JSONPath, MIT), `regex` (MIT/Apache-2.0),
+`jsonschema` without default features (MIT; no HTTP fetching of remote `$ref`s, no extra TLS stack).
+**Consequences:** One key per subject, so two checks on the same JSONPath go in one table. Comparing with an
+object needs `{ equals = { ... } }`. Remote schema references are not fetched (local files only).

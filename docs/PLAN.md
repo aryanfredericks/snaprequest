@@ -187,13 +187,14 @@ The first thing people can actually use.
 ### Phase 5: Assertions and the test runner (`snapreq-test`)
 
 - **P5.1** Declarative assertions in request files: status, header, response time, body contains, JSONPath equals/exists/matches/type, JSON Schema.
-- **P5.2** Chaining: extract values from a response (JSONPath, header, regex) into runtime variables for later requests.
-- **P5.3** `snapreq run <collection> [-e env] [--folder x] [--iterations n] [--data data.csv|json]`. Data-driven runs.
-- **P5.4** Run control: bail on first failure, delay between requests, parallel runs of independent requests.
-- **P5.5** Reporters: pretty console output, JSON, JUnit XML, single-file HTML report including traces.
-- **P5.6** Exit codes for CI; an example GitHub Actions workflow.
+- **P5.2** Chaining: extract values from a response (JSONPath, header, regex, cookie) into runtime variables for later requests; captured secrets stay redacted.
+- **P5.3** **Flows (chain testing):** one `*.flow.toml` file describes a whole API workflow as ordered steps. A step reuses a collection request (keeping its inherited headers, auth and environment) or defines one inline, may override variables, captures values for later steps and asserts on the response. Polling with `retry = { until, every_ms, max }`, per-step delays, stop at the first failing step with expected vs actual and that step's trace.
+- **P5.4** `snapreq run <collection|folder|flow> [-e env] [--folder x] [--iterations n] [--data data.csv|json]`. Data-driven runs.
+- **P5.5** Run control: bail on first failure, delay between requests, parallel runs of independent requests.
+- **P5.6** Reporters: pretty console output, JSON, JUnit XML, single-file HTML report including traces (per flow step).
+- **P5.7** Exit codes for CI; an example GitHub Actions workflow.
 
-**Acceptance:** a CI job runs a fixture collection and publishes a JUnit report; failing assertions show expected vs actual values and the relevant trace.
+**Acceptance:** a CI job runs a fixture collection and a fixture flow (log in → create → poll until ready → delete, passing values between steps) and publishes a JUnit report; failing assertions show expected vs actual values and the relevant trace.
 
 ---
 
@@ -219,7 +220,7 @@ The first thing people can actually use.
 - **P7.4** **Debug view:** timing waterfall, TLS and certificate details, raw wire log, redirect chain. This is the headline feature.
 - **P7.5** Collections sidebar (tree, drag and drop), environment switcher and editor.
 - **P7.6** History with search and filters; re-run from history; compare two responses (diff).
-- **P7.7** Collection runner UI with live progress and reports.
+- **P7.7** Collection runner UI with live progress and reports. Flow editor: reorderable step list, step-by-step runs showing the captured variables after each step, re-run from step N, and each step's waterfall and wire log.
 - **P7.8** Dark and light themes, keyboard shortcuts, accessibility pass.
 
 **Acceptance:** everything the CLI can do for single requests and runs can also be done in the browser.
@@ -241,7 +242,7 @@ The first thing people can actually use.
 
 ### Phase 9: Interoperability and scripting
 
-- **P9.1** Import: cURL command, Postman Collection v2.1 (with environments), OpenAPI 3.x, Insomnia, HAR.
+- **P9.1** Import: cURL command, Postman Collection v2.1 (with environments), OpenAPI 3.x, Insomnia, HAR, Hurl files (as flows).
 - **P9.2** Export: cURL, HAR, code snippets (Python requests, JS fetch, Go, Rust reqwest).
 - **P9.3** Pre-request and test scripts in JS via `rquickjs`: a `snapreq.*` API (variables, request, response, expect), with time and memory limits and no file or network access.
 - **P9.4** Translation of simple Postman `pm.test`/`pm.expect` scripts during import where possible.

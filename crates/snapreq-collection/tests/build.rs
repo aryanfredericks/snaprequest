@@ -516,3 +516,79 @@ audience = "https://api.test"
     let back: snapreq_collection::CollectionFile = toml::from_str(&text).unwrap();
     assert_eq!(back, c.file);
 }
+
+#[test]
+fn assertions_are_interpolated_and_round_trip() {
+    let dir = temp_collection(
+        "assert",
+        &[
+            (
+                "snapreq.toml",
+                "format = 1\nname = \"A\"\n[vars]\nname = \"snap\"\n",
+            ),
+            (
+                "users/get.toml",
+                r#"url = "http://a.test"
+
+[assert]
+status = "2xx"
+schema = "schemas/user.json"
+
+[assert.headers]
+content-type = { contains = "json" }
+
+[assert.json]
+"$.name" = "{{name}}"
+"$.id" = { type = "integer", gt = 0 }
+"#,
+            ),
+        ],
+    );
+    let (c, _) = Collection::load(&dir).unwrap();
+    let s = Scopes::for_request(
+        &c,
+        "users/get",
+        None,
+        &Variables::default(),
+        &Variables::default(),
+    );
+    let a = snapreq_collection::build_assertions(&c, "users/get", &s).unwrap();
+    assert_eq!(a.json.0[0].1, snapreq_collection::Check::equals("snap"));
+    assert_eq!(a.schema, Some(dir.join("users").join("schemas/user.json")));
+
+    let file = &c.find("users/get").unwrap().file;
+    let text = snapreq_collection::save::to_toml(file).unwrap();
+    assert!(
+        text.contains("[assert]\nstatus = \"2xx\"\nschema = \"schemas/user.json\"\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "[assert.json]\n\"$.name\" = \"{{name}}\"\n\"$.id\" = { type = \"integer\", gt = 0 }\n"
+        ),
+        "{text}"
+    );
+    let back: snapreq_collection::RequestFile = toml::from_str(&text).unwrap();
+    assert_eq!(&back, file);
+
+    let s = Scopes::for_request(
+        &c,
+        "users/get",
+        None,
+        &Variables::default(),
+        &Variables::default(),
+    );
+    std::fs::write(
+        dir.join("users/get.toml"),
+        "url = \"http://a.test\"\n[assert.json]\n\"$.x\" = \"{{missing}}\"\n",
+    )
+    .unwrap();
+    let (c, _) = Collection::load(&dir).unwrap();
+    let err = snapreq_collection::build_assertions(&c, "users/get", &s)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("get.toml: assert.json.$.x: variable `missing`"),
+        "{err}"
+    );
+}

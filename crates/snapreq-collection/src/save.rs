@@ -29,7 +29,7 @@ fn layout(table: &mut toml_edit::Table) {
     for (key, item) in table.iter_mut() {
         let key_value_table = matches!(
             key.get(),
-            "headers" | "query" | "fields" | "vars" | "params"
+            "headers" | "query" | "fields" | "vars" | "params" | "json"
         );
         if let Item::Value(Value::InlineTable(t)) = item {
             *item = Item::Table(std::mem::take(t).into_table());

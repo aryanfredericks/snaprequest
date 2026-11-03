@@ -36,10 +36,12 @@ http-body-util = "0.1"
 hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 insta = "1"
+jsonschema = { version = "0.60", default-features = false, features = ["resolve-file"] }
 md-5 = "0.11"
 mime_guess = "2"
 percent-encoding = "2"
 rcgen = "0.14"
+regex = "1"
 rpassword = "7"
 ring = "0.17"
 ruzstd = "0.9"
@@ -47,6 +49,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_json_path = "0.7"
 terminal_size = "0.4"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }

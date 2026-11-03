@@ -85,6 +85,37 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     Ok(req)
 }
 
+/// The `[assert]` checks of the request at `key_path`, with placeholders resolved from
+/// `scopes` and the schema path made absolute (relative paths are relative to the request
+/// file). Assertions are not inherited from folders or the collection.
+pub fn build_assertions(
+    collection: &Collection,
+    key_path: &str,
+    scopes: &Scopes,
+) -> Result<crate::assert::AssertSpec> {
+    let item = collection.find(key_path).ok_or_else(|| {
+        Error::invalid(
+            &collection.root,
+            format!("no request `{key_path}` in the collection"),
+        )
+    })?;
+    let file = collection.root.join(&item.path);
+    let dir = file.parent().unwrap_or(&collection.root).to_path_buf();
+    let mut spec = (*item.file.assert).clone();
+    let mut interp = Interpolator::new(scopes);
+    spec.try_map_strings(|place, text| {
+        interp
+            .interpolate(text)
+            .map_err(|e| Error::invalid(&file, format!("{place}: {e}")))
+    })?;
+    if let Some(p) = &spec.schema
+        && p.is_relative()
+    {
+        spec.schema = Some(dir.join(p));
+    }
+    Ok(spec)
+}
+
 /// The auth that applies to the request at `key_path` and the file that sets it: the
 /// innermost `[auth]` that is not `inherit`, from the request file up to `snapreq.toml`.
 /// `None` when nothing sets one (no auth).

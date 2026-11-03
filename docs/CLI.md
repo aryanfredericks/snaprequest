@@ -58,6 +58,18 @@ Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment
 `.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
 every trace and output, including when given with `--var`.
 
+## Assertions
+
+A request file's `[assert]` checks (see `docs/FORMAT.md`) run after the response arrives. Results go to
+stderr, one line per check, then a summary; the exit code is 7 if any check failed. `--no-assert`
+skips them. Credential and secret values are hidden in the reported actual values.
+
+```text
+✓ status equals 201
+✗ json $.id type integer  (actual: "abc")
+assertions: 1 passed, 1 failed
+```
+
 ## Output
 
 JSON responses (`application/json`, `*+json`, or JSON-looking text) are pretty-printed with
@@ -229,6 +241,9 @@ One JSON document is written to stdout, for success and failure alike. Exit code
 
 - `body.encoding` is `utf8` or `base64` (binary bodies).
 - With `-o FILE`, `body_file` holds the path and `response.body` is empty.
+- When the request file has `[assert]` checks, `assertions` lists them:
+  `[{ "subject": "json $.id", "check": "type integer", "passed": false, "actual": "\"abc\"" }]`
+  (`message` explains checks that could not be applied, and schema errors).
 - On failure `response` is `null` and `error` is
   `{ "kind": "execution", "phase": "connect", "timed_out": false, "message": "…", "trace": […] }`, or
   `{ "kind": "invalid_request", "message": "…" }` when nothing was sent.
@@ -247,3 +262,4 @@ One JSON document is written to stdout, for success and failure alike. Exit code
 | 4 | `--fail` was given and the status was 400 or higher. |
 | 5 | Network failure: DNS, connection, TLS or protocol error, or no OAuth 2.0 token could be obtained. |
 | 6 | A connect or total timeout fired. |
+| 7 | A response was received but an `[assert]` check of the request file failed. |

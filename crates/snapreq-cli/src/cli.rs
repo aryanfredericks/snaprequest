@@ -128,6 +128,10 @@ pub(crate) struct SendArgs {
     )]
     pub env: Option<String>,
 
+    /// Do not run the request file's `[assert]` checks.
+    #[arg(long = "no-assert", help_heading = "Collection")]
+    pub no_assert: bool,
+
     /// Set a variable for this run, `name=value` (highest precedence). Repeatable.
     #[arg(long = "var", value_name = "NAME=VALUE", help_heading = "Collection")]
     pub vars: Vec<String>,

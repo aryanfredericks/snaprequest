@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use snapreq_collection::load::COLLECTION_FILE;
 use snapreq_collection::save::{save_collection, save_request};
 use snapreq_collection::{
-    Collection, CollectionFile, Environment, Item, RequestFile, Scopes, Secrets, Variables,
-    build_request, secrets,
+    AssertSpec, Collection, CollectionFile, Environment, Item, RequestFile, Scopes, Secrets,
+    Variables, build_assertions, build_request, secrets,
 };
 use snapreq_core::Request;
 
@@ -103,7 +103,12 @@ fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
 
 /// Builds the collection request `key`, then applies command-line overrides.
 /// Collection warnings are printed to stderr.
-pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Request, ArgError> {
+/// Builds the request and its `[assert]` checks (empty with `--no-assert`).
+pub(crate) fn build(
+    root: &Path,
+    key: &str,
+    args: &SendArgs,
+) -> Result<(Request, AssertSpec), ArgError> {
     let (collection, warnings) = Collection::load(root).map_err(|e| ArgError(e.to_string()))?;
     for w in &warnings {
         eprintln!("warning: {w}");
@@ -137,7 +142,12 @@ pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Request, 
         }
     }
     apply_overrides(&mut req, args)?;
-    Ok(req)
+    let checks = if args.no_assert {
+        AssertSpec::default()
+    } else {
+        build_assertions(&collection, key, &scopes).map_err(|e| ArgError(e.to_string()))?
+    };
+    Ok((req, checks))
 }
 
 /// `snapreq ls`.

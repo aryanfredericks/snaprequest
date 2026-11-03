@@ -1,5 +1,9 @@
 //! SnapRequest assertions, collection runner and reporters.
 
+pub mod assert;
+
+pub use assert::{Assertions, Outcome};
+
 /// Errors produced by `snapreq-test`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

@@ -1,5 +1,6 @@
 //! `snapreq`: fast, self-hosted HTTP API testing and debugging.
 
+mod assert_view;
 mod cli;
 mod collection_cmd;
 #[cfg(test)]
@@ -40,6 +41,8 @@ pub(crate) mod exit {
     pub const NETWORK: u8 = 5;
     /// A connect or total timeout fired.
     pub const TIMEOUT: u8 = 6;
+    /// A response was received but an `[assert]` check failed.
+    pub const ASSERTION_FAILED: u8 = 7;
 }
 
 fn init_logging(level: &str) -> anyhow::Result<()> {
@@ -147,14 +150,21 @@ async fn run_send(args: &SendArgs) -> u8 {
     };
 
     let built = collection_cmd::resolve_target(args).and_then(|target| match target {
-        collection_cmd::Target::Url => send::build_request(args),
+        collection_cmd::Target::Url => {
+            send::build_request(args).map(|r| (r, snapreq_collection::AssertSpec::default()))
+        }
         collection_cmd::Target::Collection { root, key } => {
             collection_cmd::build(&root, &key, args)
         }
     });
-    let mut request = match built {
+    let (mut request, checks) = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
+    };
+    // Invalid JSONPaths, patterns or schema files are reported before anything is sent.
+    let assertions = match snapreq_test::Assertions::compile(&checks) {
+        Ok(a) => a,
+        Err(e) => return invalid(e),
     };
     if send::needs_password_prompt(args)
         && std::io::stdin().is_terminal()
@@ -217,12 +227,14 @@ async fn run_send(args: &SendArgs) -> u8 {
                     );
                 }
             }
+            let mut outcomes = assertions.evaluate(&response);
+            assert_view::scrub(&mut outcomes, &request.secrets());
             if json {
-                emit_json(&json_out::success(
-                    &request,
-                    &response,
-                    args.output.as_deref(),
-                ));
+                let mut doc = json_out::success(&request, &response, args.output.as_deref());
+                if !outcomes.is_empty() {
+                    doc["assertions"] = serde_json::to_value(&outcomes).unwrap_or_default();
+                }
+                emit_json(&doc);
             } else {
                 let mut out = anstream::AutoStream::new(std::io::stdout().lock(), color);
                 if let Err(e) = output::print(&mut out, &request, &response, parts, terminal) {
@@ -233,7 +245,13 @@ async fn run_send(args: &SendArgs) -> u8 {
                     }
                 }
             }
-            if args.fail && response.status >= 400 {
+            if !json && !outcomes.is_empty() {
+                let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);
+                let _ = assert_view::render(&mut err, &outcomes);
+            }
+            if outcomes.iter().any(|o| !o.passed) {
+                exit::ASSERTION_FAILED
+            } else if args.fail && response.status >= 400 {
                 exit::HTTP_ERROR
             } else {
                 exit::OK

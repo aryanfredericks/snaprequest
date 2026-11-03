@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 5 Assertions and the test runner, starting (Phases 0–4 complete)
-- **Current checkpoint:** P5.1, declarative assertions
+- **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
+- **Current checkpoint:** P5.2, chaining (captures)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,31 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.1 declarative assertions in request files (status, header, response time, body contains, JSONPath
-   equals/exists/matches/type, JSON Schema), in `snapreq-test`. Read PLAN Phase 5 and ADR-008 first; decide the
-   TOML shape (probably `[[assert]]` tables or a compact `[assert]` table) and the JSONPath / JSON Schema crates
-   (check licenses with cargo-deny; prefer `serde_json_path` (RFC 9535) and `jsonschema`). Likely an ADR.
+1. P5.2 chaining: a `[capture]` table in request files, `name = { json = "$.id" }` / `{ header = "location" }` /
+   `{ regex = "...", group = 1 }` / `{ cookie = "sid" }` / `{ status = true }`, optional `secret = true`. Captured
+   values go into the runtime scope for later requests in the same run (the runner and flows use this; for a
+   single `snapreq send` print them with -v). Captured secrets join `settings.secrets` of later requests.
+   Design it so flow steps can use the same table as `[step.capture]`.
+2. P5.3 flows (`*.flow.toml`, added to PLAN on 2026-11-03 at the maintainer's request): ordered `[[step]]`s that
+   reference collection requests (`request = "auth/login"`) or define inline ones, with `vars`, `[step.capture]`,
+   `[step.assert]`, `retry = { until, every_ms, max }`, `delay_ms`; stop at the first failing step. Needs an ADR
+   for the flow file format (reuse `RequestFile` fields for inline steps).
+3. P5.4 `snapreq run` (collection | folder | flow), then run control, reporters, CI (P5.5–P5.7).
+
+## Assertion notes (P5.1)
+- Format (ADR-016): `snapreq_collection::assert::{AssertSpec, Check, Checks, JsonType}`; `RequestFile::assert` is a
+  `Box<AssertSpec>` (keeps `Item` small). `Check` has a custom serde (plain value = `equals`; tables via a
+  `#[serde(remote)]` mirror with `deny_unknown_fields`). `try_map_strings` drives interpolation;
+  `build_assertions(collection, key, scopes)` interpolates and resolves `schema` against the request file.
+  Saving keeps `[assert.json]` / `[assert.headers]` entries inline (`save.rs` layout list).
+- Evaluation: `snapreq_test::Assertions::compile(&spec)` (JSONPath, regex, schema file validated up front) →
+  `evaluate(&Response) -> Vec<Outcome { subject, check, passed, actual, message }>`. Status accepts `"2xx"` and
+  lists; `loose_eq` compares numbers by value and lets text match unquoted numbers/booleans; multi-match JSONPath
+  → array; zero matches → missing.
+- CLI: `snapreq send` runs a request file's checks (stderr lines + summary, `assert_view.rs`), exit code 7 on
+  failure, `--no-assert`, `assertions` in `--format json`; actual values are scrubbed with `Request::secrets()`.
+- Deps: `serde_json_path`, `regex`, `jsonschema` (no default features). `deny.toml` now allows `MIT-0`
+  (borrow-or-share via jsonschema).
 
 ## Auth inheritance notes (P4.5)
 - `snapreq_collection::effective_auth(collection, key)` → innermost non-`inherit` `[auth]` and its file;
@@ -246,7 +267,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 2 CLI MVP | ✅ done |
 | 3 Collections & environments | ✅ done |
 | 4 Auth helpers | ✅ done |
-| 5 Assertions & runner | ⬜ |
+| 5 Assertions & runner | 🟨 |
 | 6 Self-hosted server | ⬜ |
 | 7 Web UI | ⬜ |
 | 8 Multi-user & hardening | ⬜ |
@@ -290,6 +311,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P4.3 — 2026-11-03 — OAuth 2.0 (client credentials, password, authorization code + PKCE, refresh, 401 retry); `TokenStore`/`AuthorizationPrompt` in core, file cache + `snapreq tokens` in the CLI; ADR-015. 275 tests total.
 - P4.4 — 2026-11-03 — AWS Signature V4 (every hop signed, strict query encoding, S3 payload hash), verified against botocore vectors and a re-verifying mock. 281 tests total.
 - P4.5 — 2026-11-03 — `effective_auth` and auth markers in `snapreq ls`. Phase 4 complete. 282 tests total.
+- P5.1 — 2026-11-03 — Declarative `[assert]` checks (status, duration, body, headers, JSONPath, JSON Schema) evaluated by `snapreq-test`; `snapreq send` reports them, exit code 7; ADR-016. 293 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -306,3 +328,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1 done.

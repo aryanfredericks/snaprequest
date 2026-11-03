@@ -457,3 +457,68 @@ async fn ls_marks_where_auth_is_set() {
         "{text}"
     );
 }
+
+#[tokio::test]
+async fn request_file_assertions_run_after_the_response() {
+    let addr = server().await;
+    let dir = collection("asserts");
+    let file = dir.join("check.toml");
+    let write = |text: &str| {
+        std::fs::write(&file, format!("url = \"{{{{base_url}}}}/check\"\n{text}")).unwrap()
+    };
+    let base = format!("base_url=http://{addr}");
+    let send = |extra: &'static [&'static str]| {
+        let mut args = vec![
+            "send".to_owned(),
+            file.to_str().unwrap().to_owned(),
+            "--var".into(),
+            base.clone(),
+        ];
+        args.extend(extra.iter().map(|s| (*s).to_owned()));
+        async move {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            run(&args, None, None, &[]).await
+        }
+    };
+
+    write(
+        "[assert]\nstatus = 200\nbody = { contains = \"GET /check\" }\n[assert.headers]\ncontent-length = { gt = 0 }\n",
+    );
+    let o = send(&[]).await;
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("✓ status equals 200\n"), "{}", err(&o));
+    assert!(err(&o).ends_with("assertions: 3 passed\n"), "{}", err(&o));
+
+    write("[assert]\nstatus = \"4xx\"\n[assert.json]\n\"$.id\" = 1\n");
+    let o = send(&[]).await;
+    assert_eq!(o.status.code(), Some(7), "{}", err(&o));
+    assert!(
+        err(&o).contains("✗ status equals \"4xx\"  (actual: 200)\n"),
+        "{}",
+        err(&o)
+    );
+    assert!(
+        err(&o).contains("✗ json $.id equals 1  (the body is not JSON"),
+        "{}",
+        err(&o)
+    );
+    assert!(
+        err(&o).ends_with("assertions: 0 passed, 2 failed\n"),
+        "{}",
+        err(&o)
+    );
+
+    assert_eq!(send(&["--no-assert"]).await.status.code(), Some(0));
+
+    let o = send(&["--format", "json"]).await;
+    assert_eq!(o.status.code(), Some(7));
+    let doc: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(doc["assertions"][0]["subject"], "status");
+    assert_eq!(doc["assertions"][0]["passed"], false);
+    assert_eq!(doc["assertions"][0]["actual"], "200");
+
+    write("[assert.json]\n\"$.[\" = 1\n");
+    let o = send(&[]).await;
+    assert_eq!(o.status.code(), Some(3), "{}", err(&o));
+    assert!(err(&o).contains("invalid JSONPath `$.[`"), "{}", err(&o));
+}

@@ -1,6 +1,7 @@
 //! SnapRequest collections: the on-disk file format (`docs/FORMAT.md`), loading and saving.
 //! Variables, environments and turning collection items into requests build on this.
 
+pub mod assert;
 pub mod build;
 pub mod error;
 pub mod files;
@@ -11,7 +12,8 @@ pub mod save;
 pub mod secrets;
 pub mod vars;
 
-pub use build::{build_request, effective_auth};
+pub use assert::{AssertSpec, Check, Checks, JsonType};
+pub use build::{build_assertions, build_request, effective_auth};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,
