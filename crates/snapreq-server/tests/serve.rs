@@ -13,6 +13,7 @@ async fn health_and_version_then_graceful_shutdown() {
     let config = Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         data_dir: data_dir.clone(),
+        workspace: data_dir.join("workspace"),
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
     };
@@ -68,6 +69,7 @@ async fn binding_a_busy_port_fails_clearly() {
     let config = Config {
         bind: taken.local_addr().unwrap(),
         data_dir: std::env::temp_dir().join(format!("snapreq-serve-busy-{}", std::process::id())),
+        workspace: std::env::temp_dir(),
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
     };

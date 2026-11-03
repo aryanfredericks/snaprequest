@@ -61,6 +61,41 @@ impl RequestRun {
     }
 }
 
+/// A progress event of a run (for live views).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum Progress {
+    /// A request is about to be sent.
+    RequestStarted { iteration: usize, key: String },
+    /// A request finished (or could not be built or sent).
+    RequestDone {
+        iteration: usize,
+        key: String,
+        passed: bool,
+        status: Option<u16>,
+        duration_ms: Option<f64>,
+    },
+}
+
+/// Receives [`Progress`] events.
+pub type ProgressSink = std::sync::Arc<dyn Fn(&Progress) + Send + Sync>;
+
+/// Live observers of a run: trace events of every request and progress events.
+#[derive(Clone, Default)]
+pub struct Live {
+    pub trace: Option<snapreq_core::TraceSink>,
+    pub progress: Option<ProgressSink>,
+}
+
+impl std::fmt::Debug for Live {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Live")
+            .field("trace", &self.trace.is_some())
+            .field("progress", &self.progress.is_some())
+            .finish()
+    }
+}
+
 /// What to send.
 #[derive(Debug, Clone, Copy)]
 pub enum Target<'t> {
@@ -108,7 +143,6 @@ impl<'t> SendSpec<'t> {
 ///
 /// Variable precedence, highest first: `overrides` (`--var`) → step variables → the data
 /// row (`data`) → captured values (`runtime`) → flow variables → the request's usual scopes.
-#[derive(Debug)]
 pub struct Session<'a> {
     collection: &'a Collection,
     environment: Option<&'a Environment>,
@@ -123,6 +157,21 @@ pub struct Session<'a> {
     pub runtime: Variables,
     /// Secret values seen in this run, hidden in every later request.
     hidden: Vec<String>,
+    /// Receives the trace events of every request as they happen.
+    pub trace: Option<snapreq_core::TraceSink>,
+    /// Receives progress events.
+    pub progress: Option<ProgressSink>,
+    /// Iteration number reported in progress events.
+    pub iteration: usize,
+}
+
+impl std::fmt::Debug for Session<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("collection", &self.collection.root)
+            .field("iteration", &self.iteration)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> Session<'a> {
@@ -142,6 +191,9 @@ impl<'a> Session<'a> {
             data: Variables::default(),
             runtime: Variables::default(),
             hidden: Vec::new(),
+            trace: None,
+            progress: None,
+            iteration: 1,
         }
     }
 
@@ -220,6 +272,34 @@ impl<'a> Session<'a> {
         spec: SendSpec<'_>,
         adjust: impl FnOnce(&mut Request),
     ) -> RequestRun {
+        let key = match spec.target {
+            Target::Request(k) | Target::Inline { key: k, .. } => k.to_owned(),
+        };
+        if let Some(p) = &self.progress {
+            p(&Progress::RequestStarted {
+                iteration: self.iteration,
+                key: key.clone(),
+            });
+        }
+        let run = self.send_spec_inner(spec, adjust).await;
+        if let Some(p) = &self.progress {
+            let resp = run.response();
+            p(&Progress::RequestDone {
+                iteration: self.iteration,
+                key,
+                passed: run.passed(),
+                status: resp.map(|r| r.status),
+                duration_ms: resp.map(|r| r.timings.total.as_secs_f64() * 1000.0),
+            });
+        }
+        run
+    }
+
+    async fn send_spec_inner(
+        &mut self,
+        spec: SendSpec<'_>,
+        adjust: impl FnOnce(&mut Request),
+    ) -> RequestRun {
         let (key, file, path) = match spec.target {
             Target::Request(key) => match self.collection.find(key) {
                 Some(item) => (key, &item.file, self.collection.root.join(&item.path)),
@@ -276,7 +356,7 @@ impl<'a> Session<'a> {
             }
         }
 
-        let resp = match self.client.execute(&request).await {
+        let resp = match self.client.execute_with(&request, self.trace.clone()).await {
             Ok(resp) => resp,
             Err(e) => {
                 return RequestRun {

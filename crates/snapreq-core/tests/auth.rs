@@ -407,3 +407,20 @@ async fn digest_without_a_challenge_is_a_normal_request() {
     assert_eq!(resp.status, 401);
     assert_eq!(events(&resp.trace), ["401"]);
 }
+
+#[tokio::test]
+async fn trace_events_stream_live_and_redacted() {
+    let addr = start_server().await;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: snapreq_core::TraceSink = std::sync::Arc::new(move |e: &TraceEntry| {
+        sink_seen.lock().unwrap().push(e.clone());
+    });
+    let resp = Client::default()
+        .execute_with(&Request::get(url(addr, "/basic")).auth(basic()), Some(sink))
+        .await
+        .unwrap();
+    let live = seen.lock().unwrap().clone();
+    assert_eq!(live, resp.trace, "live events match the final trace");
+    assert!(!trace_text(&live).contains("QWxhZGRpbjpvcGVuIHNlc2FtZQ=="));
+}

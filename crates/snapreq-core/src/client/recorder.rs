@@ -38,6 +38,17 @@ pub(crate) struct Recorder {
     redactor: Redactor,
     /// Connection whose captured bytes should be emitted as a `Wire` event.
     capture: Option<Meter>,
+    /// Receives every event as it is recorded (redacted with what is known by then).
+    pub(crate) sink: Option<Sink>,
+}
+
+/// A [`TraceSink`](super::TraceSink) with a `Debug` impl.
+pub(crate) struct Sink(pub(crate) super::TraceSink);
+
+impl std::fmt::Debug for Sink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Sink")
+    }
 }
 
 impl Recorder {
@@ -49,6 +60,7 @@ impl Recorder {
             pending: None,
             redactor,
             capture: None,
+            sink: None,
         }
     }
 
@@ -89,7 +101,13 @@ impl Recorder {
     pub(crate) fn record_at(&mut self, when: Instant, event: TraceEvent) {
         let at = when.saturating_duration_since(self.start);
         tracing::trace!(?at, ?event, "trace");
-        self.entries.push(TraceEntry { at, event });
+        let entry = TraceEntry { at, event };
+        if let Some(sink) = &self.sink {
+            let mut live = [entry.clone()];
+            self.redactor.trace(&mut live);
+            (sink.0)(&live[0]);
+        }
+        self.entries.push(entry);
     }
 
     /// Marks the start of writing a request.

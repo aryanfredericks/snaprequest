@@ -10,6 +10,7 @@ use snapreq_core::{Error, Request};
 use snapreq_test::report::{counts, lines, request_line, secrets_of};
 use snapreq_test::{
     Iteration, Plan, Report, RequestRun, RunOptions, RunOutcome, Unit, data, execute, request_keys,
+    resolve_unit,
 };
 
 use crate::cli::{ColorArg, FormatArg, ReportFormat, RunArgs};
@@ -86,27 +87,10 @@ fn resolve(args: &RunArgs) -> Result<(PathBuf, Target), ArgError> {
 /// Turns the target into a unit of the loaded collection.
 fn unit<'c>(c: &'c Collection, target: Target, folder: Option<&str>) -> Result<Unit<'c>, String> {
     match target {
-        Target::Key(key) => {
-            if let Some(flow) = c.find_flow(&key) {
-                if folder.is_some() {
-                    return Err("--folder cannot be used with a flow".into());
-                }
-                return Ok(Unit::Flow(flow));
-            }
-            request_keys(c, Some(&key))
-                .map(Unit::Requests)
-                .map_err(|_| {
-                    let flows: Vec<&str> = c.flows.iter().map(|f| f.key.as_str()).collect();
-                    format!(
-                        "no flow or folder `{key}` in the collection (flows: {})",
-                        if flows.is_empty() {
-                            "none".into()
-                        } else {
-                            flows.join(", ")
-                        }
-                    )
-                })
-        }
+        Target::Key(key) => match (c.find_flow(&key), folder) {
+            (Some(_), Some(_)) => Err("--folder cannot be used with a flow".into()),
+            _ => resolve_unit(c, Some(&key)),
+        },
         Target::Folder(dir) => match (dir, folder) {
             (Some(_), Some(_)) => Err("give the folder either as TARGET or with --folder".into()),
             (d, f) => request_keys(c, d.as_deref().or(f)).map(Unit::Requests),
@@ -217,6 +201,7 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             delay: args.delay.map(Duration::from_millis),
             parallel: args.parallel,
         },
+        live: None,
     };
     let planned = if plan.rows.is_empty() {
         plan.iterations

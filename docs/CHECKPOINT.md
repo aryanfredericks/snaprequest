@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.3, REST API
+- **Current checkpoint:** P6.4, WebSocket live traces and run progress
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,16 +25,22 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.3 REST API (axum, JSON, under `/api/v1`): execute a request (`POST /api/v1/requests/execute` with a core
-   `Request` or a collection key + env + vars; stores history via `HistoryEntry::from_exchange`), history list/search
-   (`GET /api/v1/history?url=&method=&status=&before=&limit=`, `GET /api/v1/history/{id}`), run a flow/folder
-   (`POST /api/v1/runs`, stores `RunEntry::from_report`; `GET /api/v1/runs`, `/runs/{id}`), and collections/
-   environments CRUD backed by files in a workspace directory (new config `workspace = DIR`, default
-   `<data dir>/workspace`; one subdirectory per collection; reuse `snapreq_collection` load/save). Consistent JSON
-   error bodies `{ "error": { "kind", "message" } }`. Path traversal must be impossible (validate keys).
-   The executing endpoints need the P6.6 SSRF policy before remote use; ADR-018 keeps the server local until then.
-2. P6.4 WebSocket live traces, P6.5 OpenAPI (utoipa), P6.6 SSRF policy, P6.7 Docker.
-3. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+1. P6.4 WebSocket `/api/v1/ws`: client sends `{"type":"execute", ...ExecuteBody}` or `{"type":"run", ...RunBody}`;
+   server streams `{"type":"trace", ...}` / `{"type":"progress", ...}` and a final `{"type":"result"}` or
+   `{"type":"error"}`. Hooks exist: `Client::execute_with(req, TraceSink)`, `Session::{trace, progress}`,
+   `Plan::live`, `api::{execute_body, run_body}` take them.
+2. P6.5 OpenAPI (utoipa), P6.6 SSRF policy (connect-time IP check in core), P6.7 Docker.
+
+## API notes (P6.3)
+- `snapreq_server::api` (`docs/SERVER.md`): execute (raw `Request` or collection key + env + vars, via `Session`),
+  history list/search/get, runs (`resolve_unit` shared with the CLI; data rows / iterations / bail / delay /
+  parallel; stored with `RunEntry`), file-backed CRUD for collections, requests, flows, environments in
+  `Config::workspace` (`--workspace`, `SNAPREQ_WORKSPACE`, `workspace`, default `<data dir>/workspace`).
+- Safety: ids/keys validated per segment (`valid_segment`, reserved names), files validated (`RequestFile::validate`,
+  `FlowFile::validate` now pub) before writing; JSON errors `{error:{kind,message}}`.
+- Core: `TraceSink` + `Client::execute_with` (live, redacted events). snapreq-test: `Live { trace, progress }`,
+  `Progress::{RequestStarted, RequestDone}`, `Session::{trace, progress, iteration}`, `Plan::live`; `execute` now uses
+  an explicit `FuturesOrdered` loop (the stream-combinator version was not `Send`-general for axum handlers).
 
 ## Storage notes (P6.2)
 - ADR-019: `rusqlite` (bundled) instead of sqlx; MSRV 1.89 (Cargo.toml, CI job, CONTRIBUTING; check.sh reads it).
@@ -409,6 +415,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.7 — 2026-11-03 — Example collection + flow against a mock in CI with JUnit publishing, docs/CI.md; fixed secret captures showing in their own checks. Phase 5 complete. 310 tests total.
 - P6.1 — 2026-11-03 — `snapreq serve`: axum server with config file / env / flags, graceful shutdown, health and version endpoints, loopback-only by default (ADR-018). 319 tests total.
 - P6.2 — 2026-11-03 — SQLite storage (rusqlite, ADR-019, MSRV 1.89): redacted request history and run results, migrations, retention by age and size. 325 tests total.
+- P6.3 — 2026-11-03 — REST API: execute, history, runs, collections/requests/flows/environments CRUD over the workspace; docs/SERVER.md. 329 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.

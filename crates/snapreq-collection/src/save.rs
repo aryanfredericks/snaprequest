@@ -101,6 +101,11 @@ pub fn save_environment(path: &Path, vars: &crate::vars::Variables) -> Result<()
     write(path, &doc.to_string())
 }
 
+/// Writes a flow file (`*.flow.toml`).
+pub fn save_flow(path: &Path, file: &crate::flow::FlowFile) -> Result<()> {
+    write(path, &to_toml(file)?)
+}
+
 /// Writes `folder.toml`.
 pub fn save_folder(path: &Path, file: &FolderFile) -> Result<()> {
     write(path, &to_toml(file)?)

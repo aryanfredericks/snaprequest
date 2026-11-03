@@ -1,6 +1,5 @@
 //! Runs: a flow or a list of requests, once or once per iteration / data row.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures_util::StreamExt as _;
@@ -73,6 +72,8 @@ pub struct Plan<'a> {
     /// Iterations when there are no rows (at least 1).
     pub iterations: usize,
     pub options: RunOptions,
+    /// Live observers (trace and progress events).
+    pub live: Option<crate::session::Live>,
 }
 
 /// How a run proceeds.
@@ -111,6 +112,30 @@ pub fn request_keys(collection: &Collection, folder: Option<&str>) -> Result<Vec
     Ok(keys)
 }
 
+/// What to run for `key`: the flow with that key, else the requests of the folder with
+/// that key; `None` runs every request of the collection.
+pub fn resolve_unit<'c>(collection: &'c Collection, key: Option<&str>) -> Result<Unit<'c>, String> {
+    let Some(key) = key.map(|k| k.trim_matches('/')).filter(|k| !k.is_empty()) else {
+        return request_keys(collection, None).map(Unit::Requests);
+    };
+    if let Some(flow) = collection.find_flow(key) {
+        return Ok(Unit::Flow(flow));
+    }
+    request_keys(collection, Some(key))
+        .map(Unit::Requests)
+        .map_err(|_| {
+            let flows: Vec<&str> = collection.flows.iter().map(|f| f.key.as_str()).collect();
+            format!(
+                "no flow or folder `{key}` in the collection (flows: {})",
+                if flows.is_empty() {
+                    "none".into()
+                } else {
+                    flows.join(", ")
+                }
+            )
+        })
+}
+
 /// Runs `unit` once per row (or `plan.iterations` times). Each iteration starts with no
 /// captured values. Results are in iteration order; with `bail`, iterations after a
 /// failure are not started (ones already running finish).
@@ -124,24 +149,26 @@ pub async fn execute(
     } else {
         plan.rows.iter().map(Some).collect()
     };
-    let stop = AtomicBool::new(false);
-    let adjust = &adjust;
-    let stop = &stop;
-    futures_util::stream::iter(rows.into_iter().enumerate())
-        .map(|(i, row)| async move {
-            if stop.load(Ordering::SeqCst) {
-                return None;
-            }
-            let it = iteration(plan, unit, i + 1, row, adjust).await;
-            if plan.options.bail && !it.passed() {
-                stop.store(true, Ordering::SeqCst);
-            }
-            Some(it)
-        })
-        .buffered(plan.options.parallel.max(1))
-        .filter_map(|it| async move { it })
-        .collect()
-        .await
+    let parallel = plan.options.parallel.max(1);
+    let mut pending = futures_util::stream::FuturesOrdered::new();
+    let mut results = Vec::new();
+    let mut next = rows.into_iter().enumerate();
+    let mut stop = false;
+    loop {
+        while !stop && pending.len() < parallel {
+            let Some((i, row)) = next.next() else { break };
+            pending.push_back(iteration(plan, unit, i + 1, row, &adjust));
+        }
+        let Some(it) = pending.next().await else {
+            break;
+        };
+        if plan.options.bail && !it.passed() {
+            // Iterations already running finish; no new ones start.
+            stop = true;
+        }
+        results.push(it);
+    }
+    results
 }
 
 async fn iteration(
@@ -163,6 +190,11 @@ async fn iteration(
     }
     if let Some(row) = row {
         session.data = row.clone();
+    }
+    session.iteration = number;
+    if let Some(live) = &plan.live {
+        session.trace = live.trace.clone();
+        session.progress = live.progress.clone();
     }
     let delay = plan.options.delay;
     let result = match unit {

@@ -146,6 +146,7 @@ async fn serve(args: &cli::ServeArgs) -> u8 {
     let overrides = snapreq_server::Overrides {
         bind: args.bind.clone(),
         data_dir: args.data_dir.clone(),
+        workspace: args.workspace.clone(),
         config_file: args.config.clone(),
         allow_remote: args.allow_remote,
     };

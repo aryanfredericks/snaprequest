@@ -131,7 +131,7 @@ impl RequestFile {
     }
 
     /// Checks rules serde cannot express. Returns the problem, if any.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.url.trim().is_empty() {
             return Err("`url` must not be empty".into());
         }

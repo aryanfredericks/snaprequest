@@ -21,6 +21,8 @@ pub struct Config {
     pub bind: SocketAddr,
     /// History, run results and other server state live here.
     pub data_dir: PathBuf,
+    /// Collections served by the API, one directory each.
+    pub workspace: PathBuf,
     /// Allow binding to a non-loopback address. Off by default: until authentication
     /// and the outbound request policy exist, a reachable server is an open proxy into
     /// the network it runs in.
@@ -43,6 +45,7 @@ struct HistoryConfig {
 struct FileConfig {
     bind: Option<String>,
     data_dir: Option<PathBuf>,
+    workspace: Option<PathBuf>,
     allow_remote: Option<bool>,
     #[serde(default)]
     history: HistoryConfig,
@@ -53,6 +56,7 @@ struct FileConfig {
 pub struct Overrides {
     pub bind: Option<String>,
     pub data_dir: Option<PathBuf>,
+    pub workspace: Option<PathBuf>,
     pub config_file: Option<PathBuf>,
     pub allow_remote: bool,
 }
@@ -129,8 +133,15 @@ impl Config {
             .map(std::time::Duration::from_secs),
             max_bytes: limit(file.history.max_mb, 1024 * 1024, defaults.max_bytes),
         };
+        let workspace = overrides
+            .workspace
+            .clone()
+            .or_else(|| env("SNAPREQ_WORKSPACE").map(PathBuf::from))
+            .or(file.workspace.clone())
+            .unwrap_or_else(|| data_dir.join("workspace"));
         let config = Self {
             bind,
+            workspace,
             data_dir,
             allow_remote,
             retention,
@@ -196,6 +207,14 @@ mod tests {
         let c = Config::load(&Overrides::default(), env(&[]), Some("/data".into())).unwrap();
         assert_eq!(c.bind, DEFAULT_BIND.parse().unwrap());
         assert_eq!(c.data_dir, PathBuf::from("/data"));
+        assert_eq!(c.workspace, PathBuf::from("/data/workspace"));
+        let w = Config::load(
+            &Overrides::default(),
+            env(&[("SNAPREQ_WORKSPACE", "/w")]),
+            Some("/data".into()),
+        )
+        .unwrap();
+        assert_eq!(w.workspace, PathBuf::from("/w"));
         assert!(!c.allow_remote);
         assert!(
             Config::load(&Overrides::default(), env(&[]), None)

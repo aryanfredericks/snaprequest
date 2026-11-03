@@ -188,7 +188,7 @@ impl StepSpec {
 
 impl FlowFile {
     /// Checks rules serde cannot express; the message names the step.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.steps.is_empty() {
             return Err("a flow needs at least one `[[step]]`".into());
         }

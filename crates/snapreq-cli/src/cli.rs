@@ -168,6 +168,11 @@ pub(crate) struct ServeArgs {
     #[arg(long, value_name = "DIR")]
     pub data_dir: Option<PathBuf>,
 
+    /// Directory with the collections the API serves (env `SNAPREQ_WORKSPACE`; default:
+    /// `workspace/` in the data directory).
+    #[arg(long, value_name = "DIR")]
+    pub workspace: Option<PathBuf>,
+
     /// Config file (env `SNAPREQ_CONFIG`; default: `config.toml` in the data directory).
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,

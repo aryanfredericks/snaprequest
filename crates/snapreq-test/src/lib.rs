@@ -12,8 +12,8 @@ pub use assert::{Assertions, Outcome};
 pub use capture::{Captured, Capturer};
 pub use flow::{FlowRun, StepRun, run_flow, run_flow_with};
 pub use report::Report;
-pub use run::{Iteration, Plan, RunOptions, Unit, UnitRun, execute, request_keys};
-pub use session::{RequestRun, RunOutcome, SendSpec, Session, Target};
+pub use run::{Iteration, Plan, RunOptions, Unit, UnitRun, execute, request_keys, resolve_unit};
+pub use session::{Live, Progress, RequestRun, RunOutcome, SendSpec, Session, Target};
 
 /// Errors produced by `snapreq-test`.
 #[derive(Debug, thiserror::Error)]

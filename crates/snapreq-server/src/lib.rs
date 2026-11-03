@@ -3,6 +3,7 @@
 //! [`serve`] runs the HTTP server for a [`Config`]; [`app`] is the router on its own (for
 //! tests and embedding).
 
+pub mod api;
 pub mod config;
 pub mod store;
 
@@ -50,6 +51,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct AppState {
     pub config: Config,
     pub store: store::Store,
+    /// Sends the requests the API executes (shared connection pool and cookie jar).
+    pub client: snapreq_core::Client,
 }
 
 /// How often history is pruned while the server runs.
@@ -60,6 +63,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(health))
         .route("/api/v1/version", get(version))
+        .nest("/api/v1", api::routes())
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -127,6 +131,13 @@ impl Server {
                 context: format!("cannot listen on {}", config.bind),
                 source,
             })?;
+        std::fs::create_dir_all(&config.workspace).map_err(|source| Error::Io {
+            context: format!(
+                "cannot create the workspace `{}`",
+                config.workspace.display()
+            ),
+            source,
+        })?;
         let store = store::Store::open(&config.data_dir.join(store::DB_FILE)).await?;
         let pruned = store.prune(config.retention).await?;
         if pruned != store::Pruned::default() {
@@ -144,7 +155,11 @@ impl Server {
         }
         Ok(Self {
             listener,
-            state: Arc::new(AppState { config, store }),
+            state: Arc::new(AppState {
+                config,
+                store,
+                client: snapreq_core::Client::default(),
+            }),
         })
     }
 

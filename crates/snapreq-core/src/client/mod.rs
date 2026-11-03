@@ -33,6 +33,10 @@ use crate::model::{
 };
 use crate::{Error, Result};
 
+/// Receives trace events while a request runs (live views). Events are redacted with the
+/// secrets known at that moment; the trace in the final response or error is authoritative.
+pub type TraceSink = Arc<dyn Fn(&crate::model::TraceEntry) + Send + Sync>;
+
 /// Client-wide configuration. Per-request options live in
 /// [`RequestSettings`](crate::model::RequestSettings).
 #[derive(Debug, Clone)]
@@ -159,8 +163,14 @@ impl Client {
     /// any network activity. Failures during execution are [`Error::Execution`], which
     /// carries the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
+        self.execute_with(req, None).await
+    }
+
+    /// [`execute`](Self::execute), also sending every trace event to `sink` as it happens.
+    pub async fn execute_with(&self, req: &Request, sink: Option<TraceSink>) -> Result<Response> {
         let url = req.effective_url()?;
         let mut rec = self.recorder(req);
+        rec.sink = sink.map(recorder::Sink);
         let shadowed = crate::auth::shadowed_by_header(req);
         if let Some(name) = &shadowed {
             rec.record(TraceEvent::Info {
