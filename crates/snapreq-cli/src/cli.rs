@@ -242,6 +242,16 @@ pub(crate) struct SendArgs {
     )]
     pub redirect_uri: Option<String>,
 
+    /// AWS Signature V4 for `REGION/SERVICE` (for example `eu-west-1/s3`). Credentials come
+    /// from `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and optionally `AWS_SESSION_TOKEN`.
+    #[arg(
+        long = "aws-sigv4",
+        value_name = "REGION/SERVICE",
+        help_heading = "Auth",
+        conflicts_with_all = ["user", "bearer", "api_key", "no_auth", "oauth2"]
+    )]
+    pub aws_sigv4: Option<String>,
+
     /// Send no auth, even if the collection or folder defines one.
     #[arg(long = "no-auth", help_heading = "Auth")]
     pub no_auth: bool,

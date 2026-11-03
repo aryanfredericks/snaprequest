@@ -195,6 +195,15 @@ pub enum AuthSpec {
     },
     #[serde(rename = "oauth2")]
     OAuth2(OAuth2Spec),
+    #[serde(rename = "aws_sigv4")]
+    AwsSigV4 {
+        access_key: String,
+        secret_key: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        session_token: String,
+        region: String,
+        service: String,
+    },
 }
 
 /// `type = "oauth2"` in an `[auth]` table.

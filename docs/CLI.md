@@ -141,6 +141,7 @@ Only one kind of body can be given per request.
 | `--client-id ID`, `--client-secret SECRET` | Client credentials; omit the secret for public clients. Sent with HTTP Basic. |
 | `--scope SCOPES` | Space-separated scopes. |
 | `--redirect-uri URI` | Loopback redirect URI for the authorization code grant (default `http://127.0.0.1:<random port>/callback`). Register it with the provider. |
+| `--aws-sigv4 REGION/SERVICE` | AWS Signature V4, for example `eu-west-1/s3` or `us-east-1/execute-api`. Credentials from `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and optionally `AWS_SESSION_TOKEN`. Every hop is signed; the query string is sent in strict RFC 3986 encoding. Set `-H 'x-amz-content-sha256: UNSIGNED-PAYLOAD'` to skip hashing large S3 uploads. |
 | `--no-auth` | Send no auth, even if the collection defines one. |
 
 Only one auth option can be given. With a collection request, an auth option replaces the

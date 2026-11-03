@@ -130,6 +130,7 @@ enabled = true                     # optional
 | `"bearer"` | `token` | `Authorization: Bearer <token>` |
 | `"digest"` | `username`, optional `password` | Digest (RFC 7616): sent without credentials first, then again answering the server's `401` challenge (MD5, SHA-256, SHA-512-256, `-sess`, `qop=auth`) |
 | `"oauth2"` | see below | `Authorization: Bearer <access token>`, fetched, cached and refreshed |
+| `"aws_sigv4"` | `access_key`, `secret_key`, optional `session_token`, `region`, `service` | AWS Signature V4 on every hop (`X-Amz-Date`, `Authorization`; `X-Amz-Content-SHA256` for `service = "s3"`) |
 | `"api_key"` | `name`, `value`, optional `location` | header `name: value`, or with `location = "query"` the query parameter `name=value` |
 
 ```toml

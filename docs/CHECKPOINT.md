@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 4 Authentication helpers, in progress (Phases 0–3 complete)
-- **Current checkpoint:** P4.4, AWS Signature V4
+- **Current checkpoint:** P4.5, auth inheritance details
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,15 +25,23 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P4.4 AWS SigV4: `Auth::AwsSigV4 { access_key, secret_key, session_token?, region, service }`. Sign per hop
-   in the engine (needs the final headers and the body hash: `x-amz-content-sha256`; in-memory bodies hashed,
-   file bodies hashed by reading the file, or `UNSIGNED-PAYLOAD` for S3). Canonical request per the AWS docs,
-   test against the AWS SigV4 test suite vectors (get-vanilla, post-x-www-form-urlencoded, ...). Date header
-   from the clock: make the clock injectable in tests. Collection `type = "aws_sigv4"`, CLI `--aws-sigv4
-   REGION/SERVICE` with credentials from `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` (CLI
-   only reads env; core gets values).
-2. P4.5 inheritance details: show the effective auth (type and where it comes from) in `snapreq ls` and `-v`.
-   OAuth tokens are already shared across a collection through the cache key.
+1. P4.5: `[auth]` inheritance with `inherit`/`none` already landed in P4.1. Remaining: show the effective auth
+   and the file it comes from in `snapreq ls`; then Phase 4 is done and Phase 5 (assertions, runner) starts.
+
+## SigV4 notes (P4.4)
+- `Auth::AwsSigV4 { access_key, secret_key, session_token, region, service }` (JSON/TOML `type = "aws_sigv4"`).
+- `src/auth/sigv4.rs`: pure signer (`canonical_request`, `authorization`, `strict_query`, `amz_date`); unit tests
+  use expected values computed with botocore 1.43 (get-vanilla equals the AWS test suite). Non-S3 canonical URI
+  is the wire path encoded again; S3 uses it as is. All sent headers are signed except `UNSIGNED` (user-agent,
+  expect, connection-specific, authorization...).
+- `build::sign_sigv4` runs in `prepare` (so every hop is re-signed): adds `x-amz-date`, `x-amz-security-token`,
+  `x-amz-content-sha256` (S3 only, or kept if set by hand, e.g. `UNSIGNED-PAYLOAD`), hashes the body
+  (`EncodedBody::sha256_hex` reads files). `auth::apply_to_url` rewrites the query into strict encoding for
+  SigV4 (via `effective_url` and redirect targets) so the wire matches the signature.
+- `tests/sigv4.rs`: mock service that independently re-verifies signatures from the received request.
+- CLI `--aws-sigv4 REGION/SERVICE`, credentials from `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+  `AWS_SESSION_TOKEN` (no profiles/SSO yet). Not done: presigned URLs, SigV4a, chunked S3 uploads.
+- Reference vectors: botocore installed in a throwaway venv in the session scratchpad (not a project dependency).
 
 ## OAuth 2.0 notes (P4.3)
 - Model: `Auth::OAuth2(OAuth2 { grant, token_url, auth_url, client_id, client_secret, scope, username, password,
@@ -273,6 +281,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P4.1 — 2026-11-03 — Basic, Bearer and API-key auth in core, collections (`[auth]` with inherit/none) and CLI; URL-encoded secrets redacted. 247 tests total.
 - P4.2 — 2026-11-03 — Digest auth (RFC 7616) with challenge retry traced as `auth_challenge`; ADR-014 (md-5). 256 tests total.
 - P4.3 — 2026-11-03 — OAuth 2.0 (client credentials, password, authorization code + PKCE, refresh, 401 retry); `TokenStore`/`AuthorizationPrompt` in core, file cache + `snapreq tokens` in the CLI; ADR-015. 275 tests total.
+- P4.4 — 2026-11-03 — AWS Signature V4 (every hop signed, strict query encoding, S3 payload hash), verified against botocore vectors and a re-verifying mock. 281 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -288,4 +297,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
-- **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3 done.
+- **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3 and P4.4 done.

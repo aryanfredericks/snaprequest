@@ -33,6 +33,19 @@ pub enum Auth {
     /// the client), then sent as `Authorization: Bearer <token>`.
     #[serde(rename = "oauth2")]
     OAuth2(OAuth2),
+    /// AWS Signature Version 4: every hop is signed with these credentials.
+    #[serde(rename = "aws_sigv4")]
+    AwsSigV4 {
+        access_key: String,
+        secret_key: String,
+        /// For temporary credentials (`x-amz-security-token`).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        session_token: String,
+        /// For example `eu-west-1`.
+        region: String,
+        /// For example `s3`, `execute-api`, `dynamodb`.
+        service: String,
+    },
     /// A key sent in a header or a query parameter.
     ApiKey {
         /// Header or query parameter name, for example `X-API-Key` or `api_key`.
@@ -154,6 +167,7 @@ impl Auth {
             Self::Bearer { .. } => "bearer",
             Self::Digest { .. } => "digest",
             Self::OAuth2(_) => "oauth2",
+            Self::AwsSigV4 { .. } => "aws_sigv4",
             Self::ApiKey { .. } => "api_key",
         }
     }
@@ -168,6 +182,11 @@ impl Auth {
             Self::Bearer { token } => vec![token.clone()],
             Self::Digest { password, .. } => vec![password.clone()],
             Self::OAuth2(o) => vec![o.client_secret.clone(), o.password.clone()],
+            Self::AwsSigV4 {
+                secret_key,
+                session_token,
+                ..
+            } => vec![secret_key.clone(), session_token.clone()],
             Self::ApiKey { value, .. } => vec![value.clone()],
         };
         out.retain(|s| !s.is_empty());

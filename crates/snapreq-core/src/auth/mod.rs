@@ -8,6 +8,7 @@ use url::Url;
 
 pub(crate) mod digest;
 pub(crate) mod oauth2;
+pub(crate) mod sigv4;
 
 pub use oauth2::{AuthorizationPrompt, MemoryTokenStore, Token, TokenStore};
 
@@ -27,14 +28,14 @@ pub(crate) fn header(auth: &Auth) -> Option<(&str, String)> {
             value,
             location: ApiKeyLocation::Header,
         } => Some((name.trim(), value.clone())),
-        Auth::ApiKey { .. } | Auth::Digest { .. } | Auth::OAuth2(_) => None,
+        Auth::ApiKey { .. } | Auth::Digest { .. } | Auth::OAuth2(_) | Auth::AwsSigV4 { .. } => None,
     }
 }
 
 /// The header `auth` sets (now or after a challenge), if any.
 fn header_name(auth: &Auth) -> Option<&str> {
     match auth {
-        Auth::Digest { .. } | Auth::OAuth2(_) => Some("Authorization"),
+        Auth::Digest { .. } | Auth::OAuth2(_) | Auth::AwsSigV4 { .. } => Some("Authorization"),
         other => header(other).map(|(name, _)| name),
     }
 }
@@ -80,6 +81,11 @@ pub(crate) fn digest_retry(
 /// Adds a query API key to `url`, replacing parameters of the same name so that applying
 /// it again (to a redirect target that echoes the key) does not repeat it.
 pub(crate) fn apply_to_url(auth: &Auth, url: &mut Url) {
+    if let Auth::AwsSigV4 { .. } = auth {
+        // Sent exactly as signed.
+        sigv4::strict_query(url);
+        return;
+    }
     let Auth::ApiKey {
         name,
         value,

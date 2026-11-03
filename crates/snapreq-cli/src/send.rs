@@ -143,6 +143,9 @@ fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
     if let Some(grant) = args.oauth2 {
         return oauth2(args, grant).map(Some);
     }
+    if let Some(spec) = &args.aws_sigv4 {
+        return aws_sigv4(spec, |k| std::env::var(k).ok()).map(Some);
+    }
     if let Some(user) = &args.user {
         let (username, password) = user.split_once(':').unwrap_or((user, ""));
         let (username, password) = (username.to_owned(), password.to_owned());
@@ -177,6 +180,33 @@ fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
         }));
     }
     Ok(args.no_auth.then_some(Auth::None))
+}
+
+/// `--aws-sigv4 REGION/SERVICE` with credentials from the standard AWS variables.
+fn aws_sigv4(spec: &str, env: impl Fn(&str) -> Option<String>) -> Result<Auth, ArgError> {
+    let Some((region, service)) = spec
+        .split_once('/')
+        .filter(|(r, s)| !r.trim().is_empty() && !s.trim().is_empty())
+    else {
+        return err(format!(
+            "invalid --aws-sigv4 `{spec}`, expected `REGION/SERVICE`"
+        ));
+    };
+    let var = |k: &str| env(k).filter(|v| !v.is_empty());
+    let (Some(access_key), Some(secret_key)) =
+        (var("AWS_ACCESS_KEY_ID"), var("AWS_SECRET_ACCESS_KEY"))
+    else {
+        return err(
+            "--aws-sigv4 needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the environment",
+        );
+    };
+    Ok(Auth::AwsSigV4 {
+        access_key,
+        secret_key,
+        session_token: var("AWS_SESSION_TOKEN").unwrap_or_default(),
+        region: region.trim().to_owned(),
+        service: service.trim().to_owned(),
+    })
 }
 
 fn oauth2(args: &SendArgs, grant: OAuth2GrantArg) -> Result<Auth, ArgError> {
@@ -672,6 +702,37 @@ mod tests {
     }
 
     #[test]
+    fn aws_sigv4_option() {
+        let env = |k: &str| match k {
+            "AWS_ACCESS_KEY_ID" => Some("AK".to_owned()),
+            "AWS_SECRET_ACCESS_KEY" => Some("SK".to_owned()),
+            _ => None,
+        };
+        assert_eq!(
+            aws_sigv4("eu-west-1/s3", env).unwrap(),
+            Auth::AwsSigV4 {
+                access_key: "AK".into(),
+                secret_key: "SK".into(),
+                session_token: String::new(),
+                region: "eu-west-1".into(),
+                service: "s3".into()
+            }
+        );
+        assert!(
+            aws_sigv4("eu-west-1", env)
+                .unwrap_err()
+                .0
+                .contains("REGION/SERVICE")
+        );
+        assert!(
+            aws_sigv4("a/b", |_| None)
+                .unwrap_err()
+                .0
+                .contains("AWS_ACCESS_KEY_ID")
+        );
+    }
+
+    #[test]
     fn auth_options_conflict() {
         for args in [
             &["-u", "a:b", "--bearer", "t"][..],
@@ -681,6 +742,7 @@ mod tests {
             &["--digest"],
             &["--token-url", "t"],
             &["--oauth2", "password", "--bearer", "t"],
+            &["--aws-sigv4", "r/s", "-u", "a:b"],
         ] {
             let full: Vec<&str> = ["snapreq", "send", "x"]
                 .iter()

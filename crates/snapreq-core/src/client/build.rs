@@ -187,6 +187,31 @@ pub(crate) async fn prepare(
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(body.len));
     }
 
+    if let crate::model::Auth::AwsSigV4 {
+        access_key,
+        secret_key,
+        session_token,
+        region,
+        service,
+    } = &req.auth
+        && !has_header(req, "authorization")
+    {
+        sign_sigv4(
+            &mut headers,
+            req,
+            url,
+            &body,
+            &crate::auth::sigv4::Credentials {
+                access_key,
+                secret_key,
+                region,
+                service,
+            },
+            session_token,
+        )
+        .await?;
+    }
+
     let sent_headers = headers
         .iter()
         .map(|(name, value)| {
@@ -220,6 +245,75 @@ pub(crate) async fn prepare(
         body,
         sent_headers,
     })
+}
+
+/// Adds `X-Amz-Date` (and the session token and, for S3, the content hash), then the
+/// SigV4 `Authorization` header over everything sent.
+async fn sign_sigv4(
+    headers: &mut HeaderMap,
+    req: &Request,
+    url: &Url,
+    body: &EncodedBody,
+    creds: &crate::auth::sigv4::Credentials<'_>,
+    session_token: &str,
+) -> Result<()> {
+    use crate::auth::sigv4;
+    let invalid = |what: &str| {
+        Error::InvalidRequest(format!(
+            "aws_sigv4 auth: the {what} contains characters not allowed in a header"
+        ))
+    };
+    let timestamp = sigv4::amz_date(std::time::SystemTime::now());
+    headers.insert(
+        HeaderName::from_static("x-amz-date"),
+        HeaderValue::from_str(&timestamp).map_err(|_| invalid("date"))?,
+    );
+    if !session_token.is_empty() {
+        headers.insert(
+            HeaderName::from_static("x-amz-security-token"),
+            HeaderValue::from_str(session_token).map_err(|_| invalid("session token"))?,
+        );
+    }
+    // A hand-set hash (for example `UNSIGNED-PAYLOAD` for large S3 uploads) is used as is.
+    let payload_hash = match headers
+        .get("x-amz-content-sha256")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(v) => v.to_owned(),
+        None if body.len == 0 => sigv4::EMPTY_SHA256.to_owned(),
+        None => body.sha256_hex().await?,
+    };
+    if creds.service == "s3" && !headers.contains_key("x-amz-content-sha256") {
+        headers.insert(
+            HeaderName::from_static("x-amz-content-sha256"),
+            HeaderValue::from_str(&payload_hash).map_err(|_| invalid("payload hash"))?,
+        );
+    }
+    let signed: Vec<(String, String)> = headers
+        .iter()
+        .map(|(n, v)| {
+            (
+                n.as_str().to_owned(),
+                String::from_utf8_lossy(v.as_bytes()).into_owned(),
+            )
+        })
+        .collect();
+    let authorization = sigv4::authorization(
+        &sigv4::Input {
+            method: req.method.as_str(),
+            path: url.path(),
+            query: url.query(),
+            headers: &signed,
+            payload_hash: &payload_hash,
+            timestamp: &timestamp,
+        },
+        creds,
+    );
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(&authorization).map_err(|_| invalid("access key"))?,
+    );
+    Ok(())
 }
 
 fn has_header(req: &Request, name: &str) -> bool {

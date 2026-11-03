@@ -101,6 +101,39 @@ impl EncodedBody {
         }
     }
 
+    /// Hex SHA-256 of the whole body (files are read), for request signing.
+    pub(crate) async fn sha256_hex(&self) -> Result<String> {
+        use tokio::io::AsyncReadExt as _;
+        let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+        for seg in &self.segments {
+            match seg {
+                Segment::Bytes(b) => ctx.update(b),
+                Segment::File { path, len } => {
+                    let f = tokio::fs::File::open(path).await.map_err(|e| {
+                        Error::InvalidRequest(format!("cannot read `{}`: {e}", path.display()))
+                    })?;
+                    let mut f = f.take(*len);
+                    let mut buf = vec![0u8; FILE_CHUNK];
+                    loop {
+                        let n = f.read(&mut buf).await.map_err(|e| {
+                            Error::InvalidRequest(format!("cannot read `{}`: {e}", path.display()))
+                        })?;
+                        if n == 0 {
+                            break;
+                        }
+                        ctx.update(&buf[..n]);
+                    }
+                }
+            }
+        }
+        Ok(ctx
+            .finish()
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect())
+    }
+
     /// Builds a fresh streaming body. Files are opened only when the body is polled.
     pub(crate) fn to_body(&self) -> ReqBody {
         match self.segments.as_slice() {

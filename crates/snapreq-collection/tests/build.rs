@@ -298,6 +298,10 @@ fn auth_is_inherited_overridden_and_switched_off() {
                 "url = \"http://a.test\"\n[auth]\ntype = \"digest\"\nusername = \"{{user}}\"\npassword = \"pw\"\n",
             ),
             (
+                "keys/aws.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"aws_sigv4\"\naccess_key = \"AK\"\nsecret_key = \"{{user}}\"\nregion = \"eu-west-1\"\nservice = \"s3\"\n",
+            ),
+            (
                 "keys/basic.toml",
                 "url = \"http://a.test\"\n[auth]\ntype = \"basic\"\nusername = \"{{user}}\"\n",
             ),
@@ -320,6 +324,16 @@ fn auth_is_inherited_overridden_and_switched_off() {
         }
     );
     assert_eq!(build(&dir, "keys/open", &vars).unwrap().auth, Auth::None);
+    assert_eq!(
+        build(&dir, "keys/aws", &vars).unwrap().auth,
+        Auth::AwsSigV4 {
+            access_key: "AK".into(),
+            secret_key: "me".into(),
+            session_token: String::new(),
+            region: "eu-west-1".into(),
+            service: "s3".into()
+        }
+    );
     assert_eq!(
         build(&dir, "keys/digest", &vars).unwrap().auth,
         Auth::Digest {

@@ -202,6 +202,19 @@ impl Builder<'_> {
                     location: *location,
                 }
             }
+            AuthSpec::AwsSigV4 {
+                access_key,
+                secret_key,
+                session_token,
+                region,
+                service,
+            } => Auth::AwsSigV4 {
+                access_key: self.text("auth.access_key", access_key)?,
+                secret_key: self.text("auth.secret_key", secret_key)?,
+                session_token: self.text("auth.session_token", session_token)?,
+                region: self.text("auth.region", region)?,
+                service: self.text("auth.service", service)?,
+            },
             AuthSpec::OAuth2(o) => {
                 let opt = |b: &mut Self, field: &str, v: &Option<String>| {
                     v.as_deref().map(|v| b.text(field, v)).transpose()
