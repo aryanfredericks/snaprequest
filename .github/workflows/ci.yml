@@ -87,3 +87,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  docker:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: snapreq:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start the server
+        run: |
+          docker run -d --name snapreq -p 127.0.0.1:7878:7878 snapreq:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:7878/healthz && exit 0
+            sleep 1
+          done
+          docker logs snapreq
+          exit 1
+      - name: Run the smoke test
+        run: python3 scripts/docker-smoke.py http://127.0.0.1:7878
+      - name: Server logs
+        if: always()
+        run: docker logs snapreq || true
