@@ -11,6 +11,19 @@ Configuration (bind address, data directory, workspace, retention) is described 
 - **Security:** no authentication yet (Phase 8). The server listens on loopback only unless
   `--allow-remote` is given (ADR-018).
 
+## Docker
+
+```sh
+docker build -t snapreq .
+docker run -d -p 127.0.0.1:7878:7878 -v snapreq-data:/data snapreq
+scripts/docker-smoke.py http://127.0.0.1:7878     # optional check
+```
+
+or `docker compose up -d` with the included `docker-compose.yml`. The image is distroless and runs as
+a non-root user; state and the workspace are in the `/data` volume. Inside the container the server
+listens on all interfaces with `SNAPREQ_ALLOW_REMOTE=1`, so cloud metadata endpoints are blocked by
+default; publish the port on `127.0.0.1` unless the network is trusted.
+
 ## Outbound request policy
 
 The server sends requests for whoever calls its API, so it can be used to reach anything the machine

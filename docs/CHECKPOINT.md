@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.7, Docker image and docker-compose example
+- **Phase:** 7 Web UI, next (Phases 0–6 complete)
+- **Current checkpoint:** P7.1, web UI project setup
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,10 +25,16 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.7 Docker: multi-stage `Dockerfile` (rust builder → `gcr.io/distroless/cc-debian12:nonroot`), `SNAPREQ_BIND=0.0.0.0:7878`,
-   `SNAPREQ_ALLOW_REMOTE=1`, `SNAPREQ_DATA_DIR=/data` volume, healthcheck via `snapreq send --fail`,
-   `docker-compose.yml` publishing on 127.0.0.1, `.dockerignore`. Verify with docker/podman if available; CI job
-   building the image and running a request through the API (Phase 6 acceptance).
+1. Add a CI job that builds the Docker image and runs `scripts/docker-smoke.py` against it (verified locally with
+   podman on 2026-11-03; not yet in CI). Then `scripts/check.sh` + push.
+2. P7.1 web UI setup (Svelte 5 + TS + Vite, typed client from `/api/v1/openapi.json`, assets embedded).
+
+## Docker notes (P6.7)
+- `Dockerfile`: rust:1-bookworm builder (cache mounts; removes rust-toolchain.toml) → `gcr.io/distroless/cc-debian12:nonroot`,
+  `SNAPREQ_BIND=0.0.0.0:7878`, `SNAPREQ_ALLOW_REMOTE=1` (so `block_metadata` is on), `/data` volume owned by 65532,
+  HEALTHCHECK via `snapreq send --fail` (ignored by podman's OCI format). `docker-compose.yml` publishes on 127.0.0.1.
+- `scripts/docker-smoke.py` (stdlib only, includes a tiny WebSocket client): health, REST execute, WebSocket execute
+  with live traces, history, metadata endpoint blocked. Passed against the image built with podman.
 
 ## Outbound policy notes (P6.6)
 - Core `ConnectPolicy` (`ClientConfig::connect_policy`), checked in `conn::connect` via `allowed()` on every resolved
@@ -383,7 +389,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 3 Collections & environments | ✅ done |
 | 4 Auth helpers | ✅ done |
 | 5 Assertions & runner | ✅ done |
-| 6 Self-hosted server | 🟨 |
+| 6 Self-hosted server | ✅ done |
 | 7 Web UI | ⬜ |
 | 8 Multi-user & hardening | ⬜ |
 | 9 Interop & scripting | ⬜ |
@@ -439,6 +445,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P6.4 — 2026-11-03 — WebSocket endpoint streaming live trace events and run progress, then the stored result. 330 tests total.
 - P6.5 — 2026-11-03 — OpenAPI 3.1 description generated from the handlers (utoipa), served at /api/v1/openapi.json. 332 tests total.
 - P6.6 — 2026-11-03 — Outbound request policy (SSRF): connect-time checks of every address in the engine, server allow/deny lists, private and cloud-metadata blocking (ADR-020). 339 tests total.
+- P6.7 — 2026-11-03 — Docker image (distroless, non-root), docker-compose example, smoke test passing against the image. Phase 6 complete.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -457,3 +464,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
 - **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.7 done; Phase 5 complete.
 - **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done. Maintainer chose rusqlite over sqlx; P6.2 done.
+- **2026-11-03 (17):** Phase 6 complete (P6.3–P6.7). Docker CI job still to add. Session ended at the usage limit.

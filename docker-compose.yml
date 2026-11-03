@@ -1,0 +1,19 @@
+# Self-hosted SnapRequest: `docker compose up -d`, then open http://127.0.0.1:7878.
+services:
+  snapreq:
+    build: .
+    image: snapreq:local
+    ports:
+      # Loopback only: the server has no authentication yet (ADR-018).
+      - "127.0.0.1:7878:7878"
+    volumes:
+      # History, run results and the workspace (collections) live here.
+      - snapreq-data:/data
+    environment:
+      SNAPREQ_LOG: info
+      # Secrets for collection variables, e.g.:
+      # SNAPREQ_SECRET_TOKEN: ${API_TOKEN}
+    restart: unless-stopped
+
+volumes:
+  snapreq-data:
