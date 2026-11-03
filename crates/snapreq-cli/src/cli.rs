@@ -9,9 +9,10 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 #[command(name = "snapreq", version, about, long_about = None)]
 pub(crate) struct Cli {
     /// Internal log level for SnapRequest itself (error, warn, info, debug, trace).
-    /// Overridden by the `SNAPREQ_LOG` environment variable.
-    #[arg(long, global = true, default_value = "warn")]
-    pub log_level: String,
+    /// Overridden by the `SNAPREQ_LOG` environment variable. Default: `warn`, or `info`
+    /// for `serve` (one line per API request).
+    #[arg(long, global = true)]
+    pub log_level: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
@@ -41,6 +42,14 @@ pub(crate) enum Command {
     ///   snapreq run -c my-api --folder users --data users.csv
     #[command(verbatim_doc_comment)]
     Run(RunArgs),
+
+    /// Start the self-hosted server (API, and later the web UI).
+    ///
+    /// Examples:
+    ///   snapreq serve                          # http://127.0.0.1:7878
+    ///   snapreq serve --bind 127.0.0.1:9000 --data-dir ./snapreq-data
+    #[command(verbatim_doc_comment)]
+    Serve(ServeArgs),
 
     /// List the folders, requests and flows of a collection.
     Ls(LsArgs),
@@ -146,6 +155,27 @@ pub(crate) enum ReportFormat {
     Junit,
     Html,
     Json,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ServeArgs {
+    /// Address to listen on, `IP:PORT` (env `SNAPREQ_BIND`; default 127.0.0.1:7878).
+    #[arg(long, value_name = "IP:PORT")]
+    pub bind: Option<String>,
+
+    /// Where the server keeps its state (env `SNAPREQ_DATA_DIR`; default: the platform
+    /// data directory, e.g. ~/.local/share/snapreq).
+    #[arg(long, value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    /// Config file (env `SNAPREQ_CONFIG`; default: `config.toml` in the data directory).
+    #[arg(long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+
+    /// Allow a non-loopback address. The server has no authentication yet: only do this
+    /// on a trusted network (env `SNAPREQ_ALLOW_REMOTE=1`).
+    #[arg(long)]
+    pub allow_remote: bool,
 }
 
 #[derive(Debug, Args)]

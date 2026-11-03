@@ -158,3 +158,15 @@ server and the web UI (P7.7) share.
 **Consequences:** One format and parser for everything, editable by the web UI with `toml_edit`. Long flows are
 wordier than Hurl files; a Hurl importer (P9.1) eases migration. `request` steps cannot patch the referenced
 request (keeps steps and files from drifting); inline steps cover one-off variations.
+
+## ADR-018: The server refuses non-loopback addresses until it has authentication
+**Status:** Accepted (2026-11-03)
+**Context:** `snapreq serve` executes HTTP requests on behalf of its callers. Until authentication (P8.1) and the
+outbound request policy (P6.6) exist, anyone who can reach the server could use it as an open proxy into the
+network it runs in (internal services, cloud metadata endpoints).
+**Decision:** The default bind is `127.0.0.1:7878`. Binding to any non-loopback address fails with an explanation
+unless `--allow-remote` / `SNAPREQ_ALLOW_REMOTE=1` / `allow_remote = true` is set; when it is, a warning is
+logged. Configuration precedence: flags > `SNAPREQ_*` environment variables > config file > defaults.
+**Consequences:** Safe by default for local use. Containers (P6.7) must set `SNAPREQ_ALLOW_REMOTE=1` and bind
+`0.0.0.0` inside the container while publishing the port on the host's loopback. Revisit once P8.1 lands:
+remote binds should then require authentication instead of a flag.

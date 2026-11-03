@@ -13,7 +13,17 @@ authors.workspace = true
 snapreq-core.workspace = true
 snapreq-collection.workspace = true
 snapreq-test.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "macros", "rt", "signal"] }
+toml.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
 
 [lints]
 workspace = true

@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 6 Self-hosted server, starting (Phases 0–5 complete)
-- **Current checkpoint:** P6.1, `snapreq serve` (axum app, config)
+- **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
+- **Current checkpoint:** P6.2, SQLite storage with migrations
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,12 +25,26 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P6.1 `snapreq serve [--bind 127.0.0.1:7878] [--data-dir]`: axum app in `snapreq-server`, config file + env vars
-   (precedence: flags > env `SNAPREQ_*` > config file > defaults), graceful shutdown, `/healthz`, tracing request
-   logs. Read PLAN Phase 6 and ADR-006 (SQLite) first. Note P6.6 (SSRF policy) must exist before the server is
-   ever exposed beyond localhost: default bind stays 127.0.0.1.
-2. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build` (not
-   `Session`).
+1. P6.2 SQLite storage (ADR-006: `sqlx` + SQLite, embedded migrations) in `<data dir>/snapreq.db`: tables for
+   request history (request summary, response summary, full redacted trace as JSON, timestamps, duration,
+   status, collection/key if any) and run results (the `Report::json(true)` document + summary columns).
+   Retention: max age and max total size (config keys `history.max_age_days`, `history.max_mb`), pruned on
+   start and periodically. Check `sqlx` features (sqlite, runtime-tokio, migrate, no TLS) against cargo-deny and
+   the MSRV; consider `rusqlite` (bundled) + `tokio::task::spawn_blocking` if sqlx's dependency tree is heavy —
+   decide and record (it would amend ADR-006).
+2. P6.3 REST API, P6.4 WebSocket live traces, P6.5 OpenAPI, P6.6 SSRF policy (before any remote use), P6.7 Docker.
+3. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+
+## Server notes (P6.1)
+- `snapreq-server`: `Config { bind, data_dir, allow_remote }` via `Config::load(&Overrides, env, default_data_dir)`
+  (flags > `SNAPREQ_BIND`/`SNAPREQ_DATA_DIR`/`SNAPREQ_CONFIG`/`SNAPREQ_ALLOW_REMOTE` > `config.toml` > defaults;
+  `deny_unknown_fields`). Non-loopback binds need `allow_remote` (ADR-018).
+- `app(Arc<AppState>) -> Router` (`/healthz`, `/api/v1/version`, `TraceLayer` at INFO); `Server::bind(config)`
+  creates the data dir and binds; `local_addr()`; `run(shutdown)` with graceful shutdown; `shutdown_signal()` =
+  Ctrl-C or SIGTERM.
+- CLI `snapreq serve [--bind] [--data-dir] [--config] [--allow-remote]`; `--log-level` is now optional (default
+  `warn`, `info` for serve). Deps: axum 0.8 (no default features: http1, json, tokio, query), tower-http 0.7 (trace).
+- Fixed after P5.7 CI failed: `scripts/api-tests.sh` built only the example (`--example` narrows a build).
 
 ## CI example notes (P5.7)
 - `crates/snapreq-test/examples/mock_shop.rs` (login → token, orders CRUD, order ready on the 3rd poll), collection
@@ -328,7 +342,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 3 Collections & environments | ✅ done |
 | 4 Auth helpers | ✅ done |
 | 5 Assertions & runner | ✅ done |
-| 6 Self-hosted server | ⬜ |
+| 6 Self-hosted server | 🟨 |
 | 7 Web UI | ⬜ |
 | 8 Multi-user & hardening | ⬜ |
 | 9 Interop & scripting | ⬜ |
@@ -378,6 +392,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.5 — 2026-11-03 — Run control: `--bail`, `--delay`, `--parallel` (concurrent iterations, ordered results). 308 tests total.
 - P5.6 — 2026-11-03 — Reports: JUnit XML, self-contained HTML and detailed JSON (`snapreq run --report`), secrets hidden everywhere including bodies. 309 tests total.
 - P5.7 — 2026-11-03 — Example collection + flow against a mock in CI with JUnit publishing, docs/CI.md; fixed secret captures showing in their own checks. Phase 5 complete. 310 tests total.
+- P6.1 — 2026-11-03 — `snapreq serve`: axum server with config file / env / flags, graceful shutdown, health and version endpoints, loopback-only by default (ADR-018). 319 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -395,3 +410,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
 - **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.7 done; Phase 5 complete.
+- **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done.

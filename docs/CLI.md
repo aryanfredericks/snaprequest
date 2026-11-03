@@ -5,6 +5,7 @@ snapreq send [METHOD] URL [OPTIONS]
 snapreq send REQUEST_FILE.toml [-e ENV] [--var name=value] [OPTIONS]
 snapreq send -c COLLECTION_DIR REQUEST_KEY [-e ENV] [OPTIONS]
 snapreq run [COLLECTION | FOLDER | FLOW] [-e ENV] [--var name=value] [--data FILE | -n N]
+snapreq serve [--bind IP:PORT] [--data-dir DIR]
 snapreq ls | new | secret | tokens …
 ```
 
@@ -58,6 +59,32 @@ echo "$TOKEN" | snapreq secret set token -e prod   # or reads it from stdin
 Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment variables, then
 `.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
 every trace and output, including when given with `--var`.
+
+## Server (`snapreq serve`)
+
+```sh
+snapreq serve                                        # http://127.0.0.1:7878
+snapreq serve --bind 127.0.0.1:9000 --data-dir ./snapreq-data
+```
+
+Starts the self-hosted server (the API grows through Phase 6; the web UI comes in Phase 7). It prints
+`snapreq server listening on http://ADDR (data: DIR)` on stderr, logs one line per API request (`info`
+level; change with `--log-level` or `SNAPREQ_LOG`) and stops gracefully on Ctrl-C or SIGTERM.
+
+| Setting | Flag | Environment | Config file key | Default |
+|---|---|---|---|---|
+| Listen address | `--bind IP:PORT` | `SNAPREQ_BIND` | `bind` | `127.0.0.1:7878` |
+| Data directory | `--data-dir DIR` | `SNAPREQ_DATA_DIR` | `data_dir` | `$XDG_DATA_HOME/snapreq`, `~/.local/share/snapreq`, `~/Library/Application Support/snapreq`, `%APPDATA%\snapreq` |
+| Config file | `--config FILE` | `SNAPREQ_CONFIG` | | `config.toml` in the data directory, if present |
+| Non-loopback address | `--allow-remote` | `SNAPREQ_ALLOW_REMOTE=1` | `allow_remote = true` | off |
+
+Flags win over environment variables, which win over the config file. Unknown config keys are errors.
+
+The server has no authentication yet (Phase 8) and sends requests on behalf of whoever calls it, so it
+refuses non-loopback addresses unless `--allow-remote` is given. Only use that on a trusted network.
+
+Endpoints so far: `GET /healthz` → `{"status":"ok"}`, `GET /api/v1/version` →
+`{"name":"snapreq","version":"…","api":1}`.
 
 ## Runs (`snapreq run`)
 

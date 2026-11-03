@@ -58,7 +58,12 @@ fn init_logging(level: &str) -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Err(e) = init_logging(&cli.log_level) {
+    let default_level = if matches!(cli.command, Command::Serve(_)) {
+        "info"
+    } else {
+        "warn"
+    };
+    if let Err(e) = init_logging(cli.log_level.as_deref().unwrap_or(default_level)) {
         eprintln!("error: invalid --log-level: {e}");
         return ExitCode::from(exit::INVALID_REQUEST);
     }
@@ -67,6 +72,7 @@ async fn main() -> ExitCode {
     let code = match cli.command {
         Command::Send(args) => run_send(&args).await,
         Command::Run(args) => run_cmd::run(&args).await,
+        Command::Serve(args) => serve(&args).await,
         Command::Ls(args) => report(collection_cmd::ls(
             args.dir.as_deref(),
             &mut std::io::stdout().lock(),
@@ -132,6 +138,53 @@ pub(crate) fn client() -> Client {
     };
     // Only extra root certificates can make this fail, and none are configured.
     Client::new(config).unwrap_or_default()
+}
+
+/// `snapreq serve`.
+async fn serve(args: &cli::ServeArgs) -> u8 {
+    let env = |k: &str| std::env::var(k).ok();
+    let overrides = snapreq_server::Overrides {
+        bind: args.bind.clone(),
+        data_dir: args.data_dir.clone(),
+        config_file: args.config.clone(),
+        allow_remote: args.allow_remote,
+    };
+    let config = match snapreq_server::Config::load(
+        &overrides,
+        env,
+        snapreq_server::config::default_data_dir(env),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return exit::INVALID_REQUEST;
+        }
+    };
+    let data_dir = config.data_dir.clone();
+    let server = match snapreq_server::Server::bind(config).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return exit::INTERNAL;
+        }
+    };
+    match server.local_addr() {
+        Ok(addr) => eprintln!(
+            "snapreq server listening on http://{addr} (data: {})",
+            data_dir.display()
+        ),
+        Err(e) => eprintln!("warning: {e}"),
+    }
+    match server.run(snapreq_server::shutdown_signal()).await {
+        Ok(()) => {
+            eprintln!("snapreq server stopped");
+            exit::OK
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit::INTERNAL
+        }
+    }
 }
 
 async fn run_send(args: &SendArgs) -> u8 {
