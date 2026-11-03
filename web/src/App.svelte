@@ -2,6 +2,10 @@
   import { api, serverVersion, type ServerVersion } from "./lib/api/client";
   import DiffView from "./lib/components/DiffView.svelte";
   import EnvView from "./lib/components/EnvView.svelte";
+  import FlowView from "./lib/components/FlowView.svelte";
+  import ReportView from "./lib/components/ReportView.svelte";
+  import RunnerView from "./lib/components/RunnerView.svelte";
+  import RunsPanel from "./lib/components/RunsPanel.svelte";
   import HistoryPanel from "./lib/components/HistoryPanel.svelte";
   import HistoryView from "./lib/components/HistoryView.svelte";
   import PromptDialog from "./lib/components/PromptDialog.svelte";
@@ -15,7 +19,7 @@
   let version = $state<ServerVersion | null>(null);
   let offline = $state<string | null>(null);
   let view: RequestView | undefined = $state();
-  type Side = "collections" | "history";
+  type Side = "collections" | "history" | "runs";
   let side = $state<Side>((localStorage.getItem("snapreq.side") as Side | null) ?? "collections");
   $effect(() => localStorage.setItem("snapreq.side", side));
 
@@ -37,6 +41,8 @@
     else if (r.kind === "collection") await app.openScope(r.collection, "");
     else if (r.kind === "history") await app.openHistory(r.id);
     else if (r.kind === "compare") await app.compare(r.a, r.b);
+    else if (r.kind === "flow") await app.openFlow(r.collection, r.key);
+    else if (r.kind === "run") await app.openRun(r.id);
     else if (r.kind === "new" && !app.tabs.some((t) => t.kind === "request" && t.collection === null)) app.newRequest();
   }
 
@@ -87,12 +93,12 @@
   </header>
   <aside class="side">
     <div class="switch" role="tablist" aria-label="Sidebar">
-      {#each [{ id: "collections", label: "Collections" }, { id: "history", label: "History" }] as s (s.id)}
+      {#each [{ id: "collections", label: "Collections" }, { id: "history", label: "History" }, { id: "runs", label: "Runs" }] as s (s.id)}
         <button type="button" role="tab" aria-selected={side === s.id} aria-controls="side-panel" onclick={() => (side = s.id as Side)}>{s.label}</button>
       {/each}
     </div>
     <div class="side-panel" id="side-panel" role="tabpanel">
-      {#if side === "collections"}<Sidebar />{:else}<HistoryPanel />{/if}
+      {#if side === "collections"}<Sidebar />{:else if side === "history"}<HistoryPanel />{:else}<RunsPanel />{/if}
     </div>
   </aside>
   <main>
@@ -107,8 +113,14 @@
           <EnvView {tab} />
         {:else if tab.kind === "history"}
           <HistoryView {tab} />
-        {:else}
+        {:else if tab.kind === "diff"}
           <DiffView {tab} />
+        {:else if tab.kind === "runner"}
+          <RunnerView {tab} />
+        {:else if tab.kind === "flow"}
+          <FlowView {tab} />
+        {:else}
+          <div class="run-tab"><ReportView report={tab.report} runId={tab.runId} idPrefix="run-{tab.id}" /></div>
         {/if}
       {/key}
     {:else}
@@ -208,6 +220,11 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+  }
+  .run-tab {
+    padding: 0.8rem 1rem;
+    overflow: auto;
+    height: 100%;
   }
   main > :global(.view) {
     flex: 1;

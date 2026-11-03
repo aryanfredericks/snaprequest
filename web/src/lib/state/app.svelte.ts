@@ -3,21 +3,37 @@ import { api, ApiError, unwrap } from "../api/client";
 import type {
   CollectionDoc,
   CollectionListEntry,
+  FlowFile,
   HistoryRecord,
   HistorySummary,
   RequestFile,
+  RunReport,
+  RunSummary,
   VariableInfo,
   VarsTable,
 } from "../api/types";
 import { jobs } from "../api/ws";
 import { draftFromFile, draftToCore, draftToFile, uid } from "../model/draft";
 import { draftFromHistory } from "../model/history";
+import { flowToFile } from "../model/flow";
+import { parseData } from "../model/runs";
 import { scopeFromFile, scopeToFile, varsFromTable, varsToTable, type ScopeFile } from "../model/scope";
 import { prompt } from "./prompt.svelte";
 import { formatRoute } from "./route";
-import { DiffTab, EnvTab, HistoryTab, RequestTab, ScopeTab, type Tab } from "./tabs.svelte";
+import {
+  DiffTab,
+  EnvTab,
+  FlowTab,
+  HistoryTab,
+  RequestTab,
+  RunnerTab,
+  RunTab,
+  ScopeTab,
+  type RunTarget,
+  type Tab,
+} from "./tabs.svelte";
 
-export { DiffTab, EnvTab, HistoryTab, RequestTab, ScopeTab, type Tab };
+export { DiffTab, EnvTab, FlowTab, HistoryTab, RequestTab, RunnerTab, RunTab, ScopeTab, type RunTarget, type Tab };
 
 export interface HistoryFilter {
   url: string;
@@ -50,6 +66,8 @@ class AppState {
   notices = $state<Notice[]>([]);
   /** Bumped whenever something is added to the history (the history list reloads). */
   historyVersion = $state(0);
+  /** Bumped whenever a run is stored. */
+  runsVersion = $state(0);
 
   get active(): Tab | null {
     return this.tabs.find((t) => t.id === this.activeId) ?? null;
@@ -261,6 +279,8 @@ class AppState {
         return this.saveScope(tab);
       case "environment":
         return this.saveEnvironment(tab);
+      case "flow":
+        return this.saveFlow(tab);
       default:
         return false;
     }
@@ -380,6 +400,179 @@ class AppState {
     }
     this.historyVersion++;
     return true;
+  }
+
+  // --- Runs -------------------------------------------------------------------------------
+
+  openRunner(target: RunTarget) {
+    const tab = new RunnerTab(target, this.envs[target.collection] ?? null);
+    this.open(tab);
+    if (!this.docs[target.collection]) void this.loadCollection(target.collection);
+  }
+
+  async startRun(tab: RunnerTab) {
+    if (tab.running) return;
+    tab.error = null;
+    const body: Record<string, unknown> = {
+      collection: tab.target.collection,
+      capture_wire: true,
+      bail: tab.bail,
+      parallel: Math.max(1, tab.parallel),
+    };
+    if (tab.target.key) body.target = tab.target.key;
+    if (tab.env) body.env = tab.env;
+    if (tab.delayMs > 0) body.delay_ms = tab.delayMs;
+    const vars = Object.fromEntries(tab.vars.filter((v) => v.enabled && v.name.trim()).map((v) => [v.name.trim(), v.value]));
+    if (Object.keys(vars).length) body.vars = vars;
+    try {
+      const rows = parseData(tab.data);
+      if (rows.length) body.data = rows;
+      else if (tab.iterations > 1) body.iterations = tab.iterations;
+    } catch (e) {
+      tab.error = `Data: ${message(e)}`;
+      return;
+    }
+    tab.running = true;
+    tab.progress = [];
+    tab.report = null;
+    try {
+      const summary = await jobs.run(body, { onProgress: (e) => tab.onProgress(e) });
+      tab.report = { ...(await this.runReport(summary.id!)), id: summary.id, collection: tab.target.collection };
+      this.activate(tab);
+      this.runsVersion++;
+      this.historyVersion++;
+    } catch (e) {
+      tab.error = message(e);
+    } finally {
+      tab.running = false;
+    }
+  }
+
+  async runReport(id: number): Promise<RunReport> {
+    return unwrap(await api.GET("/api/v1/runs/{id}", { params: { path: { id } } })) as unknown as RunReport;
+  }
+
+  async listRuns(limit = 100): Promise<RunSummary[]> {
+    const data = unwrap(await api.GET("/api/v1/runs", { params: { query: { limit } } }));
+    return (data.runs ?? []) as RunSummary[];
+  }
+
+  async openRun(id: number, targetKey?: string) {
+    const open = this.tabs.find((t) => (t.kind === "run" && t.runId === id) || (t.kind === "runner" && t.report?.id === id));
+    if (open) return this.activate(open);
+    await this.attempt(`Opening run ${id}`, async () => {
+      const report = await this.runReport(id);
+      this.open(new RunTab(id, report, targetKey ? targetKey.split("/")[0]! : null));
+    });
+  }
+
+  // --- Flows ------------------------------------------------------------------------------
+
+  async openFlow(collection: string, key: string) {
+    const open = this.tabs.find((t) => t.kind === "flow" && t.collection === collection && t.key === key);
+    if (open) return this.activate(open);
+    await this.attempt(`Opening the flow ${key}`, async () => {
+      const data = unwrap(
+        await api.GET("/api/v1/collections/{id}/flows/{key}", { params: { path: { id: collection, key } } }),
+      ) as unknown as { key: string; file: FlowFile };
+      this.open(new FlowTab(collection, data.key, data.file));
+      if (!this.docs[collection]) void this.loadCollection(collection);
+    });
+  }
+
+  async saveFlow(tab: FlowTab): Promise<boolean> {
+    const file = flowToFile(tab.draft);
+    const ok = await this.attempt("Saving the flow", async () =>
+      unwrap(
+        await api.PUT("/api/v1/collections/{id}/flows/{key}", {
+          params: { path: { id: tab.collection, key: tab.key } },
+          body: file as unknown as Doc,
+        }),
+      ),
+    );
+    if (!ok) return false;
+    tab.saved = JSON.stringify(file);
+    this.notify(`Saved ${tab.key}`);
+    void this.loadCollection(tab.collection);
+    return true;
+  }
+
+  async createFlow(collection: string, folder: string) {
+    const v = await prompt.ask({
+      title: `New flow in ${folder || collection}`,
+      fields: [{ name: "name", label: "File name", pattern: "[A-Za-z0-9_\\-][A-Za-z0-9_.\\-]*", placeholder: "checkout", hint: "Saved as <name>.flow.toml" }],
+      submit: "Create",
+    });
+    if (!v) return;
+    const key = folder ? `${folder}/${v.name}` : v.name!;
+    const file: FlowFile = { name: v.name, step: [{ name: "First step", url: "{{base_url}}/" }] };
+    const ok = await this.attempt("Creating the flow", async () =>
+      unwrap(await api.PUT("/api/v1/collections/{id}/flows/{key}", { params: { path: { id: collection, key } }, body: file as unknown as Doc })),
+    );
+    if (!ok) return;
+    await this.refresh(collection);
+    await this.openFlow(collection, key);
+  }
+
+  /**
+   * Runs a flow: `all` from the start, `next` the step after the last one run, or the steps
+   * `from`–`to` starting from the captured values a previous run left before `from`.
+   */
+  async runFlow(tab: FlowTab, mode: "all" | "next" | { from: number; to?: number }) {
+    if (tab.running !== null) return;
+    if (tab.dirty && !(await this.saveFlow(tab))) return;
+    const total = tab.draft.steps.length;
+    let from = 1;
+    let to: number | undefined;
+    if (mode === "next") {
+      const n = tab.next;
+      if (n === null) return;
+      from = n;
+      to = n;
+    } else if (mode !== "all") {
+      from = mode.from;
+      to = mode.to;
+    }
+    const body: Record<string, unknown> = { collection: tab.collection, target: tab.key, capture_wire: true };
+    const env = this.envs[tab.collection];
+    if (env) body.env = env;
+    if (from > 1) {
+      const run = tab.resumeRun[from];
+      if (run === undefined) {
+        tab.error = `Run the steps before step ${from} first: their captured values are needed.`;
+        return;
+      }
+      body.from_step = from;
+      body.resume = run;
+    }
+    if (to !== undefined && to < total) body.to_step = to;
+    else if (from > 1) body.to_step = total;
+    tab.error = null;
+    tab.running = from;
+    try {
+      const summary = (await jobs.run(body)) as RunReport & { resumable_steps?: number[] };
+      const report = await this.runReport(summary.id!);
+      const steps = report.iterations[0]?.steps ?? [];
+      const kept = Object.fromEntries(Object.entries(tab.results).filter(([n]) => Number(n) < from));
+      for (const s of steps) kept[s.number] = s;
+      tab.results = kept;
+      tab.ran = steps.map((s) => s.number);
+      const resumable = summary.resumable_steps ?? [];
+      const last = Math.max(from, ...resumable);
+      const map = Object.fromEntries(Object.entries(tab.resumeRun).filter(([n]) => Number(n) < from || Number(n) > last));
+      for (const n of resumable) map[n] = summary.id!;
+      // States after a failure in this run are gone; older ones would not match the new results.
+      for (const n of Object.keys(map).map(Number)) if (n > last) delete map[n];
+      tab.resumeRun = map;
+      const lastRun = steps.at(-1)?.number;
+      if (lastRun !== undefined) tab.selected = tab.draft.steps[lastRun - 1]?.id ?? tab.selected;
+      this.runsVersion++;
+      this.historyVersion++;
+    } catch (e) {
+      tab.error = message(e);
+    } finally {
+      tab.running = null;
+    }
   }
 
   // --- Tree changes -----------------------------------------------------------------------
@@ -503,7 +696,7 @@ class AppState {
     });
     if (!ok) return;
     for (const t of [...this.tabs]) {
-      if (t.kind === "history" || t.kind === "diff" || t.collection !== collection) continue;
+      if (t.kind === "history" || t.kind === "diff" || t.kind === "run" || t.kind === "runner" || t.collection !== collection) continue;
       const k = t.kind === "environment" ? null : t.key;
       if (k !== null && (k === key || (kind === "folder" && k.startsWith(`${key}/`)))) this.close(t, true);
     }

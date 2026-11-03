@@ -55,6 +55,9 @@ const MIGRATIONS: &[&str] = &[
         size_bytes INTEGER NOT NULL
     );
     CREATE INDEX runs_created_at ON runs (created_at);",
+    // 2: the JUnit XML and HTML renderings of each run's report
+    "ALTER TABLE runs ADD COLUMN junit TEXT;
+    ALTER TABLE runs ADD COLUMN html TEXT;",
 ];
 
 fn now_ms() -> i64 {
@@ -156,6 +159,17 @@ pub struct RunEntry {
     pub name: String,
     pub passed: bool,
     pub report: Value,
+    /// The report as JUnit XML and as a self-contained HTML page (`snapreq run --report`).
+    pub junit: Option<String>,
+    pub html: Option<String>,
+}
+
+/// A stored rendering of a run report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportFormat {
+    Json,
+    Junit,
+    Html,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
@@ -268,6 +282,8 @@ impl RunEntry {
             name: report.name.clone(),
             passed: report.passed(),
             report: report.json(true),
+            junit: Some(report.junit()),
+            html: Some(report.html()),
         }
     }
 }
@@ -434,10 +450,12 @@ impl Store {
     pub async fn add_run(&self, e: RunEntry) -> Result<i64> {
         self.with(move |c| {
             let report = e.report.to_string();
-            let size = report.len() as i64;
+            let size = (report.len()
+                + e.junit.as_ref().map_or(0, String::len)
+                + e.html.as_ref().map_or(0, String::len)) as i64;
             c.execute(
-                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size],
+                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, junit, html) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size, e.junit, e.html],
             )
             .map_err(db_err)?;
             Ok(c.last_insert_rowid())
@@ -478,6 +496,26 @@ impl Store {
                 .optional()
                 .map_err(db_err)?;
             Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
+        })
+        .await
+    }
+
+    /// A stored rendering of a run's report (`None`: no such run, or not stored for it).
+    pub async fn run_rendering(&self, id: i64, format: ReportFormat) -> Result<Option<String>> {
+        let column = match format {
+            ReportFormat::Json => "report_json",
+            ReportFormat::Junit => "junit",
+            ReportFormat::Html => "html",
+        };
+        self.with(move |c| {
+            c.query_row(
+                &format!("SELECT {column} FROM runs WHERE id = ?1"),
+                [id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(db_err)
         })
         .await
     }

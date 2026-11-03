@@ -210,7 +210,7 @@ pub fn lines(it: &Iteration) -> Vec<Line<'_>> {
 /// Total and skipped requests or steps of an iteration.
 pub fn counts(it: &Iteration) -> (usize, usize) {
     match &it.result {
-        UnitRun::Flow(f) => (f.total, f.skipped()),
+        UnitRun::Flow(f) => (f.planned(), f.skipped()),
         UnitRun::Requests { runs, total } => (*total, total - runs.len()),
     }
 }

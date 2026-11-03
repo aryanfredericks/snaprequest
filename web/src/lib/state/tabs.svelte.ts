@@ -1,5 +1,17 @@
 // The kinds of tabs the main area shows.
-import type { ExecuteResult, HistoryRecord, RequestFile, TraceEntry, VariableInfo } from "../api/types";
+import type {
+  ExecuteResult,
+  FlowFile,
+  HistoryRecord,
+  RequestFile,
+  RunReport,
+  RunStep,
+  TraceEntry,
+  VariableInfo,
+} from "../api/types";
+import type { ProgressEvent } from "../api/ws";
+import { flowFromFile, flowToFile, type FlowDraft } from "../model/flow";
+import { row, type Row } from "../model/draft";
 import { draftToFile, emptyDraft, sameFile, uid, type Draft } from "../model/draft";
 import { sameScope, scopeToFile, type ScopeDraft, type ScopeFile, type VarRow } from "../model/scope";
 import type { Route } from "./route";
@@ -158,4 +170,139 @@ export class DiffTab {
   }
 }
 
-export type Tab = RequestTab | ScopeTab | EnvTab | HistoryTab | DiffTab;
+/** What a runner runs: a whole collection, a folder or a flow. */
+export interface RunTarget {
+  collection: string;
+  kind: "collection" | "folder" | "flow";
+  /** Folder or flow key ("" for the collection). */
+  key: string;
+}
+
+export interface ProgressRow {
+  iteration: number;
+  key: string;
+  done: boolean;
+  passed?: boolean;
+  status?: number | null;
+  durationMs?: number | null;
+}
+
+/** A configured run of a collection, folder or flow, with its live progress and report. */
+export class RunnerTab {
+  readonly kind = "runner" as const;
+  readonly id = uid();
+  readonly dirty = false;
+  target: RunTarget;
+  env = $state<string | null>(null);
+  iterations = $state(1);
+  /** CSV or JSON rows for a data-driven run. */
+  data = $state("");
+  bail = $state(false);
+  delayMs = $state(0);
+  parallel = $state(1);
+  vars = $state<Row[]>([row()]);
+  running = $state(false);
+  progress = $state<ProgressRow[]>([]);
+  error = $state<string | null>(null);
+  report = $state<RunReport | null>(null);
+
+  constructor(target: RunTarget, env: string | null) {
+    this.target = target;
+    this.env = env;
+  }
+
+  get collection() {
+    return this.target.collection;
+  }
+
+  get title(): string {
+    return `Run ${this.target.key || this.target.collection}`;
+  }
+
+  get route(): Route {
+    return this.report?.id ? { kind: "run", id: this.report.id } : { kind: "home" };
+  }
+
+  onProgress(e: ProgressEvent) {
+    if (e.event === "request_started") {
+      this.progress.push({ iteration: e.iteration, key: e.key, done: false });
+    } else {
+      const r = this.progress.findLast((p) => p.iteration === e.iteration && p.key === e.key && !p.done);
+      if (r) Object.assign(r, { done: true, passed: e.passed, status: e.status, durationMs: e.duration_ms });
+    }
+  }
+}
+
+/** A stored run report. */
+export class RunTab {
+  readonly kind = "run" as const;
+  readonly id = uid();
+  readonly dirty = false;
+  runId: number;
+  collection: string | null;
+  report: RunReport;
+
+  constructor(runId: number, report: RunReport, collection: string | null) {
+    this.runId = runId;
+    this.report = report;
+    this.collection = collection;
+  }
+
+  get title(): string {
+    return `Run #${this.runId} ${this.report.target.name}`;
+  }
+
+  get route(): Route {
+    return { kind: "run", id: this.runId };
+  }
+}
+
+/** A flow being edited and run step by step. */
+export class FlowTab {
+  readonly kind = "flow" as const;
+  readonly id = uid();
+  collection: string;
+  key = $state("");
+  draft = $state<FlowDraft>(null as unknown as FlowDraft);
+  saved = $state("");
+  selected = $state<number | null>(null);
+  /** For each step that can be resumed, the run whose saved state before it to use. */
+  resumeRun = $state<Record<number, number>>({});
+  /** Detailed results by step number (from the latest runs). */
+  results = $state<Record<number, RunStep>>({});
+  /** Step numbers of the latest run, in order. */
+  ran = $state<number[]>([]);
+  running = $state<number | null>(null);
+  error = $state<string | null>(null);
+
+  constructor(collection: string, key: string, file: FlowFile) {
+    this.collection = collection;
+    this.key = key;
+    this.draft = flowFromFile(file);
+    this.saved = JSON.stringify(flowToFile(this.draft));
+  }
+
+  get title(): string {
+    return this.draft.name || this.key.split("/").pop() || this.key;
+  }
+
+  get dirty(): boolean {
+    return JSON.stringify(flowToFile(this.draft)) !== this.saved;
+  }
+
+  get route(): Route {
+    return { kind: "flow", collection: this.collection, key: this.key };
+  }
+
+  /** The step that "Step" runs next (1-based), or null at the end. */
+  get next(): number | null {
+    const done = Object.keys(this.results).map(Number);
+    if (!done.length) return 1;
+    const last = Math.max(...done);
+    const failed = !this.results[last]!.passed;
+    if (failed) return null;
+    return last < this.draft.steps.length ? last + 1 : null;
+  }
+}
+
+export type Tab = RequestTab | ScopeTab | EnvTab | HistoryTab | DiffTab | RunnerTab | RunTab | FlowTab;

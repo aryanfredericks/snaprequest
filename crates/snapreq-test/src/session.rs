@@ -139,6 +139,21 @@ impl<'t> SendSpec<'t> {
     }
 }
 
+/// What a session has learned so far: captured values and the secret values to hide. A
+/// snapshot taken before a flow step lets the flow be resumed at that step later.
+#[derive(Debug, Clone, Default)]
+pub struct SessionState {
+    pub runtime: Variables,
+    hidden: Vec<String>,
+}
+
+impl SessionState {
+    /// Secret values hidden from requests sent with this state.
+    pub fn hidden(&self) -> &[String] {
+        &self.hidden
+    }
+}
+
 /// State shared by the requests of one run.
 ///
 /// Variable precedence, highest first: `overrides` (`--var`) → step variables → the data
@@ -199,6 +214,22 @@ impl<'a> Session<'a> {
 
     pub fn collection(&self) -> &'a Collection {
         self.collection
+    }
+
+    /// Captured values and hidden secrets, for resuming later.
+    pub fn state(&self) -> SessionState {
+        SessionState {
+            runtime: self.runtime.clone(),
+            hidden: self.hidden.clone(),
+        }
+    }
+
+    /// Continues from a saved state (its captured values; its secrets stay hidden).
+    pub fn restore(&mut self, state: &SessionState) {
+        self.runtime = state.runtime.clone();
+        for v in &state.hidden {
+            self.hide(v.clone());
+        }
     }
 
     /// Hides `value` in every later request (for example a `--var` of a secret variable).

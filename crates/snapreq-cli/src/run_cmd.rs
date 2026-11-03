@@ -202,6 +202,7 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             parallel: args.parallel,
         },
         live: None,
+        flow_steps: Default::default(),
     };
     let planned = if plan.rows.is_empty() {
         plan.iterations

@@ -17,6 +17,12 @@
         return `History #${tab.record.id}: ${tab.record.method} ${tab.record.url}`;
       case "diff":
         return `Comparing history #${tab.left.id} and #${tab.right.id}`;
+      case "runner":
+        return `Runner: ${tab.target.collection}${tab.target.key ? `/${tab.target.key}` : ""}`;
+      case "run":
+        return `Run #${tab.runId}: ${tab.report.target.name}`;
+      case "flow":
+        return `Flow ${tab.collection}/${tab.key}`;
     }
   }
 </script>
@@ -37,7 +43,9 @@
         {:else if tab.kind === "environment"}<span class="kind" aria-hidden="true">◎</span>
         {:else if tab.kind === "history"}<span class="kind" aria-hidden="true">↺</span>
         {:else if tab.kind === "diff"}<span class="kind" aria-hidden="true">⇄</span>
-        {:else}<span class="kind" aria-hidden="true">⚙</span>{/if}
+        {:else if tab.kind === "flow"}<span class="kind flow" aria-hidden="true">⇢</span>
+        {:else if tab.kind === "scope"}<span class="kind" aria-hidden="true">⚙</span>
+        {:else}<span class="kind" aria-hidden="true">▶</span>{/if}
         <span class="label">{tab.title}</span>
         {#if tab.dirty}<span class="dirty" aria-label="unsaved changes">●</span>{/if}
       </button>

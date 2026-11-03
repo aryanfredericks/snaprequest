@@ -23,12 +23,23 @@
 
   function collectionMenu(id: string): MenuItem[] {
     return [
+      { label: "Run collection…", action: () => app.openRunner({ collection: id, kind: "collection", key: "" }) },
       { label: "New request…", action: () => app.createRequest(id, "") },
       { label: "New folder…", action: () => app.createFolder(id, "") },
+      { label: "New flow…", action: () => app.createFlow(id, "") },
       { label: "New environment…", action: () => app.createEnvironment(id) },
       { label: "Collection settings", action: () => app.openScope(id, "") },
       { label: "Reload from disk", action: () => app.loadCollection(id) },
       { label: "Delete collection…", danger: true, action: () => app.deleteCollection(id) },
+    ];
+  }
+
+  function flowMenu(id: string, key: string): MenuItem[] {
+    return [
+      { label: "Open", action: () => app.openFlow(id, key) },
+      { label: "Run…", action: () => app.openRunner({ collection: id, kind: "flow", key }) },
+      { label: "Rename…", action: () => app.rename(id, "flow", key) },
+      { label: "Delete…", danger: true, action: () => app.remove(id, "flow", key) },
     ];
   }
 
@@ -109,9 +120,10 @@
               {#each doc.flows as f (f.key)}
                 <li role="treeitem" aria-level={2} aria-selected={false}>
                   <div class="row-wrap">
-                    <button type="button" class="row sub" data-tree-row title="{f.key}: {f.steps} steps" onclick={() => app.notify("The flow editor arrives with P7.7.")}>
+                    <button type="button" class="row sub" data-tree-row title="{f.key}: {f.steps} steps" onclick={() => app.openFlow(c.id, f.key)}>
                       <span class="flow" aria-hidden="true">⇢</span> {f.name}
                     </button>
+                    <ItemMenu items={flowMenu(c.id, f.key)} label="Actions for flow {f.name}" />
                   </div>
                 </li>
               {/each}

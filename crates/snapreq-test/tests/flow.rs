@@ -330,3 +330,76 @@ every_ms = 1
 [step.retry.until.json]
 "$.token" = "never"
 "#;
+
+#[tokio::test]
+async fn a_flow_runs_step_by_step_and_resumes_from_a_saved_state() {
+    let addr = start().await;
+    let dir = collection("steps", addr, &[("orders/checkout.flow.toml", CHECKOUT)]);
+    let (c, _) = Collection::load(&dir).unwrap();
+    let flow = c.find_flow("orders/checkout").unwrap();
+    let secrets = Secrets::default();
+    let new_session = || snapreq_test::Session::new(&c, None, &secrets, Client::default());
+
+    // Steps 1–2 only: the state before step 3 holds the captured token and order id.
+    let mut session = new_session();
+    let first = snapreq_test::run_flow_steps(
+        &mut session,
+        flow,
+        |_| {},
+        None,
+        &snapreq_test::FlowSteps {
+            from: 1,
+            to: Some(2),
+            start: None,
+        },
+    )
+    .await;
+    assert_eq!(first.steps.len(), 2);
+    assert!(first.passed(), "{first:#?}");
+    assert_eq!(first.planned(), 2);
+    assert_eq!(
+        first.states.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    let before_3 = &first.states[2].1;
+    assert!(before_3.runtime.get("order_id").is_some());
+    assert_eq!(before_3.hidden(), ["tok-42xyz"]);
+
+    // A fresh session resumes at step 3 with that state: the token is still sent and hidden.
+    let mut session = new_session();
+    let rest = snapreq_test::run_flow_steps(
+        &mut session,
+        flow,
+        |_| {},
+        None,
+        &snapreq_test::FlowSteps {
+            from: 3,
+            to: None,
+            start: Some(before_3.clone()),
+        },
+    )
+    .await;
+    assert_eq!(
+        rest.steps.iter().map(|s| s.number).collect::<Vec<_>>(),
+        [3, 4]
+    );
+    assert!(rest.passed(), "{rest:#?}");
+    let trace = serde_json::to_string(&rest.steps[1].run.response().unwrap().trace).unwrap();
+    assert!(!trace.contains("tok-42xyz") && trace.contains("Bearer <redacted>"));
+
+    // Without the state, step 3 cannot know the order.
+    let mut session = new_session();
+    let cold = snapreq_test::run_flow_steps(
+        &mut session,
+        flow,
+        |_| {},
+        None,
+        &snapreq_test::FlowSteps {
+            from: 3,
+            to: Some(3),
+            start: None,
+        },
+    )
+    .await;
+    assert!(!cold.passed());
+}

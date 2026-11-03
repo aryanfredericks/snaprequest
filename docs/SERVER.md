@@ -126,13 +126,22 @@ A summary is `{ "id", "created_at" (Unix ms), "method", "url", "status", "durati
 ```
 
 `target` is a flow or folder key (absent: every request); `data` (one iteration per row) and
-`iterations` exclude each other. The response is the run document of `snapreq run --format json`
-(`docs/CLI.md`) plus `"id"` and `"collection"`.
+`iterations` exclude each other. `"capture_wire": true` records the raw bytes of every exchange in
+the stored report. The response is the run document of `snapreq run --format json` (`docs/CLI.md`)
+plus `"id"` and `"collection"`.
+
+Flows can also run by steps (single iteration): `"from_step"` and `"to_step"` (1-based, inclusive)
+choose the steps, and `"resume": <run id>` starts from the captured values (and hidden secrets) that
+run left before `from_step`. A flow run's response lists the steps it can be resumed at
+(`"resumable_steps"`) and the `"range"` it ran. These states are kept in the server's memory for an
+hour (the last 50 runs); they are never stored or returned. Starting after step 1 without `resume`
+is a 400; a state that is no longer available is a 409.
 
 | Method and path | Result |
 |---|---|
 | `GET /api/v1/runs?limit=` | `{ "runs": [{ "id", "created_at", "kind", "target_key", "name", "passed" }] }`, newest first |
 | `GET /api/v1/runs/{id}` | The stored detailed report (with responses and traces) |
+| `GET /api/v1/runs/{id}/report/{json,junit,html}` | The report as a download, the same files as `snapreq run --report` (HTML is sent with `Content-Security-Policy: sandbox`) |
 
 ## Collections
 

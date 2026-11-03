@@ -43,8 +43,10 @@
     ];
     if (item.type === "folder") {
       return [
+        { label: "Run folder…", action: () => app.openRunner({ collection, kind: "folder", key: item.key }) },
         { label: "New request…", action: () => app.createRequest(collection, item.key) },
         { label: "New folder…", action: () => app.createFolder(collection, item.key) },
+        { label: "New flow…", action: () => app.createFlow(collection, item.key) },
         { label: "Folder settings", action: () => app.openScope(collection, item.key) },
         ...common,
         { label: "Delete…", danger: true, action: () => app.remove(collection, "folder", item.key) },

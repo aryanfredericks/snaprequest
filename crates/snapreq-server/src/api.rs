@@ -90,6 +90,7 @@ pub fn router() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(get_history, delete_history))
         .routes(routes!(list_runs, start_run))
         .routes(routes!(get_run))
+        .routes(routes!(get_run_report))
         .routes(routes!(list_collections, create_collection))
         .routes(routes!(get_collection, put_collection, delete_collection))
         .routes(routes!(get_request, put_request, delete_request))
@@ -467,6 +468,17 @@ pub struct RunBody {
     pub bail: bool,
     pub delay_ms: Option<u64>,
     pub parallel: Option<usize>,
+    /// Record the raw bytes of every exchange (`wire` trace events in the stored report).
+    #[serde(default)]
+    pub capture_wire: bool,
+    /// Flows only: the first step to run (1-based). With `resume`, the captured values of the
+    /// earlier steps come from that run.
+    pub from_step: Option<usize>,
+    /// Flows only: the last step to run.
+    pub to_step: Option<usize>,
+    /// Flows only: the id of an earlier run of this flow whose state before `from_step` to
+    /// start from (kept in memory for an hour; never stored or returned).
+    pub resume: Option<i64>,
 }
 
 #[utoipa::path(post, path = "/runs", tag = "runs", request_body = RunBody, responses((status = 200, description = "The run document plus its stored `id`", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
@@ -516,6 +528,55 @@ pub(crate) async fn run_body(
             v
         })
         .collect();
+    let stepped = body.from_step.is_some() || body.to_step.is_some() || body.resume.is_some();
+    let mut flow_steps = snapreq_test::FlowSteps::default();
+    if stepped {
+        let snapreq_test::Unit::Flow(flow) = &unit else {
+            return Err(ApiError::bad_request(
+                "`from_step`, `to_step` and `resume` apply to flows only",
+            ));
+        };
+        if !body.data.is_empty() || body.iterations.is_some_and(|n| n > 1) {
+            return Err(ApiError::bad_request(
+                "a flow run by steps has a single iteration",
+            ));
+        }
+        let total = flow.file.steps.len();
+        let from = body.from_step.unwrap_or(1);
+        let to = body.to_step.unwrap_or(total);
+        if from == 0 || from > total || to < from || to > total {
+            return Err(ApiError::bad_request(format!(
+                "steps {from}–{to} are not in this flow (1–{total})"
+            )));
+        }
+        let start = match body.resume {
+            Some(run) => Some(
+                state
+                    .flow_states
+                    .get(run, &body.collection, &flow.key, from)
+                    .ok_or_else(|| {
+                        ApiError::new(
+                            StatusCode::CONFLICT,
+                            "conflict",
+                            format!(
+                                "the state before step {from} of run {run} is no longer available; run the flow from the start"
+                            ),
+                        )
+                    })?,
+            ),
+            None if from > 1 => {
+                return Err(ApiError::bad_request(
+                    "starting after step 1 needs `resume` (a run whose captured values to use)",
+                ));
+            }
+            None => None,
+        };
+        flow_steps = snapreq_test::FlowSteps {
+            from,
+            to: Some(to),
+            start,
+        };
+    }
     let overrides = vars_of(&body.vars);
     let scope_key = match &unit {
         snapreq_test::Unit::Flow(f) => f.key.clone(),
@@ -557,13 +618,15 @@ pub(crate) async fn run_body(
             parallel: body.parallel.unwrap_or(1),
         },
         live,
+        flow_steps,
     };
     let planned = if plan.rows.is_empty() {
         plan.iterations
     } else {
         plan.rows.len()
     };
-    let iterations = execute(&plan, &unit, |_| {}).await;
+    let wire = body.capture_wire;
+    let iterations = execute(&plan, &unit, |r| r.settings.capture_wire |= wire).await;
     let report = Report::new(&collection, &unit, &iterations, planned, secret_vars);
     let mut entry = RunEntry::from_report(&report);
     entry.target_key = format!("{}/{}", body.collection, report.key)
@@ -573,6 +636,22 @@ pub(crate) async fn run_body(
     let mut summary = report.json(false);
     summary["id"] = json!(id);
     summary["collection"] = json!(body.collection);
+    // A single-iteration flow run can be resumed at any step it reached.
+    if let (snapreq_test::Unit::Flow(flow), [it]) = (&unit, iterations.as_slice())
+        && let snapreq_test::UnitRun::Flow(run) = &it.result
+    {
+        let steps: Vec<usize> = run
+            .states
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| *n <= run.total)
+            .collect();
+        state
+            .flow_states
+            .insert(id, &body.collection, &flow.key, run.states.clone());
+        summary["resumable_steps"] = json!(steps);
+        summary["range"] = json!([run.range.0, run.range.1]);
+    }
     Ok(summary)
 }
 
@@ -596,6 +675,53 @@ async fn get_run(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<J
         Some(r) => Ok(Json(r)),
         None => Err(ApiError::not_found(format!("no run {id}"))),
     }
+}
+
+#[utoipa::path(get, path = "/runs/{id}/report/{format}", tag = "runs", params(("id" = i64, Path, description = "Run id"), ("format" = String, Path, description = "`json`, `junit` or `html`")), responses((status = 200, description = "The report as a file download (like `snapreq run --report`)"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody)))]
+/// `GET /api/v1/runs/{id}/report/{format}`: the report as a download.
+async fn get_run_report(
+    State(state): Shared,
+    UrlPath((id, format)): UrlPath<(i64, String)>,
+) -> ApiResult<Response> {
+    use crate::store::ReportFormat;
+    let (fmt, mime, ext) = match format.as_str() {
+        "json" => (ReportFormat::Json, "application/json", "json"),
+        "junit" => (ReportFormat::Junit, "application/xml", "xml"),
+        "html" => (ReportFormat::Html, "text/html; charset=utf-8", "html"),
+        other => {
+            return Err(ApiError::bad_request(format!(
+                "unknown report format `{other}` (json, junit, html)"
+            )));
+        }
+    };
+    let text = state
+        .store
+        .run_rendering(id, fmt)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no {format} report for run {id}")))?;
+    let text = if fmt == ReportFormat::Json {
+        serde_json::from_str::<Value>(&text)
+            .and_then(|v| serde_json::to_string_pretty(&v))
+            .unwrap_or(text)
+    } else {
+        text
+    };
+    // Always a download, never rendered in this origin (the HTML holds response bodies).
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, mime.to_owned()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"snapreq-run-{id}.{ext}\""),
+            ),
+            (
+                axum::http::header::CONTENT_SECURITY_POLICY,
+                "sandbox".to_owned(),
+            ),
+        ],
+        text,
+    )
+        .into_response())
 }
 
 // --- Collections -------------------------------------------------------------

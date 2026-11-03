@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod config;
+pub mod flow_states;
 pub mod outbound;
 pub mod store;
 pub mod tree;
@@ -58,6 +59,8 @@ pub struct AppState {
     pub store: store::Store,
     /// Sends the requests the API executes (shared connection pool and cookie jar).
     pub client: snapreq_core::Client,
+    /// States of recent flow runs, for resuming them at a step.
+    pub flow_states: flow_states::FlowStates,
 }
 
 /// How often history is pruned while the server runs.
@@ -228,6 +231,7 @@ impl Server {
                 config,
                 store,
                 client,
+                flow_states: Default::default(),
             }),
         })
     }

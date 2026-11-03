@@ -1791,6 +1791,61 @@
         }
       }
     },
+    "/api/v1/runs/{id}/report/{format}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "`GET /api/v1/runs/{id}/report/{format}`: the report as a download.",
+        "operationId": "get_run_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "format",
+            "in": "path",
+            "description": "`json`, `junit` or `html`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report as a file download (like `snapreq run --report`)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/version": {
       "get": {
         "tags": [
@@ -2083,6 +2138,10 @@
           "bail": {
             "type": "boolean"
           },
+          "capture_wire": {
+            "type": "boolean",
+            "description": "Record the raw bytes of every exchange (`wire` trace events in the stored report)."
+          },
           "collection": {
             "type": "string"
           },
@@ -2107,6 +2166,14 @@
               "null"
             ]
           },
+          "from_step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Flows only: the first step to run (1-based). With `resume`, the captured values of the\nearlier steps come from that run.",
+            "minimum": 0
+          },
           "iterations": {
             "type": [
               "integer",
@@ -2121,12 +2188,28 @@
             ],
             "minimum": 0
           },
+          "resume": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Flows only: the id of an earlier run of this flow whose state before `from_step` to\nstart from (kept in memory for an hour; never stored or returned)."
+          },
           "target": {
             "type": [
               "string",
               "null"
             ],
             "description": "A flow or folder key; absent runs every request of the collection."
+          },
+          "to_step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Flows only: the last step to run.",
+            "minimum": 0
           },
           "vars": {
             "type": "object",

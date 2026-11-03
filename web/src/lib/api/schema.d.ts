@@ -237,6 +237,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{id}/report/{format}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/runs/{id}/report/{format}`: the report as a download. */
+        get: operations["get_run_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/version": {
         parameters: {
             query?: never;
@@ -353,16 +370,31 @@ export interface components {
         };
         RunBody: {
             bail?: boolean;
+            /** @description Record the raw bytes of every exchange (`wire` trace events in the stored report). */
+            capture_wire?: boolean;
             collection: string;
             /** @description One iteration per row. */
             data?: Record<string, unknown>[];
             /** Format: int64 */
             delay_ms?: number | null;
             env?: string | null;
+            /**
+             * @description Flows only: the first step to run (1-based). With `resume`, the captured values of the
+             *     earlier steps come from that run.
+             */
+            from_step?: number | null;
             iterations?: number | null;
             parallel?: number | null;
+            /**
+             * Format: int64
+             * @description Flows only: the id of an earlier run of this flow whose state before `from_step` to
+             *     start from (kept in memory for an hour; never stored or returned).
+             */
+            resume?: number | null;
             /** @description A flow or folder key; absent runs every request of the collection. */
             target?: string | null;
+            /** @description Flows only: the last step to run. */
+            to_step?: number | null;
             vars?: {
                 [key: string]: string;
             };
@@ -1733,6 +1765,47 @@ export interface operations {
             };
             /** @description Does not validate */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_run_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run id */
+                id: number;
+                /** @description `json`, `junit` or `html` */
+                format: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report as a file download (like `snapreq run --report`) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

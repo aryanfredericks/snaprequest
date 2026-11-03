@@ -97,6 +97,7 @@ async fn iterations_and_data_rows() {
         iterations: 2,
         options: RunOptions::default(),
         live: None,
+        flow_steps: Default::default(),
     };
     let unit = Unit::Requests(request_keys(&c, Some("users")).unwrap());
     let runs = execute(&plan, &unit, |_| {}).await;
@@ -179,6 +180,7 @@ async fn bail_delay_and_parallel_iterations() {
             ..RunOptions::default()
         },
         live: None,
+        flow_steps: Default::default(),
     };
 
     // `greet` fails for bob: with bail, the rest of iteration 1 and later iterations are skipped.

@@ -6,7 +6,7 @@ use futures_util::StreamExt as _;
 use snapreq_collection::{Collection, Environment, FlowItem, Secrets, Variables};
 use snapreq_core::{Client, Request};
 
-use crate::flow::{FlowRun, run_flow_with};
+use crate::flow::{FlowRun, run_flow_steps};
 use crate::session::{RequestRun, Session};
 
 /// What a run executes.
@@ -74,6 +74,8 @@ pub struct Plan<'a> {
     pub options: RunOptions,
     /// Live observers (trace and progress events).
     pub live: Option<crate::session::Live>,
+    /// For flows: the steps to run and the state to start from (default: all, fresh).
+    pub flow_steps: crate::flow::FlowSteps,
 }
 
 /// How a run proceeds.
@@ -198,7 +200,9 @@ async fn iteration(
     }
     let delay = plan.options.delay;
     let result = match unit {
-        Unit::Flow(flow) => UnitRun::Flow(run_flow_with(&mut session, flow, adjust, delay).await),
+        Unit::Flow(flow) => {
+            UnitRun::Flow(run_flow_steps(&mut session, flow, adjust, delay, &plan.flow_steps).await)
+        }
         Unit::Requests(keys) => {
             let mut runs = Vec::new();
             for (i, key) in keys.iter().enumerate() {

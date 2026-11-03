@@ -838,3 +838,128 @@ async fn folders_moves_order_and_secrets() {
         .await;
     assert_eq!(status, 400);
 }
+
+#[tokio::test]
+async fn flows_run_by_steps_and_resume() {
+    let api = Api::start("steps").await;
+    let target = target().await;
+    api.call("POST", "/collections", Some(json!({ "id": "app" })))
+        .await;
+    api.call(
+        "PUT",
+        "/collections/app",
+        Some(json!({ "format": 1, "name": "App", "vars": { "base": format!("http://{target}") } })),
+    )
+    .await;
+    let (status, doc) = api
+        .call(
+            "PUT",
+            "/collections/app/flows/journey",
+            Some(json!({ "step": [
+                { "name": "Log in", "method": "POST", "url": "{{base}}/login", "capture": { "token": { "json": "$.token", "secret": true } } },
+                { "name": "Me", "url": "{{base}}/me", "auth": { "type": "bearer", "token": "{{token}}" }, "assert": { "body": { "contains": "Bearer" } } },
+                { "name": "Again", "url": "{{base}}/again", "auth": { "type": "bearer", "token": "{{token}}" }, "assert": { "body": { "contains": "Bearer" } } }
+            ] })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+
+    // Step 1 only.
+    let (status, first) = api
+        .call(
+            "POST",
+            "/runs",
+            Some(json!({ "collection": "app", "target": "journey", "to_step": 1, "capture_wire": true })),
+        )
+        .await;
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(first["passed"], true, "{first}");
+    assert_eq!(first["iterations"][0]["steps"].as_array().unwrap().len(), 1);
+    assert_eq!(first["resumable_steps"], json!([1, 2]));
+    assert_eq!(first["range"], json!([1, 1]));
+    assert!(!first.to_string().contains("srv-secret-token-1"));
+    let run = first["id"].as_i64().unwrap();
+    // The stored report has the wire capture.
+    let (_, stored) = api.call("GET", &format!("/runs/{run}"), None).await;
+    assert!(stored.to_string().contains("\"wire\""), "{stored}");
+    // Reports as downloads, like `snapreq run --report`.
+    for (format, needle) in [
+        ("junit", "<testsuites"),
+        ("html", "<!DOCTYPE html"),
+        ("json", "\"format\": 1"),
+    ] {
+        let resp = api
+            .client
+            .execute(&Request::get(format!(
+                "{}/runs/{run}/report/{format}",
+                api.base
+            )))
+            .await
+            .unwrap();
+        assert_eq!(resp.status, 200, "{format}");
+        let text = resp.text().unwrap().to_owned();
+        assert!(
+            text.to_lowercase().contains(&needle.to_lowercase()),
+            "{format}: {text:.200}"
+        );
+        assert!(!text.contains("srv-secret-token-1"), "{format}");
+        let disposition = resp
+            .headers
+            .iter()
+            .find(|h| h.name == "content-disposition")
+            .unwrap();
+        assert!(disposition.value.starts_with("attachment"));
+    }
+    let (status, _) = api
+        .call("GET", &format!("/runs/{run}/report/pdf"), None)
+        .await;
+    assert_eq!(status, 400);
+    let (status, _) = api.call("GET", "/runs/999/report/html", None).await;
+    assert_eq!(status, 404);
+
+    // Step 2 with step 1's captured token; then 2–3 again from the same state.
+    for (from, to, count) in [(2, Some(2), 1), (2, None, 2)] {
+        let mut body =
+            json!({ "collection": "app", "target": "journey", "from_step": from, "resume": run });
+        if let Some(to) = to {
+            body["to_step"] = json!(to);
+        }
+        let (status, doc) = api.call("POST", "/runs", Some(body)).await;
+        assert_eq!(status, 200, "{doc}");
+        assert_eq!(doc["passed"], true, "{doc}");
+        let steps = doc["iterations"][0]["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), count);
+        assert_eq!(steps[0]["number"], 2);
+        assert!(!doc.to_string().contains("srv-secret-token-1"));
+    }
+
+    // Starting later without a state, unknown runs, bad ranges and non-flows are refused.
+    api.call(
+        "PUT",
+        "/collections/app/requests/ping",
+        Some(json!({ "url": "{{base}}/ping" })),
+    )
+    .await;
+    for (body, want) in [
+        (
+            json!({ "collection": "app", "target": "journey", "from_step": 2 }),
+            400,
+        ),
+        (
+            json!({ "collection": "app", "target": "journey", "from_step": 2, "resume": 999 }),
+            409,
+        ),
+        (
+            json!({ "collection": "app", "target": "journey", "from_step": 4 }),
+            400,
+        ),
+        (
+            json!({ "collection": "app", "target": "journey", "to_step": 1, "iterations": 2 }),
+            400,
+        ),
+        (json!({ "collection": "app", "to_step": 1 }), 400),
+    ] {
+        let (status, doc) = api.call("POST", "/runs", Some(body.clone())).await;
+        assert_eq!(status, want, "{body} → {doc}");
+    }
+}

@@ -6,7 +6,18 @@ use std::time::Duration;
 use snapreq_collection::FlowItem;
 use snapreq_core::Request;
 
-use crate::session::{RequestRun, RunOutcome, SendSpec, Session, Target};
+use crate::session::{RequestRun, RunOutcome, SendSpec, Session, SessionState, Target};
+
+/// Which steps of a flow to run (1-based, inclusive) and the state to start from.
+#[derive(Debug, Clone, Default)]
+pub struct FlowSteps {
+    /// First step to run; `0` or `1` is the first step.
+    pub from: usize,
+    /// Last step to run; `None` runs to the end.
+    pub to: Option<usize>,
+    /// Captured values (and hidden secrets) the steps before `from` left behind.
+    pub start: Option<SessionState>,
+}
 
 /// One executed step.
 #[derive(Debug)]
@@ -29,16 +40,26 @@ pub struct FlowRun {
     pub steps: Vec<StepRun>,
     /// Steps in the flow.
     pub total: usize,
+    /// The steps that were to run (1-based, inclusive): the whole flow unless a range was asked for.
+    pub range: (usize, usize),
+    /// The session state before each executed step and after the last one, by the number of the
+    /// step it comes before (for resuming at that step).
+    pub states: Vec<(usize, SessionState)>,
 }
 
 impl FlowRun {
-    pub fn passed(&self) -> bool {
-        self.steps.len() == self.total && self.steps.iter().all(|s| s.run.passed())
+    /// Steps in the range.
+    pub fn planned(&self) -> usize {
+        (self.range.1 + 1).saturating_sub(self.range.0)
     }
 
-    /// Steps not run because an earlier one failed.
+    pub fn passed(&self) -> bool {
+        self.steps.len() == self.planned() && self.steps.iter().all(|s| s.run.passed())
+    }
+
+    /// Steps of the range not run because an earlier one failed.
     pub fn skipped(&self) -> usize {
-        self.total - self.steps.len()
+        self.planned().saturating_sub(self.steps.len())
     }
 }
 
@@ -58,11 +79,33 @@ pub async fn run_flow_with(
     adjust: impl Fn(&mut Request),
     delay: Option<Duration>,
 ) -> FlowRun {
+    run_flow_steps(session, flow, adjust, delay, &FlowSteps::default()).await
+}
+
+/// [`run_flow_with`] for the steps in `range`, starting from its saved state.
+pub async fn run_flow_steps(
+    session: &mut Session<'_>,
+    flow: &FlowItem,
+    adjust: impl Fn(&mut Request),
+    delay: Option<Duration>,
+    range: &FlowSteps,
+) -> FlowRun {
+    let total = flow.file.steps.len();
+    let from = range.from.max(1);
+    let to = range.to.unwrap_or(total).min(total);
+    if let Some(start) = &range.start {
+        session.restore(start);
+    }
+    let mut states = Vec::new();
     let path = session.collection().root.join(&flow.path);
     let mut steps = Vec::new();
     for (i, step) in flow.file.steps.iter().enumerate() {
+        if i + 1 < from || i + 1 > to {
+            continue;
+        }
+        states.push((i + 1, session.state()));
         if let Some(d) = delay
-            && i > 0
+            && i + 1 > from
         {
             tokio::time::sleep(d).await;
         }
@@ -122,11 +165,16 @@ pub async fn run_flow_with(
         if !passed {
             break;
         }
+        states.push((i + 2, session.state()));
     }
+    // The state after a step is also the state before the next one: keep it once.
+    states.dedup_by(|b, a| a.0 == b.0);
     FlowRun {
         key: flow.key.clone(),
         name: flow.name().to_owned(),
         steps,
-        total: flow.file.steps.len(),
+        total,
+        range: (from, to.max(from.saturating_sub(1))),
+        states,
     }
 }

@@ -65,7 +65,7 @@ async fn exchange(store: &Store, req: &Request, source: Option<(&str, &str)>) ->
 async fn history_is_stored_without_secrets() {
     let addr = start().await;
     let store = Store::in_memory().await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 1);
+    assert_eq!(store.schema_version().await.unwrap(), 2);
 
     let mut req = Request::new(
         http::Method::POST,
@@ -236,6 +236,8 @@ async fn runs_and_retention() {
         name: "Checkout".into(),
         passed,
         report: serde_json::json!({ "format": 1, "passed": passed, "pad": "x".repeat(1000) }),
+        junit: None,
+        html: None,
     };
     let first = store.add_run(run(true)).await.unwrap();
     let second = store.add_run(run(false)).await.unwrap();
@@ -301,12 +303,14 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
                 name: "x".into(),
                 passed: true,
                 report: serde_json::json!({}),
+                junit: None,
+                html: None,
             })
             .await
             .unwrap();
     }
     let again = Store::open(&path).await.unwrap();
-    assert_eq!(again.schema_version().await.unwrap(), 1);
+    assert_eq!(again.schema_version().await.unwrap(), 2);
     assert_eq!(
         again.runs(10).await.unwrap().len(),
         1,
@@ -394,4 +398,60 @@ async fn history_filters_by_class_failure_and_collection_and_deletes() {
     assert_eq!(store.delete_history(Some(2)).await.unwrap(), 0);
     assert_eq!(store.delete_history(None).await.unwrap(), 3);
     assert!(ids(HistoryQuery::default()).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
+    let dir = std::env::temp_dir().join(format!("snapreq-store-upgrade-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("snapreq.db");
+    {
+        // The schema as the first release created it, with one run.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE history (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, method TEXT NOT NULL,
+               url TEXT NOT NULL, status INTEGER, duration_ms REAL, error TEXT, collection TEXT, request_key TEXT,
+               request_json TEXT NOT NULL, response_json TEXT, size_bytes INTEGER NOT NULL);
+             CREATE INDEX history_created_at ON history (created_at);
+             CREATE TABLE runs (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, kind TEXT NOT NULL,
+               target_key TEXT NOT NULL, name TEXT NOT NULL, passed INTEGER NOT NULL, report_json TEXT NOT NULL,
+               size_bytes INTEGER NOT NULL);
+             CREATE INDEX runs_created_at ON runs (created_at);
+             INSERT INTO runs VALUES (1, 0, 'flow', 'f', 'F', 1, '{\"format\":1}', 12);
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).await.unwrap();
+    assert_eq!(store.schema_version().await.unwrap(), 2);
+    assert_eq!(
+        store.run_report(1).await.unwrap(),
+        Some(json!({ "format": 1 }))
+    );
+    use snapreq_server::store::ReportFormat;
+    assert_eq!(
+        store.run_rendering(1, ReportFormat::Html).await.unwrap(),
+        None
+    );
+    let id = store
+        .add_run(RunEntry {
+            kind: "flow".into(),
+            target_key: "f".into(),
+            name: "F".into(),
+            passed: true,
+            report: json!({}),
+            junit: Some("<testsuites/>".into()),
+            html: Some("<!DOCTYPE html>".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .run_rendering(id, ReportFormat::Junit)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("<testsuites/>")
+    );
 }

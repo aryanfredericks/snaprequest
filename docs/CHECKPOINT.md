@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.7, runner and flow editor (P7.1–P7.6 done)
+- **Current checkpoint:** P7.8, themes, shortcuts, accessibility (P7.1–P7.7 done)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,8 +25,21 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.7 collection runner UI with live progress and reports; flow editor (reorder steps, step-by-step
-   runs with captured variables, re-run from step N, per-step waterfall and wire log). Then P7.8.
+1. P7.8 dark/light themes, keyboard shortcuts, accessibility pass. Then Phase 7 acceptance review.
+
+## Web UI notes (P7.7)
+- snapreq-test: `SessionState` (captured values + hidden secrets; `Session::state/restore`),
+  `FlowSteps { from, to, start }` on `Plan::flow_steps`, `run_flow_steps`; `FlowRun.range/states/planned()`.
+- Server: `RunBody.capture_wire/from_step/to_step/resume`; `flow_states::FlowStates` (in memory, last 50
+  runs, 1 h, never stored or returned); run responses add `resumable_steps` and `range`. Migration 2 adds
+  `runs.junit`/`runs.html` (rendered at run time); `GET /runs/{id}/report/{json,junit,html}` (attachment,
+  CSP sandbox).
+- UI: `RunnerTab`/`RunnerView` (env, iterations, CSV/JSON data, parallel, delay, bail, vars; live progress
+  from WebSocket progress events; report fetched from `GET /runs/{id}`), `ReportView` + `StepDetail`
+  (response, checks, until, captures, debug), `RunsPanel` (sidebar Runs), `RunTab`, `FlowTab`/`FlowView`
+  (step list with drag/↑↓, `StepEditor` reusing the request editors, Run all / Step / ▶ run from step N
+  using `resumeRun[step]` → run id, "variables after step N" from captures), `model/flow.ts`,
+  `model/runs.ts` (`parseData`, `stepResponse`, `capturedAfter`).
 
 ## Web UI notes (P7.6)
 - Server: history filters `class` (status class), `failed`, `collection`; `DELETE /history/{id}` and
@@ -515,6 +528,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.4 — 2026-11-03 — Debug view: live timing waterfall per redirect hop, event list with headers, connection and redirect chain, TLS and certificate chain, raw wire log (text/hex).
 - P7.5 — 2026-11-03 — Collections sidebar: tree with drag and drop and menus (create, rename, duplicate, move, delete), collection/folder settings, environment editor with secret values, environment switcher.
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
+- P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
