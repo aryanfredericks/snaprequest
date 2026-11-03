@@ -125,10 +125,10 @@
             }}
             ondragend={() => ((dragFrom = null), (dropAt = null))}
           >
-            <button type="button" class="pick" onclick={() => select(s)} aria-label="Step {i + 1}: {stepTitle(s)}{st.mark === '✓' ? ', passed' : st.mark === '✗' ? ', failed' : ''}">
-              <span class="num">{i + 1}</span>
+            <button type="button" class="pick" onclick={() => select(s)}>
+              <span class="num">{i + 1}.</span>
               <span class="st {st.cls}" aria-hidden="true">{st.mark}</span>
-              <span class="t">{stepTitle(s)}</span>
+              <span class="t">{stepTitle(s)}{#if st.mark === "✓"}<span class="sr-only"> (passed)</span>{:else if st.mark === "✗"}<span class="sr-only"> (failed)</span>{/if}</span>
               {#if r?.response}<span class="code {statusClass(r.response.status)}">{r.response.status}</span>
                 <span class="muted ms">{formatMs(r.response.duration_ms)}</span>{/if}
             </button>

@@ -43,7 +43,9 @@
     </label>
     <label>Parallel iterations <input type="number" min="1" bind:value={tab.parallel} /></label>
     <label>Delay between requests (ms) <input type="number" min="0" bind:value={tab.delayMs} /></label>
+    <label>Timeout per request (s) <input type="number" min="0" step="any" bind:value={tab.timeout} placeholder="from settings" /></label>
     <label class="check"><input type="checkbox" bind:checked={tab.bail} /> Stop at the first failure</label>
+    <label class="check"><input type="checkbox" bind:checked={tab.insecure} /> Skip TLS verification</label>
   </form>
   <details class="more">
     <summary>Data ({rows.rows.length ? `${rows.rows.length} rows: one iteration each` : "none"}) and variables</summary>

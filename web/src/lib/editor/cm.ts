@@ -186,6 +186,9 @@ export interface EditorOptions {
   onEnter?: () => void;
 }
 
+/** CodeMirror's keys without Mod-Enter, which the app uses for "send" (it would insert a line). */
+const editorKeymap = defaultKeymap.filter((b) => b.key !== "Mod-Enter");
+
 export const languageSlot = new Compartment();
 export const readonlySlot = new Compartment();
 
@@ -214,7 +217,7 @@ export function createState(o: EditorOptions): EditorState {
       keymap.of([
         { key: "Enter", run: () => (o.onEnter?.(), true) },
         ...historyKeymap,
-        ...defaultKeymap.filter((b) => b.key !== "Enter"),
+        ...editorKeymap.filter((b) => b.key !== "Enter"),
       ]),
       EditorView.theme({ ".cm-content": { padding: "0.3rem 0" }, ".cm-line": { padding: "0 0.4rem" } }),
     );
@@ -227,7 +230,7 @@ export function createState(o: EditorOptions): EditorState {
       bracketMatching(),
       indentOnInput(),
       EditorView.lineWrapping,
-      keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
+      keymap.of([...editorKeymap, ...historyKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
     );
   }
   if (o.onChange) {

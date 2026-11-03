@@ -130,9 +130,9 @@
     transform: translateX(-50%);
     white-space: nowrap;
   }
+  /* The timeline obviously starts at 0; its label would crowd the Duration column. */
   .tick:first-child {
-    transform: none;
-    margin-left: 0.6rem;
+    display: none;
   }
   .tick:last-child {
     transform: translateX(-100%);

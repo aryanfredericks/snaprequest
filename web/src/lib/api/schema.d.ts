@@ -383,6 +383,8 @@ export interface components {
              *     earlier steps come from that run.
              */
             from_step?: number | null;
+            /** @description Skip TLS certificate verification for every request (`snapreq run -k`). */
+            insecure?: boolean;
             iterations?: number | null;
             parallel?: number | null;
             /**
@@ -393,6 +395,11 @@ export interface components {
             resume?: number | null;
             /** @description A flow or folder key; absent runs every request of the collection. */
             target?: string | null;
+            /**
+             * Format: int64
+             * @description Time limit per request in milliseconds, `0` for none (`snapreq run -t`).
+             */
+            timeout_ms?: number | null;
             /** @description Flows only: the last step to run. */
             to_step?: number | null;
             vars?: {

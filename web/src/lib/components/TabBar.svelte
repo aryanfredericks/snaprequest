@@ -27,13 +27,13 @@
   }
 </script>
 
-<div class="bar" role="tablist" aria-label="Open requests">
+<nav class="bar" aria-label="Open tabs">
+  <ul>
   {#each app.tabs as tab (tab.id)}
-    <div class="tab" class:active={tab.id === app.activeId}>
+    <li class="tab" class:active={tab.id === app.activeId}>
       <button
         type="button"
-        role="tab"
-        aria-selected={tab.id === app.activeId}
+        aria-current={tab.id === app.activeId ? "page" : undefined}
         class="open"
         onclick={() => app.activate(tab)}
         onauxclick={(e) => e.button === 1 && close(e, tab)}
@@ -47,13 +47,14 @@
         {:else if tab.kind === "scope"}<span class="kind" aria-hidden="true">⚙</span>
         {:else}<span class="kind" aria-hidden="true">▶</span>{/if}
         <span class="label">{tab.title}</span>
-        {#if tab.dirty}<span class="dirty" aria-label="unsaved changes">●</span>{/if}
+        {#if tab.dirty}<span class="dirty" aria-label="(modified)" title="Modified, not saved">●</span>{/if}
       </button>
       <button type="button" class="icon x" aria-label="Close {tab.title}" onclick={(e) => close(e, tab)}>✕</button>
-    </div>
+    </li>
   {/each}
+  </ul>
   <button type="button" class="icon new" aria-label="New request" title="New request (Alt+N)" onclick={() => app.newRequest()}>＋</button>
-</div>
+</nav>
 
 <style>
   .bar {
@@ -63,6 +64,12 @@
     background: var(--bg-soft);
     overflow-x: auto;
     min-height: 2.2rem;
+  }
+  ul {
+    display: flex;
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
   .tab {
     display: flex;

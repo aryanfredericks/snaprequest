@@ -22,9 +22,9 @@ test("a collection runs with live progress, a report and downloads", async ({ pa
   await expect(report.getByRole("table", { name: "Steps" })).toContainText("auth/login");
 
   // A step's response, checks and debug view.
-  const show = report.getByRole("button", { name: /Show step \d+ orders\/list/ });
-  const number = (await show.getAttribute("aria-label"))!.match(/step (\d+)/)![1];
-  await show.click();
+  const row = report.getByRole("row").filter({ has: page.getByRole("button", { name: /^orders\/list \(passed\)$/ }) });
+  const number = (await row.getByRole("cell").first().innerText()).trim();
+  await row.getByRole("button").click();
   const step = report.getByRole("region", { name: `Step ${number} response` });
   await expect(step.getByRole("status")).toContainText("200");
   await step.getByRole("tab", { name: "Debug", exact: true }).click();
@@ -74,19 +74,19 @@ test("a flow runs step by step, shows captured values and resumes from a step", 
   const steps = flow.getByRole("list", { name: "Steps" });
 
   await flow.getByRole("button", { name: "Step", exact: true }).click();
-  await expect(steps.getByRole("button", { name: "Step 1: auth/login, passed" })).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^1\. auth\/login \(passed\)/ })).toBeVisible();
   await expect(flow.getByRole("table", { name: "Captured values after step 1" })).toContainText("token");
   await expect(flow.getByRole("table", { name: "Captured values after step 1" })).toContainText("<redacted>");
   await flow.getByRole("button", { name: "Step (2)" }).click();
-  await expect(steps.getByRole("button", { name: "Step 2: Create order, passed" })).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^2\. Create order \(passed\)/ })).toBeVisible();
   await expect(flow.getByRole("table", { name: "Captured values after step 2" })).toContainText("order_id");
 
   // The rest, then step 3 again from the state step 2 left.
   await flow.getByRole("button", { name: "Run from step 3" }).click();
-  await expect(steps.getByRole("button", { name: "Step 5: Gone, passed" })).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^5\. Gone \(passed\)/ })).toBeVisible();
   await flow.getByRole("button", { name: "Run all" }).click();
-  await expect(steps.getByRole("button", { name: /Step 5: Gone, passed/ })).toBeVisible();
-  await steps.getByRole("button", { name: /Step 3: Wait until ready/ }).click();
+  await expect(steps.getByRole("button", { name: /^5\. Gone \(passed\)/ })).toBeVisible();
+  await steps.getByRole("button", { name: /^3\. Wait until ready/ }).click();
   const detail = flow.getByRole("region", { name: "Step 3 response" });
   await expect(detail.getByRole("status")).toContainText("200");
   await expect(flow.getByRole("table", { name: "Retry until" })).toContainText("$.state");
@@ -101,10 +101,10 @@ test("flow steps are edited, reordered and saved", async ({ page }) => {
   await tree(page).getByRole("button", { name: "Checkout", exact: true }).click();
   const flow = page.getByRole("region", { name: "Flow orders/checkout" });
   const steps = flow.getByRole("list", { name: "Steps" });
-  await steps.getByRole("button", { name: /Step 4: Cancel/ }).click();
+  await steps.getByRole("button", { name: /^4\. Cancel/ }).click();
   await flow.getByRole("textbox", { name: "Step 4 name" }).fill("Cancel the order");
   await flow.getByRole("button", { name: "Move step 4 up" }).click();
-  await expect(steps.getByRole("button", { name: /^Step 3: Cancel the order/ })).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^3\. Cancel the order/ })).toBeVisible();
   await flow.getByRole("button", { name: "+ Inline request" }).click();
   await expect(steps.getByRole("listitem")).toHaveCount(6);
   await flow.getByRole("button", { name: "Remove step 6" }).click();

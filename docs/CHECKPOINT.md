@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 7 Web UI (Phases 0–6 complete)
-- **Current checkpoint:** P7.8, themes, shortcuts, accessibility (P7.1–P7.7 done)
+- **Phase:** 8 Multi-user and hardening, next (Phases 0–7 complete)
+- **Current checkpoint:** P8.1, local accounts, sessions and API tokens
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,7 +25,24 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P7.8 dark/light themes, keyboard shortcuts, accessibility pass. Then Phase 7 acceptance review.
+1. P8.1 local accounts (argon2), sessions, API tokens; single-user mode without login for localhost.
+   Note for Phase 8: flow states (ADR-022), history and runs must be scoped to their owner; CSRF
+   protection is needed before cookies authenticate the WebSocket and REST API (P8.5).
+2. Check why GitHub's macOS test jobs are cancelled without running a step (since 4d1e74d; see P7.6 notes).
+
+## Web UI notes (P7.8)
+- Themes: `state/theme.svelte.ts` (system/light/dark, localStorage, applied in `main.ts` before mount;
+  no inline script because of the CSP). Contrast fixed where axe found it (light `--warn`, `--ok`,
+  `--m-get`, `--m-post`; dark `--muted`; `--primary-bg` for primary buttons).
+- Shortcuts: `state/shortcuts.ts` (`match` by `code` for Alt combos, one list for handler and the `?`
+  dialog); CodeMirror's Mod-Enter binding removed (it inserted a line as the request was sent).
+- Accessibility: skip button, `main` landmark, open tabs as a navigation list with `aria-current`,
+  accessible names that contain the visible text, `web/e2e/a11y.spec.ts` runs axe (WCAG 2.1 A/AA) over the
+  main screens in both themes. `@axe-core/playwright` is MPL-2.0 (test-only, not shipped).
+- Phase 7 acceptance review against docs/CLI.md: added proxy, CA/client certificates, TLS versions and
+  host pinning (`--resolve`, scratch requests) to the settings editor, and `insecure`/`timeout_ms` to
+  runs. Not in the UI: `--secret` (use secret variables), the OAuth authorization-code grant (needs a
+  browser on the server machine). docs/WEB.md is the user guide; README updated.
 
 ## Web UI notes (P7.7)
 - snapreq-test: `SessionState` (captured values + hidden secrets; `Session::state/restore`),
@@ -529,6 +546,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.5 — 2026-11-03 — Collections sidebar: tree with drag and drop and menus (create, rename, duplicate, move, delete), collection/folder settings, environment editor with secret values, environment switcher.
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
+- P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -549,3 +567,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done. Maintainer chose rusqlite over sqlx; P6.2 done.
 - **2026-11-03 (17):** Phase 6 complete (P6.3–P6.7). Docker CI job still to add. Session ended at the usage limit.
 - **2026-11-03 (18):** Added the Docker smoke-test CI job (da78f47). P7.1 done: web project, typed client, embedded UI, verified with a release binary and the podman-built image.
+- **2026-11-03 (19):** Phase 7 complete (P7.2–P7.8), each checkpoint pushed after scripts/check.sh passed. Added Playwright end-to-end tests (mock shop + real server) and axe audits; ADR-021, ADR-022. GitHub macOS test jobs are cancelled before starting (runner/billing side, not code); Ubuntu, Windows and all other jobs pass.

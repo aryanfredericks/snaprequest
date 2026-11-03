@@ -471,6 +471,11 @@ pub struct RunBody {
     /// Record the raw bytes of every exchange (`wire` trace events in the stored report).
     #[serde(default)]
     pub capture_wire: bool,
+    /// Skip TLS certificate verification for every request (`snapreq run -k`).
+    #[serde(default)]
+    pub insecure: bool,
+    /// Time limit per request in milliseconds, `0` for none (`snapreq run -t`).
+    pub timeout_ms: Option<u64>,
     /// Flows only: the first step to run (1-based). With `resume`, the captured values of the
     /// earlier steps come from that run.
     pub from_step: Option<usize>,
@@ -625,8 +630,17 @@ pub(crate) async fn run_body(
     } else {
         plan.rows.len()
     };
-    let wire = body.capture_wire;
-    let iterations = execute(&plan, &unit, |r| r.settings.capture_wire |= wire).await;
+    let (wire, insecure, timeout) = (body.capture_wire, body.insecure, body.timeout_ms);
+    let iterations = execute(&plan, &unit, |r| {
+        r.settings.capture_wire |= wire;
+        if insecure {
+            r.settings.tls.verify = false;
+        }
+        if let Some(ms) = timeout {
+            r.settings.timeout = (ms > 0).then(|| std::time::Duration::from_millis(ms));
+        }
+    })
+    .await;
     let report = Report::new(&collection, &unit, &iterations, planned, secret_vars);
     let mut entry = RunEntry::from_report(&report);
     entry.target_key = format!("{}/{}", body.collection, report.key)

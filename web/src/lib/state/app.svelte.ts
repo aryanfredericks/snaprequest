@@ -247,19 +247,24 @@ class AppState {
       tab.error = "Enter a URL first.";
       return;
     }
+    const body: Record<string, unknown> = { capture_wire: true };
+    try {
+      if (tab.collection && tab.key) {
+        body.collection = tab.collection;
+        body.key = tab.key;
+        body.file = draftToFile(tab.draft);
+        const env = this.envs[tab.collection];
+        if (env) body.env = env;
+      } else {
+        body.request = draftToCore(tab.draft);
+      }
+    } catch (e) {
+      tab.error = message(e);
+      return;
+    }
     tab.running = true;
     tab.error = null;
     tab.live = [];
-    const body: Record<string, unknown> = { capture_wire: true };
-    if (tab.collection && tab.key) {
-      body.collection = tab.collection;
-      body.key = tab.key;
-      body.file = draftToFile(tab.draft);
-      const env = this.envs[tab.collection];
-      if (env) body.env = env;
-    } else {
-      body.request = draftToCore(tab.draft);
-    }
     try {
       tab.result = await jobs.execute(body, { onTrace: (e) => tab.live.push(e) });
       this.historyVersion++;
@@ -422,6 +427,8 @@ class AppState {
     if (tab.target.key) body.target = tab.target.key;
     if (tab.env) body.env = tab.env;
     if (tab.delayMs > 0) body.delay_ms = tab.delayMs;
+    if (tab.insecure) body.insecure = true;
+    if (tab.timeout !== null && tab.timeout >= 0) body.timeout_ms = Math.round(tab.timeout * 1000);
     const vars = Object.fromEntries(tab.vars.filter((v) => v.enabled && v.name.trim()).map((v) => [v.name.trim(), v.value]));
     if (Object.keys(vars).length) body.vars = vars;
     try {

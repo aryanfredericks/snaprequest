@@ -50,8 +50,8 @@
             <tr class:sel={selected?.it === it.number && selected.step === s.number} class:fail={!s.passed}>
               <td class="n">{s.number}</td>
               <td>
-                <button type="button" class="link" onclick={() => (selected = { it: it.number, step: s.number })} aria-label="Show step {s.number} {s.title}">
-                  {s.passed ? "✓" : "✗"} {s.title}
+                <button type="button" class="link" onclick={() => (selected = { it: it.number, step: s.number })} aria-describedby="{idPrefix}-hint">
+                  <span aria-hidden="true">{s.passed ? "✓" : "✗"}</span> {s.title}<span class="sr-only"> ({s.passed ? "passed" : "failed"})</span>
                 </button>
                 {#if s.attempts > 1}<span class="muted"> ×{s.attempts}</span>{/if}
               </td>
@@ -69,9 +69,10 @@
     </div>
   {/each}
   {#if chosen && selected}
+    <p class="sr-only" id="{idPrefix}-hint">Shows the step's response, checks, waterfall and wire log below.</p>
     <StepDetail step={chosen} idPrefix="{idPrefix}-{selected.it}" />
   {:else}
-    <p class="muted small">Select a step to see its response, checks, waterfall and wire log.</p>
+    <p class="muted small" id="{idPrefix}-hint">Select a step to see its response, checks, waterfall and wire log.</p>
   {/if}
 </section>
 

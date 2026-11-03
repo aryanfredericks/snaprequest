@@ -882,6 +882,17 @@ async fn flows_run_by_steps_and_resume() {
     // The stored report has the wire capture.
     let (_, stored) = api.call("GET", &format!("/runs/{run}"), None).await;
     assert!(stored.to_string().contains("\"wire\""), "{stored}");
+    // Run options apply to every request (`run -k`, `-t`).
+    let (status, doc) = api
+        .call(
+            "POST",
+            "/runs",
+            Some(json!({ "collection": "app", "target": "journey", "to_step": 1, "insecure": true, "timeout_ms": 5000 })),
+        )
+        .await;
+    assert_eq!(status, 200, "{doc}");
+    assert_eq!(doc["passed"], true, "{doc}");
+
     // Reports as downloads, like `snapreq run --report`.
     for (format, needle) in [
         ("junit", "<testsuites"),

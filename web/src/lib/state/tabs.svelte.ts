@@ -200,6 +200,9 @@ export class RunnerTab {
   bail = $state(false);
   delayMs = $state(0);
   parallel = $state(1);
+  insecure = $state(false);
+  /** Seconds per request; empty: the requests' own settings. */
+  timeout = $state<number | null>(null);
   vars = $state<Row[]>([row()]);
   running = $state(false);
   progress = $state<ProgressRow[]>([]);

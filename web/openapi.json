@@ -2174,6 +2174,10 @@
             "description": "Flows only: the first step to run (1-based). With `resume`, the captured values of the\nearlier steps come from that run.",
             "minimum": 0
           },
+          "insecure": {
+            "type": "boolean",
+            "description": "Skip TLS certificate verification for every request (`snapreq run -k`)."
+          },
           "iterations": {
             "type": [
               "integer",
@@ -2202,6 +2206,15 @@
               "null"
             ],
             "description": "A flow or folder key; absent runs every request of the collection."
+          },
+          "timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Time limit per request in milliseconds, `0` for none (`snapreq run -t`).",
+            "minimum": 0
           },
           "to_step": {
             "type": [

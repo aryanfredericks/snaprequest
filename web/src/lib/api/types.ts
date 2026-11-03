@@ -63,10 +63,18 @@ export interface CoreSettings {
   connect_timeout_ms?: number | null;
   follow_redirects?: boolean;
   max_redirects?: number;
-  tls?: { verify?: boolean };
+  tls?: {
+    verify?: boolean;
+    ca_cert?: string;
+    client_cert?: { cert: string; key: string };
+    min_version?: "1.2" | "1.3";
+    max_version?: "1.2" | "1.3";
+  };
   http_version?: HttpVersionPref;
   decompress?: boolean;
   cookies?: boolean;
+  proxy?: string;
+  resolve?: { host: string; port?: number; addrs: string[] }[];
   capture_wire?: boolean;
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RequestFile } from "../api/types";
-import { draftFromFile, draftToCore, draftToFile, emptyDraft, row, rowsFromTable, rowsToTable, sameFile } from "./draft";
+import { draftFromFile, draftToCore, draftToFile, emptyDraft, parseResolve, row, rowsFromTable, rowsToTable, sameFile } from "./draft";
 
 const file: RequestFile = {
   name: "Create user",
@@ -97,5 +97,25 @@ describe("draft → core request", () => {
     d.settings.timeout_ms = 0;
     d.settings.verify_tls = false;
     expect(draftToCore(d)).toEqual({ method: "GET", url: "http://x", settings: { timeout_ms: null, tls: { verify: false } } });
+  });
+});
+
+describe("connection and TLS settings", () => {
+  it("map to the core request and parse --resolve lines", () => {
+    const d = emptyDraft();
+    d.url = "https://api.test";
+    d.settings = { proxy: "socks5h://127.0.0.1:1080", ca_cert: "ca.pem", client_cert: "c.pem", client_key: "k.pem", tls_min_version: "1.3" };
+    d.resolve = "api.test:443:127.0.0.1\nb.test:*:[::1],10.0.0.2";
+    expect(draftToCore(d).settings).toEqual({
+      proxy: "socks5h://127.0.0.1:1080",
+      tls: { ca_cert: "ca.pem", client_cert: { cert: "c.pem", key: "k.pem" }, min_version: "1.3" },
+      resolve: [
+        { host: "api.test", port: 443, addrs: ["127.0.0.1"] },
+        { host: "b.test", addrs: ["::1", "10.0.0.2"] },
+      ],
+    });
+    // Request files have no `resolve`.
+    expect(draftToFile(d).settings).toEqual({ proxy: "socks5h://127.0.0.1:1080", ca_cert: "ca.pem", client_cert: "c.pem", client_key: "k.pem", tls_min_version: "1.3" });
+    expect(() => parseResolve("nope")).toThrow(/HOST:PORT:ADDR/);
   });
 });

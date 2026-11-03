@@ -12,10 +12,11 @@
   --accent: #0969da;
   --accent-bg: #ddf4ff;
   --accent-fg: #ffffff;
+  --primary-bg: #0969da;
   --focus: #0969da;
-  --ok: #1a7f37;
+  --ok: #116329;
   --ok-bg: #dafbe1;
-  --warn: #9a6700;
+  --warn: #7d5300;
   --danger: #cf222e;
   --danger-bg: #ffebe9;
   --secret: #8250df;
@@ -28,8 +29,8 @@
   --syn-number: #0550ae;
   --syn-property: #116329;
   --syn-tag: #8250df;
-  --m-get: #1a7f37;
-  --m-post: #9a6700;
+  --m-get: #116329;
+  --m-post: #7d5300;
   --m-put: #0550ae;
   --m-patch: #8250df;
   --m-delete: #cf222e;
@@ -56,11 +57,12 @@
   --bg-hover: #1f2630;
   --fg: #e6edf3;
   --fg-soft: #c9d1d9;
-  --muted: #9198a1;
+  --muted: #9ea7b3;
   --border: #3d444d;
   --accent: #4493f8;
   --accent-bg: #0c2d6b;
   --accent-fg: #ffffff;
+  --primary-bg: #1f6feb;
   --focus: #4493f8;
   --ok: #3fb950;
   --ok-bg: #12261e;
@@ -136,14 +138,14 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
   color: var(--accent-fg);
   font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--primary-bg);
   filter: brightness(1.1);
 }
 

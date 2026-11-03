@@ -147,6 +147,8 @@ export interface Draft {
   body: BodyDraft;
   auth: AuthDraft;
   settings: SettingsSpec;
+  /** Requests outside a collection: `host:port:addr[,addr]` lines (curl's `--resolve`). */
+  resolve: string;
   /** File keys the builder does not edit. */
   rest: Pick<RequestFile, "vars" | "capture" | "assert">;
 }
@@ -168,6 +170,7 @@ export function emptyDraft(inCollection = false): Draft {
     body: emptyBody(),
     auth: { type: inCollection ? "inherit" : "none", fields: {}, params: [] },
     settings: {},
+    resolve: "",
     rest: {},
   };
 }
@@ -332,6 +335,7 @@ export function draftFromFile(file: RequestFile): Draft {
     body: bodyFromSpec(file.body),
     auth: authFromSpec(file.auth),
     settings: { ...(file.settings ?? {}) },
+    resolve: "",
     rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert }),
   };
 }
@@ -398,7 +402,29 @@ function authToCore(a: AuthDraft): CoreAuth | undefined {
   return clean({ type: a.type, ...values, params: params.length ? params : undefined }) as CoreAuth;
 }
 
-function settingsToCore(s: SettingsSpec): CoreSettings | undefined {
+/** Parses `host:port:addr[,addr]` lines (port `*` = any); throws on a malformed line. */
+export function parseResolve(text: string): NonNullable<CoreSettings["resolve"]> {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const m = /^([^:]+):(\*|\d+):(.+)$/.exec(l);
+      if (!m) throw new Error(`resolve: expected HOST:PORT:ADDR[,ADDR], got \`${l}\``);
+      const addrs = m[3]!.split(",").map((a) => a.trim().replace(/^\[(.*)\]$/, "$1"));
+      return clean({ host: m[1]!, port: m[2] === "*" ? undefined : Number(m[2]), addrs });
+    });
+}
+
+function settingsToCore(s: SettingsSpec, resolve: string): CoreSettings | undefined {
+  const tls = clean({
+    verify: s.verify_tls,
+    ca_cert: s.ca_cert,
+    client_cert: s.client_cert && s.client_key ? { cert: s.client_cert, key: s.client_key } : undefined,
+    min_version: s.tls_min_version,
+    max_version: s.tls_max_version,
+  });
+  const pins = parseResolve(resolve);
   const out: CoreSettings = clean({
     timeout_ms: s.timeout_ms === undefined ? undefined : s.timeout_ms || null,
     connect_timeout_ms: s.connect_timeout_ms === undefined ? undefined : s.connect_timeout_ms || null,
@@ -407,7 +433,9 @@ function settingsToCore(s: SettingsSpec): CoreSettings | undefined {
     decompress: s.decompress,
     cookies: s.cookies,
     http_version: s.http_version,
-    tls: s.verify_tls === undefined ? undefined : { verify: s.verify_tls },
+    proxy: s.proxy,
+    tls: Object.keys(tls).length ? tls : undefined,
+    resolve: pins.length ? pins : undefined,
   });
   return Object.keys(out).length ? out : undefined;
 }
@@ -423,7 +451,7 @@ export function draftToCore(d: Draft): CoreRequest {
     headers: headers.length ? headers : undefined,
     body: bodyToCore(d.body),
     auth: authToCore(d.auth),
-    settings: settingsToCore(d.settings),
+    settings: settingsToCore(d.settings, d.resolve),
   });
 }
 

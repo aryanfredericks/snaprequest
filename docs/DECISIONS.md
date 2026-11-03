@@ -213,3 +213,17 @@ stage). Core types are `Object` in the OpenAPI document, so their TypeScript sha
 Publishing `snapreq-server` to crates.io will need the built files inside the crate (P11.2). npm audit reports
 advisories only in build-time tooling (vite-plugin-svelte's `deepmerge`, openapi-typescript's `minimatch`), none
 of which ships in the bundle.
+
+## ADR-022: Step-by-step flow runs resume from states kept in server memory
+**Status:** Accepted (2026-11-03)
+**Context:** The flow editor (PLAN P7.7) runs a flow step by step and re-runs from step N. Step N needs the
+values the earlier steps captured, including secret ones (a login token). Run reports hide secrets, so the
+browser cannot hand them back, and storing them would put credentials on disk.
+**Decision:** `snapreq-test` records the session state (captured values and the secrets to hide) before
+each flow step (`FlowRun::states`, `Session::state/restore`, `FlowSteps`). The server keeps the states of
+the last 50 single-iteration flow runs in memory for an hour (`flow_states.rs`), keyed by run id, and a run
+with `from_step` + `resume: <run id>` starts from the stored state. States are never stored or returned; a
+response only lists the steps that can be resumed.
+**Consequences:** Resuming works across edits of later steps and keeps secrets hidden as in a full run.
+States are lost when the server restarts or after an hour (a 409 asks to run from the start). With
+multiple users (Phase 8) states must be scoped to their owner.

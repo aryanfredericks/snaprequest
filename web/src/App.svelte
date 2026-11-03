@@ -15,6 +15,8 @@
   import TabBar from "./lib/components/TabBar.svelte";
   import { app } from "./lib/state/app.svelte";
   import { parseRoute } from "./lib/state/route";
+  import { label, match, SHORTCUTS } from "./lib/state/shortcuts";
+  import { theme, type ThemeChoice } from "./lib/state/theme.svelte";
 
   let version = $state<ServerVersion | null>(null);
   let offline = $state<string | null>(null);
@@ -22,6 +24,8 @@
   type Side = "collections" | "history" | "runs";
   let side = $state<Side>((localStorage.getItem("snapreq.side") as Side | null) ?? "collections");
   $effect(() => localStorage.setItem("snapreq.side", side));
+  let help: HTMLDialogElement;
+  let mainEl: HTMLElement;
 
   $effect(() => {
     serverVersion(api)
@@ -51,27 +55,58 @@
   const doc = $derived(collection ? app.docs[collection] : null);
 
   function keys(e: KeyboardEvent) {
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key === "Enter" && tab) {
-      e.preventDefault();
-      void app.send(tab);
-    } else if (mod && e.key.toLowerCase() === "s" && tab) {
-      e.preventDefault();
-      if (tab.kind === "request") view?.save();
-      else void app.save(tab);
-    } else if (e.altKey && e.key.toLowerCase() === "n") {
-      e.preventDefault();
-      app.newRequest();
-    } else if (e.altKey && e.key.toLowerCase() === "w" && tab) {
-      e.preventDefault();
-      app.close(tab);
+    const el = e.target as HTMLElement | null;
+    const typing = !!el?.closest("input, textarea, select, [contenteditable=true], .cm-editor");
+    const action = match({ ...pick(e), typing });
+    if (!action) return;
+    // Ctrl+S and Alt shortcuts are taken by the app wherever the focus is; ? only outside fields.
+    e.preventDefault();
+    switch (action) {
+      case "send":
+        if (tab?.kind === "runner") void app.startRun(tab);
+        else if (tab?.kind === "flow") void app.runFlow(tab, "all");
+        else if (tab) void app.send(tab);
+        break;
+      case "save":
+        if (tab?.kind === "request") view?.save();
+        else if (tab) void app.save(tab);
+        break;
+      case "new":
+        app.newRequest();
+        break;
+      case "close":
+        if (tab) app.close(tab);
+        break;
+      case "prev-tab":
+      case "next-tab": {
+        const i = app.tabs.findIndex((t) => t.id === app.activeId);
+        const n = app.tabs.length;
+        if (n) app.activate(app.tabs[(i + (action === "next-tab" ? 1 : -1) + n) % n]!);
+        break;
+      }
+      case "focus-url":
+        document.querySelector<HTMLElement>("[aria-label='URL'][contenteditable]")?.focus();
+        break;
+      case "side-collections":
+      case "side-history":
+      case "side-runs":
+        side = action.slice(5) as Side;
+        break;
+      case "help":
+        help.showModal();
+        break;
     }
+  }
+
+  function pick(e: KeyboardEvent) {
+    return { key: e.key, code: e.code, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: e.shiftKey };
   }
 </script>
 
 <svelte:window onkeydown={keys} />
 
 <div class="app">
+  <button type="button" class="skip" onclick={() => mainEl.focus()}>Skip to the main area</button>
   <header>
     <h1><span class="logo" aria-hidden="true">⚡</span> SnapRequest</h1>
     {#if collection && doc}
@@ -90,6 +125,15 @@
         <span class="s-err">server unreachable: {offline}</span>
       {/if}
     </span>
+    <label class="theme">
+      <span class="sr-only">Theme</span>
+      <select aria-label="Theme" value={theme.choice} onchange={(e) => theme.set(e.currentTarget.value as ThemeChoice)}>
+        <option value="system">System theme</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+    <button type="button" class="icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onclick={() => help.showModal()}>⌨</button>
   </header>
   <aside class="side">
     <div class="switch" role="tablist" aria-label="Sidebar">
@@ -101,7 +145,7 @@
       {#if side === "collections"}<Sidebar />{:else if side === "history"}<HistoryPanel />{:else}<RunsPanel />{/if}
     </div>
   </aside>
-  <main>
+  <main bind:this={mainEl} tabindex="-1" aria-label="Main area">
     <TabBar />
     {#if tab}
       {#key tab.id}
@@ -127,11 +171,24 @@
       <div class="empty">
         <p>Open a request from a collection, or start a new one.</p>
         <button type="button" class="primary" onclick={() => app.newRequest()}>New request</button>
-        <p class="muted small">Shortcuts: Ctrl+Enter send · Ctrl+S save · Alt+N new request · Alt+W close tab</p>
+        <p class="muted small">Press <kbd>?</kbd> for the keyboard shortcuts.</p>
       </div>
     {/if}
   </main>
   <PromptDialog />
+  <dialog bind:this={help} aria-labelledby="help-title" class="help">
+    <h2 id="help-title">Keyboard shortcuts</h2>
+    <table>
+      <tbody>
+        {#each SHORTCUTS as sc (sc.action)}
+          <tr><td><kbd>{label(sc.keys)}</kbd></td><td>{sc.does}</td></tr>
+        {/each}
+        <tr><td><kbd>Ctrl+F</kbd></td><td>Search in an editor or response body</td></tr>
+        <tr><td><kbd>↑ ↓ ← →</kbd></td><td>Move in the collections list and between tabs of a panel</td></tr>
+      </tbody>
+    </table>
+    <form method="dialog"><button type="submit" class="primary">Close</button></form>
+  </dialog>
   <div class="notices" aria-live="polite">
     {#each app.notices as n (n.id)}
       <div class="notice {n.kind}" role={n.kind === "error" ? "alert" : "status"}>
@@ -170,6 +227,48 @@
     align-items: center;
     font-size: 0.8rem;
     color: var(--muted);
+  }
+  .skip {
+    position: absolute;
+    left: -100vw;
+    top: 0.3rem;
+    z-index: 30;
+  }
+  .skip:focus {
+    left: 0.5rem;
+  }
+  .theme select {
+    font-size: 0.78rem;
+    padding: 0.15rem 0.3rem;
+  }
+  main:focus {
+    outline: none;
+  }
+  .help table {
+    border-collapse: collapse;
+    margin: 0.5rem 0 1rem;
+    font-size: 0.88rem;
+  }
+  .help td {
+    padding: 0.3rem 0.8rem 0.3rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .help h2 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .help form {
+    display: flex;
+    justify-content: flex-end;
+  }
+  kbd {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg-soft);
   }
   .status {
     margin-left: auto;

@@ -102,7 +102,7 @@
           <JsonField value={d.rest.vars} label="Request variables" placeholder={'{ "role": "admin" }'} onchange={(v) => (d.rest.vars = v as typeof d.rest.vars)} />
         </div>
       {:else if section === "settings"}
-        <SettingsEditor settings={d.settings} {inCollection} />
+        <SettingsEditor settings={d.settings} {inCollection} bind:resolve={d.resolve} />
       {/if}
     {/key}
   </div>

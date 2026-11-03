@@ -127,7 +127,8 @@ A summary is `{ "id", "created_at" (Unix ms), "method", "url", "status", "durati
 
 `target` is a flow or folder key (absent: every request); `data` (one iteration per row) and
 `iterations` exclude each other. `"capture_wire": true` records the raw bytes of every exchange in
-the stored report. The response is the run document of `snapreq run --format json` (`docs/CLI.md`)
+the stored report; `"insecure": true` skips TLS verification and `"timeout_ms"` limits each request
+(`0`: no limit), like `snapreq run -k` and `-t`. The response is the run document of `snapreq run --format json` (`docs/CLI.md`)
 plus `"id"` and `"collection"`.
 
 Flows can also run by steps (single iteration): `"from_step"` and `"to_step"` (1-based, inclusive)
