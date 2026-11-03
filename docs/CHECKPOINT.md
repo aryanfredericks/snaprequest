@@ -28,7 +28,6 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 1. P8.1 local accounts (argon2), sessions, API tokens; single-user mode without login for localhost.
    Note for Phase 8: flow states (ADR-022), history and runs must be scoped to their owner; CSRF
    protection is needed before cookies authenticate the WebSocket and REST API (P8.5).
-2. Check why GitHub's macOS test jobs are cancelled without running a step (since 4d1e74d; see P7.6 notes).
 
 ## Web UI notes (P7.8)
 - Themes: `state/theme.svelte.ts` (system/light/dark, localStorage, applied in `main.ts` before mount;
@@ -567,4 +566,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done. Maintainer chose rusqlite over sqlx; P6.2 done.
 - **2026-11-03 (17):** Phase 6 complete (P6.3–P6.7). Docker CI job still to add. Session ended at the usage limit.
 - **2026-11-03 (18):** Added the Docker smoke-test CI job (da78f47). P7.1 done: web project, typed client, embedded UI, verified with a release binary and the podman-built image.
-- **2026-11-03 (19):** Phase 7 complete (P7.2–P7.8), each checkpoint pushed after scripts/check.sh passed. Added Playwright end-to-end tests (mock shop + real server) and axe audits; ADR-021, ADR-022. GitHub macOS test jobs are cancelled before starting (runner/billing side, not code); Ubuntu, Windows and all other jobs pass.
+- **2026-11-03 (19):** Phase 7 complete (P7.2–P7.8), each checkpoint pushed after scripts/check.sh passed. Added Playwright end-to-end tests (mock shop + real server) and axe audits; ADR-021, ADR-022. GitHub macOS test jobs were cancelled before starting for 4 commits (runner side), fine again from 3bcc73f. The web-e2e CI job failed for P7.7/P7.8: a race in the flow test (old step results looked current while a new run was going), reproduced with `CI=1 taskset -c 0`; fixed by clearing results that a run replaces. Playwright's `github` reporter now turns e2e failures into job annotations.

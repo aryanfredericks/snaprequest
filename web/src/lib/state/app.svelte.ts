@@ -556,6 +556,8 @@ class AppState {
     else if (from > 1) body.to_step = total;
     tab.error = null;
     tab.running = from;
+    // Results of the steps about to run are replaced: do not show the old ones meanwhile.
+    tab.results = Object.fromEntries(Object.entries(tab.results).filter(([n]) => Number(n) < from));
     try {
       const summary = (await jobs.run(body)) as RunReport & { resumable_steps?: number[] };
       const report = await this.runReport(summary.id!);
