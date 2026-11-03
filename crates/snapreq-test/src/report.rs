@@ -80,13 +80,50 @@ pub fn captures_json(captures: &[Captured], secrets: &[String]) -> Value {
     )
 }
 
-/// Every secret of a request: credentials, secret variables, earlier secret captures and
-/// the values this request captured as secret (its own checks may report them).
+/// Credential values in the request's own sensitive headers (`Authorization`, `Cookie`,
+/// API key headers and so on), which a server may echo back. Like the engine, only the
+/// credential part and only values of 6 characters or more.
+pub fn header_credentials(req: &Request) -> Vec<String> {
+    const MIN_LEN: usize = 6;
+    let mut out = Vec::new();
+    for h in req.enabled_headers() {
+        let name = h.name.trim().to_ascii_lowercase();
+        if !snapreq_core::DEFAULT_SENSITIVE_HEADERS.contains(&name.as_str()) {
+            continue;
+        }
+        let value = h.value.trim();
+        let parts: Vec<&str> = match name.as_str() {
+            "authorization" | "proxy-authorization" => {
+                vec![value.split_once(' ').map_or(value, |(_, c)| c.trim())]
+            }
+            "cookie" => value
+                .split(';')
+                .filter_map(|p| p.split_once('=').map(|(_, v)| v.trim()))
+                .collect(),
+            _ => vec![value],
+        };
+        out.extend(
+            parts
+                .into_iter()
+                .filter(|p| p.len() >= MIN_LEN)
+                .map(str::to_owned),
+        );
+    }
+    out
+}
+
+/// Every secret of a request: credentials (auth, sensitive headers), secret variables,
+/// earlier secret captures and the values this request captured as secret (its own checks
+/// may report them).
 pub fn secrets_of(run: &RequestRun) -> Vec<String> {
     let mut out = run
         .request
         .as_ref()
-        .map(Request::secrets)
+        .map(|r| {
+            let mut s = r.secrets();
+            s.extend(header_credentials(r));
+            s
+        })
         .unwrap_or_default();
     out.extend(
         run.captures
@@ -98,13 +135,13 @@ pub fn secrets_of(run: &RequestRun) -> Vec<String> {
 }
 
 /// `value` as JSON with every secret hidden in its strings.
-fn hidden_json(value: Value, secrets: &[String]) -> Value {
+pub fn hide_json(value: Value, secrets: &[String]) -> Value {
     match value {
         Value::String(s) => Value::String(hide(&s, secrets)),
-        Value::Array(a) => Value::Array(a.into_iter().map(|v| hidden_json(v, secrets)).collect()),
+        Value::Array(a) => Value::Array(a.into_iter().map(|v| hide_json(v, secrets)).collect()),
         Value::Object(o) => Value::Object(
             o.into_iter()
-                .map(|(k, v)| (k, hidden_json(v, secrets)))
+                .map(|(k, v)| (k, hide_json(v, secrets)))
                 .collect(),
         ),
         other => other,
@@ -533,7 +570,7 @@ fn step_json(line: &Line<'_>, details: bool) -> Value {
                 v["headers"] = json!(r.headers);
                 v["body"] = json!(body_text(&r.body, &secrets));
                 v["timings"] = json!(r.timings);
-                v["trace"] = hidden_json(json!(r.trace), &secrets);
+                v["trace"] = hide_json(json!(r.trace), &secrets);
             }
             (v, Value::Null)
         }
@@ -544,7 +581,7 @@ fn step_json(line: &Line<'_>, details: bool) -> Value {
         RunOutcome::Failed(e) => {
             let mut v = json!({ "kind": "execution", "message": hide(&e.to_string(), &secrets) });
             if details && let Some(trace) = e.trace() {
-                v["trace"] = hidden_json(json!(trace), &secrets);
+                v["trace"] = hide_json(json!(trace), &secrets);
             }
             (Value::Null, v)
         }
@@ -845,6 +882,22 @@ tr.failed td{color:var(--bad)}tr td:first-child{width:1.5rem}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credentials_of_sensitive_headers() {
+        let mut req = Request::get("http://a.test")
+            .header("Authorization", "Bearer abc.def.ghi")
+            .header("Cookie", "sid=s3ss10n; x=1")
+            .header("X-API-Key", "key-123456")
+            .header("X-Short", "short-but-not-sensitive")
+            .header("api-key", "tiny");
+        req.headers
+            .push(snapreq_core::model::KeyValue::new("X-Auth-Token", "disabled-1").disabled());
+        assert_eq!(
+            header_credentials(&req),
+            ["abc.def.ghi", "s3ss10n", "key-123456"]
+        );
+    }
 
     #[test]
     fn hide_raw_and_json_escaped_secrets() {

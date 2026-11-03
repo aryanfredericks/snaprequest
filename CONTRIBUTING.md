@@ -25,7 +25,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check                                  # licenses and security advisories
-cargo +1.88 check --workspace --all-targets       # minimum supported Rust version
+cargo +1.89 check --workspace --all-targets       # minimum supported Rust version
 ```
 
 The last two are skipped with a hint if `cargo-deny` or the MSRV toolchain is not installed.

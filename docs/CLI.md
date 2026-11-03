@@ -80,6 +80,18 @@ level; change with `--log-level` or `SNAPREQ_LOG`) and stops gracefully on Ctrl-
 
 Flags win over environment variables, which win over the config file. Unknown config keys are errors.
 
+The server keeps request history and run results in `snapreq.db` (SQLite) in the data directory.
+Nothing secret is stored: credentials, sensitive headers and known secret values are replaced with
+`<redacted>` (in URLs, headers, bodies and traces), auth is stored as its type only, and response
+bodies are cut at 1 MiB. Old entries are pruned at start and every hour:
+
+```toml
+# config.toml
+[history]
+max_age_days = 30     # default 30; 0 = keep forever
+max_mb = 512          # history and runs together; default 512; 0 = no limit
+```
+
 The server has no authentication yet (Phase 8) and sends requests on behalf of whoever calls it, so it
 refuses non-loopback addresses unless `--allow-remote` is given. Only use that on a trusted network.
 

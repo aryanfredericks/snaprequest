@@ -4,6 +4,7 @@
 //! tests and embedding).
 
 pub mod config;
+pub mod store;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -29,6 +30,9 @@ pub enum Error {
     /// The configuration is invalid.
     #[error("{0}")]
     Config(String),
+    /// The database failed.
+    #[error("storage: {0}")]
+    Storage(String),
     /// Starting or running the server failed.
     #[error("{context}: {source}")]
     Io {
@@ -45,7 +49,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug)]
 pub struct AppState {
     pub config: Config,
+    pub store: store::Store,
 }
+
+/// How often history is pruned while the server runs.
+const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
 
 /// The HTTP routes.
 pub fn app(state: Arc<AppState>) -> Router {
@@ -119,6 +127,15 @@ impl Server {
                 context: format!("cannot listen on {}", config.bind),
                 source,
             })?;
+        let store = store::Store::open(&config.data_dir.join(store::DB_FILE)).await?;
+        let pruned = store.prune(config.retention).await?;
+        if pruned != store::Pruned::default() {
+            tracing::info!(
+                history = pruned.history,
+                runs = pruned.runs,
+                "pruned old entries"
+            );
+        }
         if !config.bind.ip().is_loopback() {
             tracing::warn!(
                 bind = %config.bind,
@@ -127,7 +144,7 @@ impl Server {
         }
         Ok(Self {
             listener,
-            state: Arc::new(AppState { config }),
+            state: Arc::new(AppState { config, store }),
         })
     }
 
@@ -140,12 +157,30 @@ impl Server {
 
     /// Serves until `shutdown` completes, then finishes the requests in flight.
     pub async fn run(self, shutdown: impl Future<Output = ()> + Send + 'static) -> Result<()> {
-        axum::serve(self.listener, app(self.state))
+        let (store, retention) = (self.state.store.clone(), self.state.config.retention);
+        let pruner = tokio::spawn(async move {
+            let mut every = tokio::time::interval(PRUNE_EVERY);
+            every.tick().await; // the first tick is immediate; pruning already ran in `bind`
+            loop {
+                every.tick().await;
+                if let Err(e) = store.prune(retention).await {
+                    tracing::warn!("pruning history failed: {e}");
+                }
+            }
+        });
+        let result = axum::serve(self.listener, app(self.state))
             .with_graceful_shutdown(shutdown)
             .await
             .map_err(|source| Error::Io {
                 context: "server failed".into(),
                 source,
-            })
+            });
+        pruner.abort();
+        result
+    }
+
+    /// The server's database.
+    pub fn store(&self) -> &store::Store {
+        &self.state.store
     }
 }

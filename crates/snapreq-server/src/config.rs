@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::store::Retention;
 use crate::{Error, Result};
 
 /// Default address: loopback only.
@@ -24,6 +25,16 @@ pub struct Config {
     /// and the outbound request policy exist, a reachable server is an open proxy into
     /// the network it runs in.
     pub allow_remote: bool,
+    /// How long and how much history and run results to keep.
+    pub retention: Retention,
+}
+
+/// `[history]` in the config file; `0` means no limit.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryConfig {
+    max_age_days: Option<u64>,
+    max_mb: Option<u64>,
 }
 
 /// What a config file may set (every key optional).
@@ -33,6 +44,8 @@ struct FileConfig {
     bind: Option<String>,
     data_dir: Option<PathBuf>,
     allow_remote: Option<bool>,
+    #[serde(default)]
+    history: HistoryConfig,
 }
 
 /// Values given on the command line; `None` means "not given".
@@ -101,10 +114,26 @@ impl Config {
                 .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"))
             || file.allow_remote.unwrap_or(false);
 
+        let defaults = Retention::default();
+        let limit = |v: Option<u64>, scale: u64, default: Option<u64>| match v {
+            Some(0) => None,
+            Some(n) => Some(n.saturating_mul(scale)),
+            None => default,
+        };
+        let retention = Retention {
+            max_age: limit(
+                file.history.max_age_days,
+                24 * 3600,
+                defaults.max_age.map(|d| d.as_secs()),
+            )
+            .map(std::time::Duration::from_secs),
+            max_bytes: limit(file.history.max_mb, 1024 * 1024, defaults.max_bytes),
+        };
         let config = Self {
             bind,
             data_dir,
             allow_remote,
+            retention,
         };
         config.check()?;
         Ok(config)
@@ -252,6 +281,24 @@ mod tests {
             ..Overrides::default()
         };
         assert!(Config::load(&v6, env(&[]), Some("/d".into())).is_ok());
+    }
+
+    #[test]
+    fn retention_from_the_file() {
+        let dir = temp("retention");
+        let c = Config::load(&Overrides::default(), env(&[]), Some(dir.clone())).unwrap();
+        assert_eq!(c.retention, Retention::default());
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[history]\nmax_age_days = 7\nmax_mb = 0\n",
+        )
+        .unwrap();
+        let c = Config::load(&Overrides::default(), env(&[]), Some(dir)).unwrap();
+        assert_eq!(
+            c.retention.max_age,
+            Some(std::time::Duration::from_secs(7 * 24 * 3600))
+        );
+        assert_eq!(c.retention.max_bytes, None);
     }
 
     #[test]

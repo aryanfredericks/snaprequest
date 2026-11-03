@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 6 Self-hosted server, in progress (Phases 0–5 complete)
-- **Current checkpoint:** P6.2, SQLite storage with migrations
+- **Current checkpoint:** P6.3, REST API
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -22,18 +22,33 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 ## Environment (verified 2026-10-31)
 - rustc / cargo 1.99.0, Node v24.18.0, git 2.56.0, Linux (Fedora)
 - `cargo-deny` is **not** installed locally (`cargo install cargo-deny --locked` to run it); the CI job runs it.
-- MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
+- MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P6.2 SQLite storage (ADR-006: `sqlx` + SQLite, embedded migrations) in `<data dir>/snapreq.db`: tables for
-   request history (request summary, response summary, full redacted trace as JSON, timestamps, duration,
-   status, collection/key if any) and run results (the `Report::json(true)` document + summary columns).
-   Retention: max age and max total size (config keys `history.max_age_days`, `history.max_mb`), pruned on
-   start and periodically. Check `sqlx` features (sqlite, runtime-tokio, migrate, no TLS) against cargo-deny and
-   the MSRV; consider `rusqlite` (bundled) + `tokio::task::spawn_blocking` if sqlx's dependency tree is heavy —
-   decide and record (it would amend ADR-006).
-2. P6.3 REST API, P6.4 WebSocket live traces, P6.5 OpenAPI, P6.6 SSRF policy (before any remote use), P6.7 Docker.
+1. P6.3 REST API (axum, JSON, under `/api/v1`): execute a request (`POST /api/v1/requests/execute` with a core
+   `Request` or a collection key + env + vars; stores history via `HistoryEntry::from_exchange`), history list/search
+   (`GET /api/v1/history?url=&method=&status=&before=&limit=`, `GET /api/v1/history/{id}`), run a flow/folder
+   (`POST /api/v1/runs`, stores `RunEntry::from_report`; `GET /api/v1/runs`, `/runs/{id}`), and collections/
+   environments CRUD backed by files in a workspace directory (new config `workspace = DIR`, default
+   `<data dir>/workspace`; one subdirectory per collection; reuse `snapreq_collection` load/save). Consistent JSON
+   error bodies `{ "error": { "kind", "message" } }`. Path traversal must be impossible (validate keys).
+   The executing endpoints need the P6.6 SSRF policy before remote use; ADR-018 keeps the server local until then.
+2. P6.4 WebSocket live traces, P6.5 OpenAPI (utoipa), P6.6 SSRF policy, P6.7 Docker.
 3. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+
+## Storage notes (P6.2)
+- ADR-019: `rusqlite` (bundled) instead of sqlx; MSRV 1.89 (Cargo.toml, CI job, CONTRIBUTING; check.sh reads it).
+- `snapreq_server::store`: `Store::{open, in_memory}` (one `Connection` behind `Arc<Mutex>`, calls via
+  `spawn_blocking`; WAL, busy_timeout), migrations as SQL strings tracked by `PRAGMA user_version` (newer schema →
+  refuse). Tables `history` (summary columns + `request_json`/`response_json`, `size_bytes`) and `runs` (summary +
+  `report_json`). API: `add_history`, `history(HistoryQuery { url_contains, method, status, before_id, limit })`,
+  `history_entry`, `add_run`, `runs`, `run_report`, `prune(Retention { max_age, max_bytes })`.
+- Redaction before writing: `HistoryEntry::from_exchange(req, result, source)` hides `Request::secrets()` +
+  `report::header_credentials(req)` (credential parts of sensitive request headers, ≥ 6 chars, also used by reports
+  now), sensitive header values → `<redacted>`, auth → its kind, body ≤ 1 MiB (base64 for binary). Runs store
+  `Report::json(true)`.
+- Server: opens `<data dir>/snapreq.db` in `Server::bind`, prunes at start and hourly; config `[history] max_age_days`
+  (default 30) / `max_mb` (default 512), `0` = unlimited.
 
 ## Server notes (P6.1)
 - `snapreq-server`: `Config { bind, data_dir, allow_remote }` via `Config::load(&Overrides, env, default_data_dir)`
@@ -393,6 +408,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.6 — 2026-11-03 — Reports: JUnit XML, self-contained HTML and detailed JSON (`snapreq run --report`), secrets hidden everywhere including bodies. 309 tests total.
 - P5.7 — 2026-11-03 — Example collection + flow against a mock in CI with JUnit publishing, docs/CI.md; fixed secret captures showing in their own checks. Phase 5 complete. 310 tests total.
 - P6.1 — 2026-11-03 — `snapreq serve`: axum server with config file / env / flags, graceful shutdown, health and version endpoints, loopback-only by default (ADR-018). 319 tests total.
+- P6.2 — 2026-11-03 — SQLite storage (rusqlite, ADR-019, MSRV 1.89): redacted request history and run results, migrations, retention by age and size. 325 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -410,4 +426,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
 - **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.7 done; Phase 5 complete.
-- **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done.
+- **2026-11-03 (16):** P5.5–P5.7 done, Phase 5 complete (P5.7 CI first failed: api-tests.sh did not build the CLI; fixed in 3f98d43). Started Phase 6: P6.1 done. Maintainer chose rusqlite over sqlx; P6.2 done.

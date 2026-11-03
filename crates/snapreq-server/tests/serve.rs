@@ -14,9 +14,15 @@ async fn health_and_version_then_graceful_shutdown() {
         bind: "127.0.0.1:0".parse().unwrap(),
         data_dir: data_dir.clone(),
         allow_remote: false,
+        retention: snapreq_server::store::Retention::default(),
     };
     let server = Server::bind(config).await.unwrap();
     assert!(data_dir.is_dir(), "the data directory is created");
+    assert!(
+        data_dir.join("snapreq.db").is_file(),
+        "the database is created"
+    );
+    assert_eq!(server.store().schema_version().await.unwrap(), 1);
     let addr = server.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let task = tokio::spawn(server.run(async {
@@ -63,6 +69,7 @@ async fn binding_a_busy_port_fails_clearly() {
         bind: taken.local_addr().unwrap(),
         data_dir: std::env::temp_dir().join(format!("snapreq-serve-busy-{}", std::process::id())),
         allow_remote: false,
+        retention: snapreq_server::store::Retention::default(),
     };
     let err = Server::bind(config).await.unwrap_err().to_string();
     assert!(

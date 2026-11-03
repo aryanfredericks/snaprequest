@@ -170,3 +170,16 @@ logged. Configuration precedence: flags > `SNAPREQ_*` environment variables > co
 **Consequences:** Safe by default for local use. Containers (P6.7) must set `SNAPREQ_ALLOW_REMOTE=1` and bind
 `0.0.0.0` inside the container while publishing the port on the host's loopback. Revisit once P8.1 lands:
 remote binds should then require authentication instead of a flag.
+
+## ADR-019: rusqlite instead of sqlx; MSRV 1.89 (amends ADR-006 and ADR-012)
+**Status:** Accepted (2026-11-03), chosen by the maintainer.
+**Context:** ADR-006 picked `sqlx` for SQLite. `sqlx` 0.9 needs Rust 1.94 and brings an async driver, a macro
+layer and a larger dependency tree; the server's storage needs are small (append history and run results, list,
+prune) and a single process owns the database.
+**Decision:** Use `rusqlite` with the `bundled` feature (SQLite compiled in, no system library), called from
+`tokio::task::spawn_blocking` behind a small `Store` type. Migrations are plain SQL steps tracked with SQLite's
+`PRAGMA user_version` (no migration crate). The MSRV becomes 1.89, which `rusqlite` 0.41 requires and the MSRV
+policy of ADR-012 allows.
+**Consequences:** Fewer dependencies and no compile-time database checks; queries are covered by tests instead.
+A C compiler is needed to build (available on all CI runners). Postgres, if ever needed, goes behind the `Store`
+interface.

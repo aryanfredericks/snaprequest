@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/aryanfredericks/snaprequest"
 homepage = "https://github.com/aryanfredericks/snaprequest"
@@ -44,6 +44,7 @@ percent-encoding = "2"
 rcgen = "0.14"
 regex = "1"
 rpassword = "7"
+rusqlite = { version = "0.41", features = ["bundled"] }
 ring = "0.17"
 ruzstd = "0.9"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
