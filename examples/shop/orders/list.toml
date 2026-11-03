@@ -1,0 +1,12 @@
+name = "List orders"
+url = "{{base_url}}/orders"
+
+[assert]
+status = 200
+
+[assert.headers]
+content-type = { starts_with = "application/json" }
+x-request-id = { exists = true }
+
+[assert.json]
+"$.orders" = { type = "array" }

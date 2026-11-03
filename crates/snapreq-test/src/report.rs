@@ -19,14 +19,28 @@ use crate::session::{RequestRun, RunOutcome};
 /// Longest response body shown in a report (bytes of text).
 const MAX_BODY: usize = 64 * 1024;
 
-/// Replaces every secret (longest first) with `<redacted>`.
+/// Replaces every secret (longest first) with `<redacted>`, also in the escaped form a
+/// secret takes inside JSON text (checks show actual values as JSON).
 pub fn hide(text: &str, secrets: &[String]) -> String {
-    let mut secrets: Vec<&String> = secrets.iter().filter(|s| !s.is_empty()).collect();
-    secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    let mut forms: Vec<String> = Vec::new();
+    for s in secrets.iter().filter(|s| !s.is_empty()) {
+        let escaped = serde_json::to_string(s).unwrap_or_default();
+        let escaped = escaped
+            .strip_prefix('"')
+            .and_then(|e| e.strip_suffix('"'))
+            .unwrap_or_default()
+            .to_owned();
+        for f in [s.clone(), escaped] {
+            if !f.is_empty() && !forms.contains(&f) {
+                forms.push(f);
+            }
+        }
+    }
+    forms.sort_by_key(|s| std::cmp::Reverse(s.len()));
     let mut out = text.to_owned();
-    for s in secrets {
-        if out.contains(s.as_str()) {
-            out = out.replace(s.as_str(), "<redacted>");
+    for f in forms {
+        if out.contains(f.as_str()) {
+            out = out.replace(f.as_str(), "<redacted>");
         }
     }
     out
@@ -66,12 +80,35 @@ pub fn captures_json(captures: &[Captured], secrets: &[String]) -> Value {
     )
 }
 
-/// Every secret of a request (credentials, secret variables and captures).
+/// Every secret of a request: credentials, secret variables, earlier secret captures and
+/// the values this request captured as secret (its own checks may report them).
 pub fn secrets_of(run: &RequestRun) -> Vec<String> {
-    run.request
+    let mut out = run
+        .request
         .as_ref()
         .map(Request::secrets)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    out.extend(
+        run.captures
+            .iter()
+            .filter(|c| c.secret)
+            .filter_map(|c| c.value.clone()),
+    );
+    out
+}
+
+/// `value` as JSON with every secret hidden in its strings.
+fn hidden_json(value: Value, secrets: &[String]) -> Value {
+    match value {
+        Value::String(s) => Value::String(hide(&s, secrets)),
+        Value::Array(a) => Value::Array(a.into_iter().map(|v| hidden_json(v, secrets)).collect()),
+        Value::Object(o) => Value::Object(
+            o.into_iter()
+                .map(|(k, v)| (k, hidden_json(v, secrets)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// `METHOD url` with secrets removed, or empty when nothing was built.
@@ -496,7 +533,7 @@ fn step_json(line: &Line<'_>, details: bool) -> Value {
                 v["headers"] = json!(r.headers);
                 v["body"] = json!(body_text(&r.body, &secrets));
                 v["timings"] = json!(r.timings);
-                v["trace"] = json!(r.trace);
+                v["trace"] = hidden_json(json!(r.trace), &secrets);
             }
             (v, Value::Null)
         }
@@ -507,7 +544,7 @@ fn step_json(line: &Line<'_>, details: bool) -> Value {
         RunOutcome::Failed(e) => {
             let mut v = json!({ "kind": "execution", "message": hide(&e.to_string(), &secrets) });
             if details && let Some(trace) = e.trace() {
-                v["trace"] = json!(trace);
+                v["trace"] = hidden_json(json!(trace), &secrets);
             }
             (Value::Null, v)
         }
@@ -804,3 +841,25 @@ tr.failed td{color:var(--bad)}tr td:first-child{width:1.5rem}
 .bar.dns{background:#0969da}.bar.connect{background:#bf8700}.bar.tls{background:#8250df}.bar.send{background:#1b7c83}.bar.wait{background:#1a7f37}.bar.download{background:#57ab5a}
 .summary{font-weight:600}footer{margin-top:2rem;font-size:12px}
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hide_raw_and_json_escaped_secrets() {
+        let secrets = vec![
+            "line1\nsay \"hi\"".to_owned(),
+            String::new(),
+            "tok".to_owned(),
+        ];
+        assert_eq!(
+            hide(
+                r#"raw: line1
+say "hi" json: "line1\nsay \"hi\"" tok"#,
+                &secrets
+            ),
+            r#"raw: <redacted> json: "<redacted>" <redacted>"#
+        );
+    }
+}

@@ -4,7 +4,7 @@
 
 SnapRequest is a single Rust binary that gives you:
 
-- **A CLI** for sending requests and running test collections in CI.
+- **A CLI** for sending requests and running test collections in CI (see [docs/CI.md](docs/CI.md)).
 - **A self-hosted web UI** (`snapreq serve`) for building and debugging requests in the browser.
 - **Detailed traces** for every request: DNS, TCP connect, TLS handshake (version, cipher, certificates),
   time to first byte, download time, redirects and the raw bytes on the wire.

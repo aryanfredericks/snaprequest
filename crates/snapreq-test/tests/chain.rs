@@ -97,6 +97,9 @@ code = { status = true }
 
 [assert]
 status = 201
+
+[assert.json]
+"$.token" = { type = "string", starts_with = "tok-" }
 "#
             .into(),
         ),
@@ -156,6 +159,25 @@ async fn captured_values_feed_later_requests() {
             ("code".into(), Some("201".into())),
         ]
     );
+    // Reports hide the token in this request's own checks and body as well.
+    let its = [snapreq_test::Iteration {
+        number: 1,
+        data: None,
+        result: snapreq_test::UnitRun::Requests {
+            runs: vec![login],
+            total: 1,
+        },
+    }];
+    let report = snapreq_test::Report::new(
+        &c,
+        &snapreq_test::Unit::Requests(vec!["login-ok".into()]),
+        &its,
+        1,
+        Vec::new(),
+    );
+    for text in [report.json(true).to_string(), report.html(), report.junit()] {
+        assert!(!text.contains("tok-secret-123"), "{text}");
+    }
     assert!(session.send("form", |_| {}).await.passed());
 
     let me = session.send("me", |_| {}).await;

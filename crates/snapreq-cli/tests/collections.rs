@@ -530,7 +530,7 @@ async fn request_file_captures_are_shown_with_v_and_in_json() {
     let file = dir.join("cap.toml");
     std::fs::write(
         &file,
-        "url = \"{{base_url}}/cap\"\n[capture]\nline = { regex = '^(\\w+) (\\S+)', group = 2 }\nstatus = { status = true }\nsecret = { body = true, secret = true }\nmissing = { header = \"x-nope\" }\n",
+        "url = \"{{base_url}}/cap\"\n[capture]\nline = { regex = '^(\\w+) (\\S+)', group = 2 }\nstatus = { status = true }\nsecret = { body = true, secret = true }\nmissing = { header = \"x-nope\" }\n[assert.body]\nequals = \"wrong\"\n",
     )
     .unwrap();
     let base = format!("base_url=http://{addr}");
@@ -541,8 +541,13 @@ async fn request_file_captures_are_shown_with_v_and_in_json() {
         &[],
     )
     .await;
-    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert_eq!(o.status.code(), Some(7), "{}", err(&o));
     let e = err(&o);
+    // The failing check would print the body, which was captured as secret.
+    assert!(
+        e.contains("✗ body equals \"wrong\"  (actual: \"<redacted>\")"),
+        "{e}"
+    );
     assert!(e.contains("captured line = /cap\n"), "{e}");
     assert!(e.contains("captured status = 200\n"), "{e}");
     assert!(e.contains("captured secret = <redacted>\n"), "{e}");

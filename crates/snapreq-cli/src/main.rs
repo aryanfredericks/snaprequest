@@ -233,16 +233,24 @@ async fn run_send(args: &SendArgs) -> u8 {
                     );
                 }
             }
-            let mut outcomes = assertions.evaluate(&response);
-            assert_view::scrub(&mut outcomes, &request.secrets());
             let captures = capturer.extract(&response);
+            // Values captured as secret are hidden too, even in this request's own checks.
+            let mut secrets = request.secrets();
+            secrets.extend(
+                captures
+                    .iter()
+                    .filter(|c| c.secret)
+                    .filter_map(|c| c.value.clone()),
+            );
+            let mut outcomes = assertions.evaluate(&response);
+            assert_view::scrub(&mut outcomes, &secrets);
             if json {
                 let mut doc = json_out::success(&request, &response, args.output.as_deref());
                 if !outcomes.is_empty() {
                     doc["assertions"] = serde_json::to_value(&outcomes).unwrap_or_default();
                 }
                 if !captures.is_empty() {
-                    doc["captures"] = assert_view::captures_json(&captures, &request.secrets());
+                    doc["captures"] = assert_view::captures_json(&captures, &secrets);
                 }
                 emit_json(&doc);
             } else {
@@ -257,7 +265,7 @@ async fn run_send(args: &SendArgs) -> u8 {
             }
             if !json && args.verbose > 0 && !captures.is_empty() {
                 let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);
-                let _ = assert_view::render_captures(&mut err, &captures, &request.secrets());
+                let _ = assert_view::render_captures(&mut err, &captures, &secrets);
             }
             if !json && !outcomes.is_empty() {
                 let mut err = anstream::AutoStream::new(std::io::stderr().lock(), color);

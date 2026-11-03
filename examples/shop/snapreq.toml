@@ -1,0 +1,17 @@
+format = 1
+name = "Shop API"
+description = "Example collection run in CI against the mock shop (crates/snapreq-test/examples/mock_shop.rs)."
+order = ["health", "auth", "orders"]
+
+[vars]
+base_url = "http://127.0.0.1:8765"
+user = "demo"
+# Given by SNAPREQ_SECRET_PASSWORD (CI) or `snapreq secret set password`.
+password = { secret = true }
+
+[headers]
+Accept = "application/json"
+
+[auth]
+type = "bearer"
+token = "{{token}}"

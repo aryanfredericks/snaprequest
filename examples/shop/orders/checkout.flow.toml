@@ -1,0 +1,47 @@
+name = "Checkout"
+description = "Log in, order an item, wait until it is ready, cancel it and check it is gone."
+
+[vars]
+item = "sku-42"
+
+[[step]]
+request = "auth/login"
+
+[[step]]
+name = "Create order"
+method = "POST"
+url = "{{base_url}}/orders"
+[step.body]
+type = "json"
+content = '{ "item": "{{item}}" }'
+[step.assert]
+status = 201
+[step.assert.json]
+"$.item" = "{{item}}"
+"$.state" = "pending"
+[step.capture]
+order_id = "$.id"
+
+[[step]]
+name = "Wait until ready"
+url = "{{base_url}}/orders/{{order_id}}"
+[step.assert]
+status = 200
+[step.retry]
+max = 10
+every_ms = 50
+[step.retry.until.json]
+"$.state" = "ready"
+
+[[step]]
+name = "Cancel"
+method = "DELETE"
+url = "{{base_url}}/orders/{{order_id}}"
+[step.assert]
+status = 204
+
+[[step]]
+name = "Gone"
+url = "{{base_url}}/orders/{{order_id}}"
+[step.assert]
+status = 404

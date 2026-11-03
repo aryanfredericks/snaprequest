@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 5 Assertions and the test runner, in progress (Phases 0–4 complete)
-- **Current checkpoint:** P5.7, CI exit codes and example GitHub Actions workflow
+- **Phase:** 6 Self-hosted server, starting (Phases 0–5 complete)
+- **Current checkpoint:** P6.1, `snapreq serve` (axum app, config)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,13 +25,24 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P5.7 (closes Phase 5): document exit codes for CI in one place; add `examples/ci/` with a small fixture
-   collection + flow and a mock server the workflow can start (or run against a public echo API? prefer a local
-   mock: e.g. a tiny `snapreq-mock` dev binary or a Python `http.server`-free option; decide), and
-   `.github/workflows/api-tests.yml` running `snapreq run ... --report junit:...` and publishing the JUnit report
-   (e.g. `mikepenz/action-junit-report` or uploading the HTML as an artifact). Phase 5 acceptance: CI job runs a
-   fixture collection and a fixture flow and publishes a JUnit report.
-2. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build`.
+1. P6.1 `snapreq serve [--bind 127.0.0.1:7878] [--data-dir]`: axum app in `snapreq-server`, config file + env vars
+   (precedence: flags > env `SNAPREQ_*` > config file > defaults), graceful shutdown, `/healthz`, tracing request
+   logs. Read PLAN Phase 6 and ADR-006 (SQLite) first. Note P6.6 (SSRF policy) must exist before the server is
+   ever exposed beyond localhost: default bind stays 127.0.0.1.
+2. Small debt: `snapreq send` with a collection request still builds through `collection_cmd::build` (not
+   `Session`).
+
+## CI example notes (P5.7)
+- `crates/snapreq-test/examples/mock_shop.rs` (login → token, orders CRUD, order ready on the 3rd poll), collection
+  `examples/shop/` (health, auth/login with secret password + secret token capture, orders/list) and flow
+  `orders/checkout.flow.toml` (login → create → poll with retry-until → cancel → 404).
+- `scripts/api-tests.sh` builds, starts the mock, runs the collection and the flow with JUnit + HTML reports into
+  `target/api-reports/`; also part of `scripts/check.sh`. CI job `api-tests` runs it, publishes JUnit with
+  `mikepenz/action-junit-report@v5` (needs `checks: write`) and uploads the reports.
+- `docs/CI.md`: exit codes for send and run, secrets via `SNAPREQ_SECRET_*`, a GitHub Actions workflow to copy.
+- Found while doing this: a request's own secret capture (the login token) showed in its own checks in reports;
+  `report::secrets_of` now adds the run's secret captures, `hide` also hides JSON-escaped forms, detailed JSON
+  traces are scrubbed; `snapreq send` got the same fix.
 
 ## Report notes (P5.6)
 - `snapreq_test::report`: `Report::new(collection, unit, iterations, planned, secret_vars)` → `json(details)`,
@@ -316,7 +327,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 2 CLI MVP | ✅ done |
 | 3 Collections & environments | ✅ done |
 | 4 Auth helpers | ✅ done |
-| 5 Assertions & runner | 🟨 |
+| 5 Assertions & runner | ✅ done |
 | 6 Self-hosted server | ⬜ |
 | 7 Web UI | ⬜ |
 | 8 Multi-user & hardening | ⬜ |
@@ -366,6 +377,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P5.4 — 2026-11-03 — `snapreq run` for collections and folders, `--iterations`, data-driven runs (`--data` CSV/JSON). 306 tests total.
 - P5.5 — 2026-11-03 — Run control: `--bail`, `--delay`, `--parallel` (concurrent iterations, ordered results). 308 tests total.
 - P5.6 — 2026-11-03 — Reports: JUnit XML, self-contained HTML and detailed JSON (`snapreq run --report`), secrets hidden everywhere including bodies. 309 tests total.
+- P5.7 — 2026-11-03 — Example collection + flow against a mock in CI with JUnit publishing, docs/CI.md; fixed secret captures showing in their own checks. Phase 5 complete. 310 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -382,4 +394,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
 - **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.
 - **2026-11-03 (14):** Maintainer approved caching OAuth tokens in the user cache dir. P4.3, P4.4 and P4.5 done; Phase 4 complete.
-- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.6 done (assertions, captures, flows, collection/data runs, run control, reports).
+- **2026-11-03 (15):** Maintainer asked for flows (chain testing, Hurl-like) in the CLI and web UI: added to PLAN as P5.3 (later P5 items renumbered), P7.7 (flow editor) and P9.1 (Hurl import). P5.1–P5.7 done; Phase 5 complete.
