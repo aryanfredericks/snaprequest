@@ -132,6 +132,10 @@ pub(crate) struct SendArgs {
     )]
     pub user: Option<String>,
 
+    /// Use Digest auth with the `-u` credentials instead of Basic.
+    #[arg(long, requires = "user", help_heading = "Auth")]
+    pub digest: bool,
+
     /// Bearer token auth (`Authorization: Bearer TOKEN`).
     #[arg(
         long,

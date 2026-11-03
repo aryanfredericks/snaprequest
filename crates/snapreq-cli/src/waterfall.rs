@@ -34,7 +34,7 @@ fn color(label: &str) -> Style {
     Style::new().fg_color(Some(anstyle::Color::Ansi(c)))
 }
 
-/// Splits the trace into hops (at `Redirect` events) and positions each phase.
+/// Splits the trace into hops (at `Redirect` and `AuthChallenge` events) and positions each phase.
 /// Phase end times come from the events; start = end − duration.
 pub(crate) fn hops(trace: &[TraceEntry]) -> Vec<Hop> {
     let mut hops = vec![Hop {
@@ -63,6 +63,13 @@ pub(crate) fn hops(trace: &[TraceEntry]) -> Vec<Hop> {
             }
             TraceEvent::Redirect { status, to, .. } => {
                 hop.title = Some(format!("{status} → {to}"));
+                hops.push(Hop {
+                    title: None,
+                    segments: Vec::new(),
+                });
+            }
+            TraceEvent::AuthChallenge { status, scheme } => {
+                hop.title = Some(format!("{status} {scheme} challenge"));
                 hops.push(Hop {
                     title: None,
                     segments: Vec::new(),
@@ -217,6 +224,30 @@ mod tests {
                 },
             ),
         ]
+    }
+
+    #[test]
+    fn auth_challenges_split_hops() {
+        let mut trace = one_hop();
+        trace.push(at(
+            100,
+            TraceEvent::AuthChallenge {
+                status: 401,
+                scheme: "digest".into(),
+            },
+        ));
+        trace.push(at(
+            120,
+            TraceEvent::RequestSent {
+                body_bytes: 0,
+                duration: d(5),
+            },
+        ));
+        let titles: Vec<String> = hops(&trace).into_iter().filter_map(|h| h.title).collect();
+        assert_eq!(
+            titles,
+            ["hop 1/2: 401 digest challenge", "hop 2/2: final response"]
+        );
     }
 
     #[test]

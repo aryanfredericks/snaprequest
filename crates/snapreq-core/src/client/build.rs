@@ -106,11 +106,13 @@ impl Prepared {
 
 /// Builds the request. `jar_cookies` are cookies from the client's jar for this URL;
 /// they are merged into the user's `Cookie` header (user values win) or sent in a new one.
+/// `auth_header` is the header the request's auth adds on this hop, if any.
 pub(crate) async fn prepare(
     req: &Request,
     url: &Url,
     user_agent: &str,
     jar_cookies: &[(String, String)],
+    auth_header: Option<(&str, String)>,
 ) -> Result<Prepared> {
     let body = body::encode(&req.body).await?;
     let mut headers = HeaderMap::new();
@@ -144,7 +146,7 @@ pub(crate) async fn prepare(
         };
         headers.append(name, value);
     }
-    if let Some((name, value)) = crate::auth::header(&req.auth)
+    if let Some((name, value)) = auth_header
         && !has_header(req, name)
     {
         let name = HeaderName::from_bytes(name.as_bytes())
@@ -263,7 +265,9 @@ mod tests {
     async fn default_headers_in_order() {
         let req = Request::get("http://example.com:8080/a?b=1").header("x-trace", "1");
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test", &[]).await.unwrap();
+        let p = prepare(&req, &url, "snapreq/test", &[], None)
+            .await
+            .unwrap();
         assert_eq!(
             names(&p),
             ["Host", "X-Trace", "User-Agent", "Accept", "Accept-Encoding"]
@@ -284,7 +288,9 @@ mod tests {
             .header("Accept", "application/json");
         req.headers.push(KeyValue::new("X-Off", "1").disabled());
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "snapreq/test", &[]).await.unwrap();
+        let p = prepare(&req, &url, "snapreq/test", &[], None)
+            .await
+            .unwrap();
         assert_eq!(
             names(&p),
             ["Host", "User-Agent", "Accept", "Accept-Encoding"]
@@ -298,7 +304,7 @@ mod tests {
             content: r#"{"a":1}"#.into(),
         });
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
+        let p = prepare(&req, &url, "ua", &[], None).await.unwrap();
         let ct = p
             .sent_headers
             .iter()
@@ -321,7 +327,7 @@ mod tests {
             .header("TE", "gzip")
             .header("X-Ok", "1");
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
+        let p = prepare(&req, &url, "ua", &[], None).await.unwrap();
         let h2 = p.to_http(true);
         assert_eq!(h2.uri(), "https://x.test/");
         assert!(h2.headers().get("connection").is_none());
@@ -337,7 +343,7 @@ mod tests {
             .header("Content-Type", "multipart/form-data")
             .body(Body::Multipart { parts: vec![] });
         let url = req.effective_url().unwrap();
-        let p = prepare(&req, &url, "ua", &[]).await.unwrap();
+        let p = prepare(&req, &url, "ua", &[], None).await.unwrap();
         let ct = p
             .sent_headers
             .iter()
@@ -362,11 +368,11 @@ mod tests {
     async fn invalid_headers_are_rejected() {
         let req = Request::get("http://x.test/").header("bad header", "v");
         let url = req.effective_url().unwrap();
-        let err = prepare(&req, &url, "ua", &[]).await.err().unwrap();
+        let err = prepare(&req, &url, "ua", &[], None).await.err().unwrap();
         assert!(err.to_string().contains("invalid header name"), "{err}");
 
         let req = Request::get("http://x.test/").header("x", "line\nbreak");
-        let err = prepare(&req, &url, "ua", &[]).await.err().unwrap();
+        let err = prepare(&req, &url, "ua", &[], None).await.err().unwrap();
         assert!(err.to_string().contains("invalid header value"), "{err}");
     }
 

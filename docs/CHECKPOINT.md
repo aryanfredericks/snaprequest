@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 4 Authentication helpers, in progress (Phases 0–3 complete)
-- **Current checkpoint:** P4.2, Digest auth
+- **Current checkpoint:** P4.3, OAuth 2.0
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,14 +25,26 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P4.2 Digest (RFC 7616: MD5, SHA-256, `-sess`, qop=auth): `Auth::Digest { username, password }`. Needs a
-   challenge round trip: send without credentials, on 401 with `WWW-Authenticate: Digest` compute the response
-   and resend once (body must be re-sendable; `EncodedBody` already supports `to_body()` again). Track nonce
-   count per client. Both exchanges belong in one trace (an `info` event between them). Collection
-   `type = "digest"`, CLI `--digest` (curl) with `-u`.
-2. Then P4.3 OAuth 2.0, P4.4 AWS SigV4, P4.5 inheritance details (basic `[auth]` inheritance with
-   `inherit`/`none` already landed in P4.1; P4.5 is left for OAuth token sharing across a collection and showing
-   the effective auth in `snapreq ls`/`-v`).
+1. P4.3 OAuth 2.0: grant types client credentials, password, authorization code + PKCE (local callback
+   listener on 127.0.0.1, opens the browser in the CLI), refresh tokens. Token endpoint calls go through the
+   same `Client` (so traces/proxies/TLS settings apply). Token cache: in core keep it an in-memory trait-backed
+   store (`TokenStore`) so core stays storage-free; CLI persists to a user cache dir file (0600), keyed by
+   token URL + client id + scopes. Refresh when expired (with a small skew) or on 401. Tokens are secrets.
+   Collection `type = "oauth2"` with `grant`, `token_url`, `auth_url`, `client_id`, `client_secret`, `scope`,
+   `audience`?, `username`/`password`; probably needs an ADR on where token caching lives.
+2. Then P4.4 AWS SigV4, P4.5 inheritance details (OAuth token sharing across a collection; show effective auth
+   in `snapreq ls`/`-v`).
+
+## Digest notes (P4.2)
+- `src/auth/digest.rs`: `parse_challenges` (several challenges per header, quoted strings, token68 skipped),
+  `authorization(challenges, Credentials)` picks the first answerable Digest challenge. MD5 (`md-5` crate,
+  ADR-014), SHA-256 / SHA-512-256 (ring), `-sess`, `qop=auth`, `userhash`, `username*` for non-ASCII names.
+- `auth::digest_retry` runs in `Client::follow` after each hop: a 401 with a Digest challenge is answered once
+  per hop (`answered` flag), recorded as `TraceEvent::AuthChallenge { status, scheme }`. The hop is re-prepared
+  with `prepare_hop(req, url, Some(answer))`, so bodies are re-encoded (files reopened). `build::prepare` now
+  takes the auth header as a parameter.
+- `Timings::from_trace`, the CLI waterfall and the `m` summary treat `AuthChallenge` as a hop boundary.
+- Verified against https://httpbin.org/digest-auth/auth/user/passwd/SHA-256 (HTTP/2).
 
 ## Auth notes (P4.1)
 - Model: `snapreq_core::model::Auth` (`None`, `Basic`, `Bearer`, `ApiKey { name, value, location }`), field
@@ -239,6 +251,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P3.5 — 2026-10-31 — Header and settings inheritance from collection and folders. 220 tests total.
 - P3.6 — 2026-10-31 — CLI: send collection requests (-c/-e/--var), ls, new, secret set. Phase 3 complete. 227 tests total.
 - P4.1 — 2026-11-03 — Basic, Bearer and API-key auth in core, collections (`[auth]` with inherit/none) and CLI; URL-encoded secrets redacted. 247 tests total.
+- P4.2 — 2026-11-03 — Digest auth (RFC 7616) with challenge retry traced as `auth_challenge`; ADR-014 (md-5). 256 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -253,4 +266,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (10):** Phase 2 (CLI MVP) complete: send command, pretty output, verbose trace, waterfall, JSON output, snapshots. CI watcher now polls once a minute (GitHub's 60 requests/hour unauthenticated limit).
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
-- **2026-11-03 (13):** P4.1 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded.
+- **2026-11-03 (13):** P4.1 and P4.2 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded. Digest verified against httpbin.org.

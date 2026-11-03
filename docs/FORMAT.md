@@ -128,6 +128,7 @@ enabled = true                     # optional
 | `"none"` | | No auth, even if a folder or the collection has one. |
 | `"basic"` | `username`, optional `password` | `Authorization: Basic base64(username:password)` (UTF-8) |
 | `"bearer"` | `token` | `Authorization: Bearer <token>` |
+| `"digest"` | `username`, optional `password` | Digest (RFC 7616): sent without credentials first, then again answering the server's `401` challenge (MD5, SHA-256, SHA-512-256, `-sess`, `qop=auth`) |
 | `"api_key"` | `name`, `value`, optional `location` | header `name: value`, or with `location = "query"` the query parameter `name=value` |
 
 ```toml

@@ -153,7 +153,12 @@ impl Timings {
     pub fn from_trace(trace: &[TraceEntry]) -> Self {
         let last_hop_start = trace
             .iter()
-            .rposition(|e| matches!(e.event, TraceEvent::Redirect { .. }))
+            .rposition(|e| {
+                matches!(
+                    e.event,
+                    TraceEvent::Redirect { .. } | TraceEvent::AuthChallenge { .. }
+                )
+            })
             .map_or(0, |i| i + 1);
 
         let mut t = Self {

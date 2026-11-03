@@ -20,6 +20,13 @@ pub enum Auth {
     },
     /// `Authorization: Bearer <token>` (RFC 6750).
     Bearer { token: String },
+    /// HTTP Digest (RFC 7616). The request is sent without credentials first; on a
+    /// `401` with a Digest challenge it is sent again once, with the answer.
+    Digest {
+        username: String,
+        #[serde(default)]
+        password: String,
+    },
     /// A key sent in a header or a query parameter.
     ApiKey {
         /// Header or query parameter name, for example `X-API-Key` or `api_key`.
@@ -50,6 +57,7 @@ impl Auth {
             Self::None => "none",
             Self::Basic { .. } => "basic",
             Self::Bearer { .. } => "bearer",
+            Self::Digest { .. } => "digest",
             Self::ApiKey { .. } => "api_key",
         }
     }
@@ -62,6 +70,7 @@ impl Auth {
                 vec![password.clone(), basic_credentials(username, password)]
             }
             Self::Bearer { token } => vec![token.clone()],
+            Self::Digest { password, .. } => vec![password.clone()],
             Self::ApiKey { value, .. } => vec![value.clone()],
         };
         out.retain(|s| !s.is_empty());

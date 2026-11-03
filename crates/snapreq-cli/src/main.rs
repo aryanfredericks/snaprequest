@@ -112,7 +112,8 @@ async fn run_send(args: &SendArgs) -> u8 {
     };
     if send::needs_password_prompt(args)
         && std::io::stdin().is_terminal()
-        && let snapreq_core::model::Auth::Basic { username, password } = &mut request.auth
+        && let snapreq_core::model::Auth::Basic { username, password }
+        | snapreq_core::model::Auth::Digest { username, password } = &mut request.auth
     {
         match rpassword::prompt_password(format!("Password for `{username}`: ")) {
             Ok(p) => *password = p,

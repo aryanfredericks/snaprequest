@@ -142,9 +142,11 @@ pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), 
 fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
     if let Some(user) = &args.user {
         let (username, password) = user.split_once(':').unwrap_or((user, ""));
-        return Ok(Some(Auth::Basic {
-            username: username.to_owned(),
-            password: password.to_owned(),
+        let (username, password) = (username.to_owned(), password.to_owned());
+        return Ok(Some(if args.digest {
+            Auth::Digest { username, password }
+        } else {
+            Auth::Basic { username, password }
         }));
     }
     if let Some(token) = &args.bearer {
@@ -486,6 +488,13 @@ mod tests {
             }
         );
         assert_eq!(
+            auth(&["-u", "me:pw", "--digest"]).unwrap(),
+            Auth::Digest {
+                username: "me".into(),
+                password: "pw".into()
+            }
+        );
+        assert_eq!(
             auth(&["--bearer", " t "]).unwrap(),
             Auth::Bearer { token: "t".into() }
         );
@@ -551,6 +560,7 @@ mod tests {
             &["--bearer", "t", "--api-key", "k=v"],
             &["--api-key", "k=v", "--no-auth"],
             &["--api-key-in", "query"],
+            &["--digest"],
         ] {
             let full: Vec<&str> = ["snapreq", "send", "x"]
                 .iter()

@@ -261,6 +261,12 @@ pub(crate) fn render(out: &mut dyn Write, trace: &[TraceEntry], level: u8) -> io
             TraceEvent::Redirect { status, to, .. } => {
                 v.info(at, &format!("{status} redirect to {to}"))?;
             }
+            TraceEvent::AuthChallenge { status, scheme } => {
+                v.info(
+                    at,
+                    &format!("{status} {scheme} challenge; sending again with credentials"),
+                )?;
+            }
             TraceEvent::Info { message } => v.info(at, message)?,
             TraceEvent::Error { phase, message } => {
                 v.line(at, ERROR, '!', &format!("{phase} failed: {message}"))?;

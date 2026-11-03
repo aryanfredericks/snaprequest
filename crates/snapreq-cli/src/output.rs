@@ -293,15 +293,21 @@ fn write_meta(out: &mut dyn Write, resp: &Response) -> io::Result<()> {
         )
     };
     let t = &resp.timings;
-    let redirects = resp
-        .trace
-        .iter()
-        .filter(|e| matches!(e.event, TraceEvent::Redirect { .. }))
-        .count();
-    if redirects > 0 {
+    let count = |f: fn(&TraceEvent) -> bool| resp.trace.iter().filter(|e| f(&e.event)).count();
+    let redirects = count(|e| matches!(e, TraceEvent::Redirect { .. }));
+    let challenges = count(|e| matches!(e, TraceEvent::AuthChallenge { .. }));
+    if redirects > 0 || challenges > 0 {
+        let mut what = Vec::new();
+        if redirects > 0 {
+            what.push(format!("{DIM}redirects{DIM:#} {redirects}"));
+        }
+        if challenges > 0 {
+            what.push(format!("{DIM}auth challenges{DIM:#} {challenges}"));
+        }
         writeln!(
             out,
-            "{DIM}redirects{DIM:#} {redirects} {DIM}(phase timings are for the final hop){DIM:#}"
+            "{} {DIM}(phase timings are for the final hop){DIM:#}",
+            what.join("  ")
         )?;
     }
     writeln!(

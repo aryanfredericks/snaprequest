@@ -150,7 +150,7 @@ impl Client {
     /// carries the trace recorded up to the failure.
     pub async fn execute(&self, req: &Request) -> Result<Response> {
         let url = req.effective_url()?;
-        let first = self.prepare_hop(req, &url).await?;
+        let first = self.prepare_hop(req, &url, None).await?;
 
         let mut rec = Recorder::new(redact::Redactor::new(
             &self.inner.config.sensitive_headers,
@@ -182,15 +182,31 @@ impl Client {
         Ok(resp)
     }
 
-    /// Encodes the body and picks the TLS configuration for one hop.
-    async fn prepare_hop(&self, req: &Request, url: &url::Url) -> Result<Hop> {
+    /// Encodes the body and picks the TLS configuration for one hop. `challenge_answer` is
+    /// the `Authorization` value answering an auth challenge (Digest).
+    async fn prepare_hop(
+        &self,
+        req: &Request,
+        url: &url::Url,
+        challenge_answer: Option<String>,
+    ) -> Result<Hop> {
         let jar_cookies = if req.settings.cookies {
             self.inner.cookies.for_request(url)
         } else {
             Vec::new()
         };
-        let prepared =
-            build::prepare(req, url, &self.inner.config.user_agent, &jar_cookies).await?;
+        let auth_header = match challenge_answer {
+            Some(value) => Some(("Authorization", value)),
+            None => crate::auth::header(&req.auth),
+        };
+        let prepared = build::prepare(
+            req,
+            url,
+            &self.inner.config.user_agent,
+            &jar_cookies,
+            auth_header,
+        )
+        .await?;
         let tls = match url.scheme() {
             "https" => Some(
                 self.inner
@@ -220,6 +236,8 @@ impl Client {
     ) -> Result<Response> {
         let mut current = req.clone();
         let mut followed = 0u32;
+        // Whether the current hop has already answered an auth challenge.
+        let mut answered = false;
         loop {
             if !hop.jar_cookie_names.is_empty() {
                 rec.record(TraceEvent::Info {
@@ -246,6 +264,30 @@ impl Client {
                     rec.record(TraceEvent::Info { message });
                 }
             }
+            if !answered && let Some(answer) = crate::auth::digest_retry(&current, &url, &resp) {
+                match answer {
+                    Ok(value) => {
+                        rec.record(TraceEvent::AuthChallenge {
+                            status: resp.status,
+                            scheme: "digest".into(),
+                        });
+                        hop = match self.prepare_hop(&current, &url, Some(value)).await {
+                            Ok(hop) => hop,
+                            Err(e) => {
+                                return Err(
+                                    rec.fail(format!("cannot answer the challenge: {e}"), false)
+                                );
+                            }
+                        };
+                        answered = true;
+                        continue;
+                    }
+                    Err(why) => rec.record(TraceEvent::Info {
+                        message: format!("cannot answer the Digest challenge: {why}"),
+                    }),
+                }
+            }
+            answered = false;
             if !current.settings.follow_redirects {
                 return Ok(resp);
             }
@@ -275,7 +317,7 @@ impl Client {
             }
             let mut next_url = next.url;
             crate::auth::apply_to_url(&next.request.auth, &mut next_url);
-            hop = match self.prepare_hop(&next.request, &next_url).await {
+            hop = match self.prepare_hop(&next.request, &next_url, None).await {
                 Ok(hop) => hop,
                 Err(e) => return Err(rec.fail(format!("cannot follow redirect: {e}"), false)),
             };

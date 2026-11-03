@@ -99,3 +99,17 @@ TOML requires plain keys before sub-tables, so saving would reorder headers and 
 explicitly (sections, `[[arrays]]`, inline entries inside key/value tables, `"""` multi-line strings).
 **Consequences:** Saved files read like hand-written ones and round-trip exactly. In-place edits that
 keep comments will use `toml_edit`'s document model (P6/P7).
+
+## ADR-014: Digest auth in-house; md-5 for the legacy hash
+**Status:** Accepted (2026-11-03)
+**Context:** Digest auth (RFC 7616) is a small algorithm but needs a challenge round trip that must
+show up in our trace and respect our redirect and redaction rules; crates such as `diqwest` are tied
+to reqwest. Most servers still use MD5, which `ring` does not provide.
+**Decision:** Implement challenge parsing and the response computation in `snapreq-core::auth::digest`,
+tested against the RFC 7616 and RFC 2617 examples. SHA-256 and SHA-512-256 come from `ring`; MD5 from
+RustCrypto's `md-5` (MIT/Apache-2.0, no other new dependencies of note). The retry is recorded as a
+`TraceEvent::AuthChallenge`, which splits hops like `Redirect`.
+**Consequences:** One small new dependency. `qop=auth-int` is not supported (it needs the whole body
+hashed before sending, which conflicts with streamed file bodies); it can be added for in-memory
+bodies later. Each challenge uses `nc=00000001`; nonce reuse across requests is a possible
+optimization.

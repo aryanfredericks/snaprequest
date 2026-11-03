@@ -180,6 +180,11 @@ pub enum AuthSpec {
     Bearer {
         token: String,
     },
+    Digest {
+        username: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        password: String,
+    },
     ApiKey {
         name: String,
         value: String,

@@ -132,6 +132,7 @@ Only one kind of body can be given per request.
 | Option | Meaning |
 |---|---|
 | `-u, --user USER[:PASSWORD]` | Basic auth. Without `:PASSWORD` you are asked for it on a terminal (keeps it out of shell history); when stdin is not a terminal the password is empty. |
+| `--digest` | Use Digest auth (RFC 7616) with the `-u` credentials: the request is sent without credentials, and once more with the answer if the server replies `401` with a Digest challenge. MD5, SHA-256 and SHA-512-256 (and `-sess`), `qop=auth`. |
 | `--bearer TOKEN` | `Authorization: Bearer TOKEN`. |
 | `--api-key NAME=VALUE` | API key in the header `NAME`, or in the query parameter `NAME` with `--api-key-in query`. |
 | `--api-key-in header\|query` | Where `--api-key` goes (default `header`). |
@@ -139,7 +140,8 @@ Only one kind of body can be given per request.
 
 Only one auth option can be given. With a collection request, an auth option replaces the
 collection's `[auth]`. Auth is applied to every hop of a redirect chain on the same origin and
-dropped when a redirect goes to another origin. A header given with `-H` (or in the request file)
+dropped when a redirect goes to another origin. A Digest challenge splits the trace and the waterfall
+like a redirect: phase timings describe the final, authenticated exchange. A header given with `-H` (or in the request file)
 with the same name wins over the auth option; the trace says so. Credential values are hidden in
 all output, including a query API key in URLs.
 

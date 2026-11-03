@@ -104,6 +104,10 @@ pub enum TraceEvent {
         from: String,
         to: String,
     },
+    /// The server asked for credentials (`status` 401 with a `scheme` challenge, for
+    /// example `digest`) and the request is sent again with them. Events after this one
+    /// belong to the authenticated exchange.
+    AuthChallenge { status: u16, scheme: String },
     /// Free-form note (for example "decompressed gzip body").
     Info { message: String },
     /// Execution failed in the given phase.

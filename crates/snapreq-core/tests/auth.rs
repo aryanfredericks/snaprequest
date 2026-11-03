@@ -5,7 +5,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 
 use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use snapreq_core::model::{ApiKeyLocation, Auth, TraceEntry, TraceEvent};
@@ -17,6 +17,8 @@ use tokio::net::TcpListener;
 /// - `/bearer`: 200 only for token `t0ken-value`
 /// - `/key-header`: 200 only with `X-API-Key: key-123456`
 /// - `/key-query`: 200 only with `?api_key=key-123456`; echoes the credential back
+/// - `/digest`: Digest auth (SHA-256, qop=auth) for `Mufasa` / `Circle of Life`; echoes the
+///   method and body on success
 /// - `/echo`: replies with the request target and headers
 /// - `/to?to=<url>`: 302 to `url`
 async fn handle(
@@ -40,6 +42,27 @@ async fn handle(
             .map(|(_, v)| v.clone())
     };
     let ok = |body: String| hyper::Response::new(Full::new(Bytes::from(body)));
+    if req.uri().path() == "/digest" {
+        let authorized = digest_ok(req.method().as_str(), &header("authorization"));
+        let method = req.method().to_string();
+        let body = req.into_body().collect().await.unwrap().to_bytes();
+        return Ok(if authorized {
+            ok(format!(
+                "welcome {method} {}",
+                String::from_utf8_lossy(&body)
+            ))
+        } else {
+            hyper::Response::builder()
+                .status(401)
+                .header("www-authenticate", r#"Basic realm="other""#)
+                .header(
+                    "www-authenticate",
+                    format!(r#"Digest realm="{REALM}", qop="auth", algorithm=SHA-256, nonce="{NONCE}", opaque="op""#),
+                )
+                .body(Full::new(Bytes::new()))
+                .unwrap()
+        });
+    }
     let denied = || {
         hyper::Response::builder()
             .status(401)
@@ -76,6 +99,42 @@ async fn handle(
             .unwrap(),
     };
     Ok(resp)
+}
+
+const REALM: &str = "test@snapreq";
+const NONCE: &str = "dcd98b7102dd2f0e8b11d0f600bfb0c093";
+
+fn sha256(s: &str) -> String {
+    ring::digest::digest(&ring::digest::SHA256, s.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Checks a Digest `Authorization` header the way a server does.
+fn digest_ok(method: &str, header: &str) -> bool {
+    let Some(rest) = header.strip_prefix("Digest ") else {
+        return false;
+    };
+    let params: std::collections::HashMap<&str, &str> = rest
+        .split(", ")
+        .filter_map(|p| p.split_once('='))
+        .map(|(k, v)| (k, v.trim_matches('"')))
+        .collect();
+    let get = |k: &str| params.get(k).copied().unwrap_or_default();
+    if get("username") != "Mufasa" || get("nonce") != NONCE || get("opaque") != "op" {
+        return false;
+    }
+    let ha1 = sha256(&format!("Mufasa:{REALM}:Circle of Life"));
+    let ha2 = sha256(&format!("{method}:{}", get("uri")));
+    let expected = sha256(&format!(
+        "{ha1}:{NONCE}:{}:{}:{}:{ha2}",
+        get("nc"),
+        get("cnonce"),
+        get("qop")
+    ));
+    get("response") == expected
 }
 
 async fn start_server() -> SocketAddr {
@@ -263,4 +322,88 @@ async fn invalid_credentials_fail_without_showing_them() {
         .to_string();
     assert!(err.contains("bearer auth"), "{err}");
     assert!(!err.contains("break-secret"), "{err}");
+}
+
+fn digest(password: &str) -> Auth {
+    Auth::Digest {
+        username: "Mufasa".into(),
+        password: password.into(),
+    }
+}
+
+fn events(trace: &[TraceEntry]) -> Vec<String> {
+    trace
+        .iter()
+        .filter_map(|e| match &e.event {
+            TraceEvent::ResponseHeaders { status, .. } => Some(status.to_string()),
+            TraceEvent::AuthChallenge { status, scheme } => {
+                Some(format!("challenge {status} {scheme}"))
+            }
+            TraceEvent::Redirect { status, .. } => Some(format!("redirect {status}")),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn digest_answers_the_challenge_and_resends_the_body() {
+    let addr = start_server().await;
+    let client = Client::default();
+
+    let req = Request::new(http::Method::PUT, url(addr, "/digest?x=1"))
+        .body(snapreq_core::Body::Text {
+            content: "payload".into(),
+            content_type: None,
+        })
+        .auth(digest("Circle of Life"));
+    let resp = client.execute(&req).await.unwrap();
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.text(), Some("welcome PUT payload"));
+    assert_eq!(events(&resp.trace), ["401", "challenge 401 digest", "200"]);
+    // Timings describe the authenticated exchange: it reused the connection.
+    assert!(resp.timings.connect.is_none());
+    assert!(trace_text(&resp.trace).contains("Digest <redacted>"));
+    assert!(!trace_text(&resp.trace).contains("Circle of Life"));
+
+    // A wrong password is tried once; the final 401 is returned.
+    let resp = client
+        .execute(&Request::get(url(addr, "/digest")).auth(digest("wrong")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 401);
+    assert_eq!(events(&resp.trace), ["401", "challenge 401 digest", "401"]);
+}
+
+#[tokio::test]
+async fn digest_is_answered_again_after_a_redirect() {
+    let addr = start_server().await;
+    let resp = Client::default()
+        .execute(&Request::get(redirect(addr, "/digest")).auth(digest("Circle of Life")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    assert_eq!(
+        events(&resp.trace),
+        ["302", "redirect 302", "401", "challenge 401 digest", "200"]
+    );
+}
+
+#[tokio::test]
+async fn digest_without_a_challenge_is_a_normal_request() {
+    let addr = start_server().await;
+    let client = Client::default();
+    let resp = client
+        .execute(&Request::get(url(addr, "/echo")).auth(digest("x")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    assert!(!resp.text().unwrap().contains("authorization"));
+
+    // A 401 with only a Basic challenge is returned as is.
+    let resp = client
+        .execute(&Request::get(url(addr, "/basic")).auth(digest("x")))
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 401);
+    assert_eq!(events(&resp.trace), ["401"]);
 }

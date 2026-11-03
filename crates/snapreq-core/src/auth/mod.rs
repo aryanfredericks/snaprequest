@@ -1,6 +1,10 @@
 //! Applying a request's [`Auth`] to the hop being sent.
 
+use crate::model::Response;
+
 use url::Url;
+
+pub(crate) mod digest;
 
 use crate::model::{ApiKeyLocation, Auth, Request, auth::basic_credentials};
 
@@ -18,7 +22,53 @@ pub(crate) fn header(auth: &Auth) -> Option<(&str, String)> {
             value,
             location: ApiKeyLocation::Header,
         } => Some((name.trim(), value.clone())),
-        Auth::ApiKey { .. } => None,
+        Auth::ApiKey { .. } | Auth::Digest { .. } => None,
+    }
+}
+
+/// The header `auth` sets (now or after a challenge), if any.
+fn header_name(auth: &Auth) -> Option<&str> {
+    match auth {
+        Auth::Digest { .. } => Some("Authorization"),
+        other => header(other).map(|(name, _)| name),
+    }
+}
+
+/// For Digest auth: the `Authorization` value answering the challenge in `resp`, if `resp`
+/// is a `401` with one. `Err` explains a challenge that cannot be answered.
+pub(crate) fn digest_retry(
+    req: &Request,
+    url: &Url,
+    resp: &Response,
+) -> Option<Result<String, String>> {
+    let Auth::Digest { username, password } = &req.auth else {
+        return None;
+    };
+    if resp.status != 401 || shadowed_by_header(req).is_some() {
+        return None;
+    }
+    let challenges = digest::parse_challenges(
+        resp.headers
+            .iter()
+            .filter(|h| h.name.eq_ignore_ascii_case("www-authenticate"))
+            .map(|h| h.value.as_str()),
+    );
+    let uri = match url.query() {
+        Some(q) => format!("{}?{q}", url.path()),
+        None => url.path().to_owned(),
+    };
+    let cnonce = digest::cnonce();
+    let creds = digest::Credentials {
+        username,
+        password,
+        method: req.method.as_str(),
+        uri: &uri,
+        cnonce: &cnonce,
+    };
+    match digest::authorization(&challenges, &creds) {
+        Ok(value) => Some(Ok(value)),
+        Err(digest::DigestError::NoChallenge) => None,
+        Err(digest::DigestError::Unsupported(why)) => Some(Err(why)),
     }
 }
 
@@ -47,7 +97,7 @@ pub(crate) fn apply_to_url(auth: &Auth, url: &mut Url) {
 /// Whether the request's own enabled headers already set the header `auth` would add.
 /// Hand-written headers win, like `-H` over `-u` in curl.
 pub(crate) fn shadowed_by_header(req: &Request) -> Option<String> {
-    let (name, _) = header(&req.auth)?;
+    let name = header_name(&req.auth)?;
     req.enabled_headers()
         .find(|h| h.name.trim().eq_ignore_ascii_case(name))
         .map(|h| h.name.trim().to_owned())

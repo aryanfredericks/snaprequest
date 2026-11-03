@@ -294,6 +294,10 @@ fn auth_is_inherited_overridden_and_switched_off() {
                 "url = \"http://a.test\"\n[auth]\ntype = \"none\"\n",
             ),
             (
+                "keys/digest.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"digest\"\nusername = \"{{user}}\"\npassword = \"pw\"\n",
+            ),
+            (
                 "keys/basic.toml",
                 "url = \"http://a.test\"\n[auth]\ntype = \"basic\"\nusername = \"{{user}}\"\n",
             ),
@@ -316,6 +320,13 @@ fn auth_is_inherited_overridden_and_switched_off() {
         }
     );
     assert_eq!(build(&dir, "keys/open", &vars).unwrap().auth, Auth::None);
+    assert_eq!(
+        build(&dir, "keys/digest", &vars).unwrap().auth,
+        Auth::Digest {
+            username: "me".into(),
+            password: "pw".into()
+        }
+    );
     assert_eq!(
         build(&dir, "keys/basic", &vars).unwrap().auth,
         Auth::Basic {

@@ -20,6 +20,7 @@ http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-util.workspace = true
+md-5.workspace = true
 mime_guess.workspace = true
 percent-encoding.workspace = true
 ring.workspace = true

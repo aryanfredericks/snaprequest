@@ -182,6 +182,10 @@ impl Builder<'_> {
             AuthSpec::Bearer { token } => Auth::Bearer {
                 token: self.text("auth.token", token)?,
             },
+            AuthSpec::Digest { username, password } => Auth::Digest {
+                username: self.text("auth.username", username)?,
+                password: self.text("auth.password", password)?,
+            },
             AuthSpec::ApiKey {
                 name,
                 value,
