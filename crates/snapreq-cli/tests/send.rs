@@ -341,3 +341,44 @@ async fn output_file_receives_the_body() {
     assert_eq!(out.status.code(), Some(3));
     assert!(stderr(&out).contains("does not exist"), "{}", stderr(&out));
 }
+
+#[tokio::test]
+async fn auth_flags_send_credentials_and_hide_them() {
+    let addr = server().await;
+    let out = snapreq(&[
+        "send",
+        &format!("http://{addr}/k"),
+        "--api-key",
+        "api_key=s3cret key",
+        "--api-key-in",
+        "query",
+        "--format",
+        "json",
+        "-v",
+    ])
+    .await;
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc = json_doc(&out);
+    assert_eq!(
+        doc["request"]["url"],
+        format!("http://{addr}/k?api_key=<redacted>")
+    );
+    let body = doc["response"]["body"]["data"].as_str().unwrap();
+    assert!(body.starts_with("GET /k?api_key=s3cret+key "), "{body}");
+    let mut without_body = doc.clone();
+    without_body["response"]["body"] = serde_json::Value::Null;
+    let text = without_body.to_string();
+    assert!(!text.contains("s3cret"), "{text}");
+
+    // `-u user` without a password and no terminal: an empty password, no prompt.
+    let out = snapreq(&["send", &format!("http://{addr}/u"), "-u", "me", "-v"]).await;
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("Authorization: Basic <redacted>"),
+        "{}",
+        stderr(&out)
+    );
+
+    let out = snapreq(&["send", "http://x.test", "--bearer", "a", "-u", "b:c"]).await;
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+}

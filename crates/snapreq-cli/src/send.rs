@@ -6,11 +6,11 @@ use std::time::Duration;
 use http::Method;
 use snapreq_core::Request;
 use snapreq_core::model::{
-    Body, ClientCertificate, HttpVersionPref, KeyValue, MultipartPart, PartValue, ProxyMode,
-    ResolveOverride, TlsVersion,
+    ApiKeyLocation, Auth, Body, ClientCertificate, HttpVersionPref, KeyValue, MultipartPart,
+    PartValue, ProxyMode, ResolveOverride, TlsVersion,
 };
 
-use crate::cli::{SendArgs, TlsVersionArg};
+use crate::cli::{ApiKeyInArg, SendArgs, TlsVersionArg};
 
 /// A problem with the arguments, reported before anything is sent.
 #[derive(Debug, PartialEq, Eq)]
@@ -52,6 +52,7 @@ pub(crate) fn build_request(args: &SendArgs) -> Result<Request, ArgError> {
 /// - `-H` replaces headers of the same name (case-insensitive) and adds new ones;
 /// - `-q` adds query parameters;
 /// - a body option replaces the body;
+/// - an auth option (`-u`, `--bearer`, `--api-key`, `--no-auth`) replaces the auth;
 /// - every connection, TLS and output option overrides the matching setting.
 pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), ArgError> {
     for h in &args.headers {
@@ -72,6 +73,9 @@ pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), 
     let body = body(args)?;
     if !body.is_none() {
         req.body = body;
+    }
+    if let Some(auth) = auth(args)? {
+        req.auth = auth;
     }
 
     let s = &mut req.settings;
@@ -132,6 +136,47 @@ pub(crate) fn apply_overrides(req: &mut Request, args: &SendArgs) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// The auth given on the command line, if any.
+fn auth(args: &SendArgs) -> Result<Option<Auth>, ArgError> {
+    if let Some(user) = &args.user {
+        let (username, password) = user.split_once(':').unwrap_or((user, ""));
+        return Ok(Some(Auth::Basic {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        }));
+    }
+    if let Some(token) = &args.bearer {
+        if token.trim().is_empty() {
+            return err("--bearer: the token is empty");
+        }
+        return Ok(Some(Auth::Bearer {
+            token: token.trim().to_owned(),
+        }));
+    }
+    if let Some(key) = &args.api_key {
+        let Some((name, value)) = key.split_once('=').filter(|(n, _)| !n.trim().is_empty()) else {
+            return err(format!(
+                "invalid --api-key `{}`, expected `NAME=VALUE`",
+                key.split_once('=').map_or(key.as_str(), |(n, _)| n)
+            ));
+        };
+        return Ok(Some(Auth::ApiKey {
+            name: name.trim().to_owned(),
+            value: value.to_owned(),
+            location: match args.api_key_in {
+                ApiKeyInArg::Header => ApiKeyLocation::Header,
+                ApiKeyInArg::Query => ApiKeyLocation::Query,
+            },
+        }));
+    }
+    Ok(args.no_auth.then_some(Auth::None))
+}
+
+/// `-u USER` without a password: whether to ask for one.
+pub(crate) fn needs_password_prompt(args: &SendArgs) -> bool {
+    args.user.as_deref().is_some_and(|u| !u.contains(':'))
 }
 
 fn body(args: &SendArgs) -> Result<Body, ArgError> {
@@ -419,6 +464,101 @@ mod tests {
         assert_eq!(s.tls.min_version, Some(TlsVersion::Tls13));
         assert!(s.capture_wire);
         assert_eq!(s.secrets, ["tok"]);
+    }
+
+    #[test]
+    fn auth_options() {
+        use snapreq_core::model::{ApiKeyLocation, Auth};
+        let auth = |args: &[&str]| parse(&[&["http://a.test"], args].concat()).map(|r| r.auth);
+        assert_eq!(auth(&[]).unwrap(), Auth::None);
+        assert_eq!(
+            auth(&["-u", "me:p:w"]).unwrap(),
+            Auth::Basic {
+                username: "me".into(),
+                password: "p:w".into()
+            }
+        );
+        assert_eq!(
+            auth(&["--user", "me"]).unwrap(),
+            Auth::Basic {
+                username: "me".into(),
+                password: String::new()
+            }
+        );
+        assert_eq!(
+            auth(&["--bearer", " t "]).unwrap(),
+            Auth::Bearer { token: "t".into() }
+        );
+        assert_eq!(
+            auth(&["--api-key", "X-Key=a=b"]).unwrap(),
+            Auth::ApiKey {
+                name: "X-Key".into(),
+                value: "a=b".into(),
+                location: ApiKeyLocation::Header
+            }
+        );
+        assert_eq!(
+            auth(&["--api-key", "k=v", "--api-key-in", "query"]).unwrap(),
+            Auth::ApiKey {
+                name: "k".into(),
+                value: "v".into(),
+                location: ApiKeyLocation::Query
+            }
+        );
+        assert!(
+            auth(&["--api-key", "novalue"])
+                .unwrap_err()
+                .0
+                .contains("NAME=VALUE")
+        );
+        assert!(auth(&["--api-key", "=v"]).is_err());
+        assert!(auth(&["--bearer", " "]).is_err());
+    }
+
+    #[test]
+    fn existing_auth_is_kept_unless_replaced() {
+        use snapreq_core::model::Auth;
+        let cli = Cli::try_parse_from(["snapreq", "send", "x", "--no-auth"]).unwrap();
+        let Command::Send(args) = cli.command else {
+            panic!()
+        };
+        let mut req = Request::get("http://a.test").auth(Auth::Bearer { token: "t".into() });
+        apply_overrides(&mut req, &args).unwrap();
+        assert_eq!(req.auth, Auth::None);
+
+        let cli = Cli::try_parse_from(["snapreq", "send", "x"]).unwrap();
+        let Command::Send(args) = cli.command else {
+            panic!()
+        };
+        let mut req = Request::get("http://a.test").auth(Auth::Bearer { token: "t".into() });
+        apply_overrides(&mut req, &args).unwrap();
+        assert_eq!(req.auth, Auth::Bearer { token: "t".into() });
+        assert!(needs_password_prompt(&match Cli::try_parse_from([
+            "snapreq", "send", "x", "-u", "me"
+        ])
+        .unwrap()
+        .command
+        {
+            Command::Send(a) => a,
+            _ => panic!(),
+        }));
+    }
+
+    #[test]
+    fn auth_options_conflict() {
+        for args in [
+            &["-u", "a:b", "--bearer", "t"][..],
+            &["--bearer", "t", "--api-key", "k=v"],
+            &["--api-key", "k=v", "--no-auth"],
+            &["--api-key-in", "query"],
+        ] {
+            let full: Vec<&str> = ["snapreq", "send", "x"]
+                .iter()
+                .copied()
+                .chain(args.iter().copied())
+                .collect();
+            assert!(Cli::try_parse_from(full).is_err(), "{args:?}");
+        }
     }
 
     #[test]

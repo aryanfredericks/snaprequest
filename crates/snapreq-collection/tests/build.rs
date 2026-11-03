@@ -243,3 +243,154 @@ fn errors_in_inherited_values_name_the_file_that_has_them() {
         "{err}"
     );
 }
+
+/// Writes `files` (relative path, contents) into a fresh collection directory.
+fn temp_collection(tag: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("snapreq-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (path, text) in files {
+        let path = dir.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    dir
+}
+
+fn build(
+    dir: &Path,
+    key: &str,
+    vars: &[(&str, &str)],
+) -> snapreq_collection::Result<snapreq_core::Request> {
+    let (c, _) = Collection::load(dir).unwrap();
+    let mut rt = Variables::default();
+    for (k, v) in vars {
+        rt.set(*k, *v);
+    }
+    let s = Scopes::for_request(&c, key, None, &Variables::default(), &rt);
+    build_request(&c, key, &s)
+}
+
+#[test]
+fn auth_is_inherited_overridden_and_switched_off() {
+    use snapreq_core::model::{ApiKeyLocation, Auth};
+    let dir = temp_collection(
+        "auth",
+        &[
+            (
+                "snapreq.toml",
+                "format = 1\nname = \"A\"\n[auth]\ntype = \"bearer\"\ntoken = \"{{token}}\"\n",
+            ),
+            ("plain.toml", "url = \"http://a.test\"\n"),
+            (
+                "keys/folder.toml",
+                "[auth]\ntype = \"api_key\"\nname = \"api_key\"\nvalue = \"{{key}}\"\nlocation = \"query\"\n",
+            ),
+            (
+                "keys/inherits.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"inherit\"\n",
+            ),
+            (
+                "keys/open.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"none\"\n",
+            ),
+            (
+                "keys/basic.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"basic\"\nusername = \"{{user}}\"\n",
+            ),
+        ],
+    );
+    let vars = [("token", "tok"), ("key", "k"), ("user", "me")];
+
+    assert_eq!(
+        build(&dir, "plain", &vars).unwrap().auth,
+        Auth::Bearer {
+            token: "tok".into()
+        }
+    );
+    assert_eq!(
+        build(&dir, "keys/inherits", &vars).unwrap().auth,
+        Auth::ApiKey {
+            name: "api_key".into(),
+            value: "k".into(),
+            location: ApiKeyLocation::Query
+        }
+    );
+    assert_eq!(build(&dir, "keys/open", &vars).unwrap().auth, Auth::None);
+    assert_eq!(
+        build(&dir, "keys/basic", &vars).unwrap().auth,
+        Auth::Basic {
+            username: "me".into(),
+            password: String::new()
+        }
+    );
+
+    // Overridden auth is not interpolated: `token` and `key` may be undefined there.
+    assert!(build(&dir, "keys/basic", &[("user", "me")]).is_ok());
+    let err = build(&dir, "keys/inherits", &[]).unwrap_err().to_string();
+    assert!(
+        err.contains("folder.toml: auth.value: variable `key` is not defined"),
+        "{err}"
+    );
+}
+
+#[test]
+fn secret_auth_values_are_marked_for_redaction() {
+    let dir = temp_collection(
+        "auth-secret",
+        &[
+            (
+                "snapreq.toml",
+                "format = 1\nname = \"S\"\n[vars]\npass = { secret = true }\n",
+            ),
+            (
+                "r.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"basic\"\nusername = \"u\"\npassword = \"{{pass}}\"\n",
+            ),
+        ],
+    );
+    let err = build(&dir, "r", &[]).unwrap_err().to_string();
+    assert!(
+        err.contains("r.toml: auth.password: secret variable `pass`"),
+        "{err}"
+    );
+
+    // Auth credentials are always hidden, wherever their values come from.
+    let req = build(&dir, "r", &[("pass", "hunter2")]).unwrap();
+    let secrets = req.secrets();
+    assert!(secrets.contains(&"hunter2".to_owned()), "{secrets:?}");
+    assert!(secrets.contains(&"dTpodW50ZXIy".to_owned()), "{secrets:?}");
+}
+
+#[test]
+fn bad_auth_tables_are_errors() {
+    for (text, needle) in [
+        ("[auth]\ntype = \"oauth9\"\n", "unknown variant `oauth9`"),
+        (
+            "[auth]\ntype = \"bearer\"\ntokn = \"x\"\n",
+            "unknown field `tokn`",
+        ),
+        ("[auth]\ntype = \"bearer\"\n", "missing field `token`"),
+    ] {
+        let dir = temp_collection(
+            "auth-bad",
+            &[
+                ("snapreq.toml", "format = 1\nname = \"B\"\n"),
+                ("r.toml", &format!("url = \"http://a.test\"\n{text}")),
+            ],
+        );
+        let err = Collection::load(&dir).unwrap_err().to_string();
+        assert!(err.contains(needle), "{err}");
+    }
+    let dir = temp_collection(
+        "auth-empty-name",
+        &[
+            ("snapreq.toml", "format = 1\nname = \"B\"\n"),
+            (
+                "r.toml",
+                "url = \"http://a.test\"\n[auth]\ntype = \"api_key\"\nname = \" \"\nvalue = \"v\"\n",
+            ),
+        ],
+    );
+    let err = build(&dir, "r", &[]).unwrap_err().to_string();
+    assert!(err.contains("auth.name: must not be empty"), "{err}");
+}

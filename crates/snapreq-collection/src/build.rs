@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use snapreq_core::Request;
 use snapreq_core::model::{
-    Body, ClientCertificate, KeyValue, MultipartPart, PartValue, RequestSettings,
+    Auth, Body, ClientCertificate, KeyValue, MultipartPart, PartValue, RequestSettings,
 };
 
 use crate::error::{Error, Result};
-use crate::files::{BodySpec, Settings};
+use crate::files::{AuthSpec, BodySpec, Settings};
 use crate::interp::Interpolator;
 use crate::kv::KeyValues;
 use crate::load::{COLLECTION_FILE, Collection, FOLDER_FILE, RequestItem};
@@ -18,10 +18,11 @@ use crate::vars::Scopes;
 /// Builds the request at `key_path` (for example `users/create-user`) with every
 /// placeholder resolved from `scopes`.
 ///
-/// Headers and settings are inherited from the collection, then each enclosing folder
-/// (outermost first), then the request itself:
+/// Headers, auth and settings are inherited from the collection, then each enclosing
+/// folder (outermost first), then the request itself:
 /// - a header replaces every inherited header with the same name (case-insensitive);
 ///   a disabled one switches the inherited header off;
+/// - the innermost `[auth]` that is not `inherit` applies; `none` switches auth off;
 /// - a setting overrides the inherited value; relative paths resolve against the
 ///   file that set them.
 ///
@@ -36,20 +37,22 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     })?;
 
     let root = &collection.root;
-    let mut layers: Vec<(PathBuf, PathBuf, &KeyValues, &Settings)> = vec![(
-        root.join(COLLECTION_FILE),
-        root.clone(),
-        &collection.file.headers,
-        &collection.file.settings,
-    )];
+    let mut layers: Vec<Layer> = vec![Layer {
+        file: root.join(COLLECTION_FILE),
+        dir: root.clone(),
+        headers: &collection.file.headers,
+        auth: collection.file.auth.as_ref(),
+        settings: &collection.file.settings,
+    }];
     for folder in collection.folders_of(key_path) {
         let dir = root.join(&folder.path);
-        layers.push((
-            dir.join(FOLDER_FILE),
+        layers.push(Layer {
+            file: dir.join(FOLDER_FILE),
             dir,
-            &folder.file.headers,
-            &folder.file.settings,
-        ));
+            headers: &folder.file.headers,
+            auth: folder.file.auth.as_ref(),
+            settings: &folder.file.settings,
+        });
     }
 
     let mut b = Builder {
@@ -59,20 +62,44 @@ pub fn build_request(collection: &Collection, key_path: &str, scopes: &Scopes) -
     };
     let mut headers = Vec::new();
     let mut settings = RequestSettings::default();
-    for (file, dir, layer_headers, layer_settings) in layers {
-        b.file = file;
-        b.base_dir = dir;
-        let layer = b.key_values("headers", layer_headers)?;
-        merge_headers(&mut headers, layer);
-        settings = b.settings(layer_settings, settings)?;
+    // The innermost explicit auth and the file it comes from.
+    let mut auth: Option<(&AuthSpec, PathBuf)> = None;
+    for layer in layers {
+        b.file = layer.file;
+        b.base_dir = layer.dir;
+        let own = b.key_values("headers", layer.headers)?;
+        merge_headers(&mut headers, own);
+        settings = b.settings(layer.settings, settings)?;
+        if let Some(spec) = layer.auth.filter(|a| **a != AuthSpec::Inherit) {
+            auth = Some((spec, b.file.clone()));
+        }
     }
 
     let file_path = root.join(&item.path);
+    if let Some(spec) = item.file.auth.as_ref().filter(|a| **a != AuthSpec::Inherit) {
+        auth = Some((spec, file_path.clone()));
+    }
     b.base_dir = file_path.parent().unwrap_or(root).to_path_buf();
     b.file = file_path;
     let mut req = b.request(item, headers, settings)?;
+    if let Some((spec, file)) = auth {
+        // Only the auth that applies is interpolated, so an overridden one may use
+        // variables that are not defined.
+        let request_file = std::mem::replace(&mut b.file, file);
+        req.auth = b.auth(spec)?;
+        b.file = request_file;
+    }
     req.settings.secrets = b.interp.into_secrets();
     Ok(req)
+}
+
+/// One level of inheritance: the collection or a folder.
+struct Layer<'a> {
+    file: PathBuf,
+    dir: PathBuf,
+    headers: &'a KeyValues,
+    auth: Option<&'a AuthSpec>,
+    settings: &'a Settings,
 }
 
 /// Appends `layer` to `inherited`, first removing inherited headers that `layer`
@@ -143,6 +170,34 @@ impl Builder<'_> {
         }
         req.settings = self.settings(&f.settings, settings)?;
         Ok(req)
+    }
+
+    fn auth(&mut self, spec: &AuthSpec) -> Result<Auth> {
+        Ok(match spec {
+            AuthSpec::Inherit | AuthSpec::None => Auth::None,
+            AuthSpec::Basic { username, password } => Auth::Basic {
+                username: self.text("auth.username", username)?,
+                password: self.text("auth.password", password)?,
+            },
+            AuthSpec::Bearer { token } => Auth::Bearer {
+                token: self.text("auth.token", token)?,
+            },
+            AuthSpec::ApiKey {
+                name,
+                value,
+                location,
+            } => {
+                let name = self.text("auth.name", name)?;
+                if name.trim().is_empty() {
+                    return Err(Error::invalid(&self.file, "auth.name: must not be empty"));
+                }
+                Auth::ApiKey {
+                    name,
+                    value: self.text("auth.value", value)?,
+                    location: *location,
+                }
+            }
+        })
     }
 
     fn body(&mut self, body: &BodySpec) -> Result<Body> {

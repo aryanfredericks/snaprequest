@@ -217,4 +217,17 @@ fn saved_files_read_like_hand_written_ones() {
         to_toml(&new).unwrap(),
         "name = \"New\"\nurl = \"https://a.test\"\n"
     );
+
+    new.auth = Some(snapreq_collection::AuthSpec::ApiKey {
+        name: "X-Key".into(),
+        value: "{{key}}".into(),
+        location: snapreq_core::model::ApiKeyLocation::Header,
+    });
+    let text = to_toml(&new).unwrap();
+    assert!(
+        text.ends_with("\n[auth]\ntype = \"api_key\"\nname = \"X-Key\"\nvalue = \"{{key}}\"\n"),
+        "{text}"
+    );
+    let back: RequestFile = toml::from_str(&text).unwrap();
+    assert_eq!(back, new);
 }

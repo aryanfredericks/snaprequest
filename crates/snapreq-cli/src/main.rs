@@ -106,10 +106,19 @@ async fn run_send(args: &SendArgs) -> u8 {
             collection_cmd::build(&root, &key, args)
         }
     });
-    let request = match built {
+    let mut request = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
     };
+    if send::needs_password_prompt(args)
+        && std::io::stdin().is_terminal()
+        && let snapreq_core::model::Auth::Basic { username, password } = &mut request.auth
+    {
+        match rpassword::prompt_password(format!("Password for `{username}`: ")) {
+            Ok(p) => *password = p,
+            Err(e) => return invalid(format!("cannot read the password: {e}")),
+        }
+    }
     let terminal = std::io::stdout().is_terminal();
     let mut parts = match &args.print {
         Some(spec) => match Parts::parse(spec) {

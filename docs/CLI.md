@@ -127,6 +127,22 @@ $ snapreq send https://example.com/ -v -p ''
 
 Only one kind of body can be given per request.
 
+## Auth options
+
+| Option | Meaning |
+|---|---|
+| `-u, --user USER[:PASSWORD]` | Basic auth. Without `:PASSWORD` you are asked for it on a terminal (keeps it out of shell history); when stdin is not a terminal the password is empty. |
+| `--bearer TOKEN` | `Authorization: Bearer TOKEN`. |
+| `--api-key NAME=VALUE` | API key in the header `NAME`, or in the query parameter `NAME` with `--api-key-in query`. |
+| `--api-key-in header\|query` | Where `--api-key` goes (default `header`). |
+| `--no-auth` | Send no auth, even if the collection defines one. |
+
+Only one auth option can be given. With a collection request, an auth option replaces the
+collection's `[auth]`. Auth is applied to every hop of a redirect chain on the same origin and
+dropped when a redirect goes to another origin. A header given with `-H` (or in the request file)
+with the same name wins over the auth option; the trace says so. Credential values are hidden in
+all output, including a query API key in URLs.
+
 ## Connection options
 
 | Option | Meaning |

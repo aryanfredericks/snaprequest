@@ -3,6 +3,7 @@
 //! This crate must stay free of UI, CLI and storage concerns so that the CLI,
 //! the server and any future front end can all share it.
 
+mod auth;
 pub mod client;
 pub mod error;
 pub mod model;

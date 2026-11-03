@@ -3,7 +3,7 @@
 use http::Method;
 use url::Url;
 
-use crate::model::{Body, Request, Response};
+use crate::model::{Auth, Body, Request, Response};
 
 /// Headers that carry credentials and must not leak to another origin.
 const CREDENTIAL_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
@@ -40,8 +40,8 @@ impl std::fmt::Display for RedirectError {
 /// - 303 turns any method except HEAD into GET without a body.
 /// - 301 and 302 turn POST into GET without a body.
 /// - 307 and 308 keep the method and body.
-/// - On a change of origin, `Authorization`, `Cookie`, `Proxy-Authorization` and an explicit
-///   `Host` header are dropped.
+/// - On a change of origin, `Authorization`, `Cookie`, `Proxy-Authorization`, an explicit
+///   `Host` header and the request's [`Auth`] are dropped.
 pub(crate) fn next_hop(
     current: &Request,
     url: &Url,
@@ -101,6 +101,13 @@ pub(crate) fn next_hop(
                 "cross-origin redirect: dropped {} header(s)",
                 dropped.join(", ")
             ));
+        }
+        if !next.auth.is_none() {
+            notes.push(format!(
+                "cross-origin redirect: not sending {} auth",
+                next.auth.kind()
+            ));
+            next.auth = Auth::None;
         }
     }
 
@@ -223,6 +230,19 @@ mod tests {
         // Same origin keeps them.
         let same = hop(&req, &redirect(307, "https://api.test/other"));
         assert!(header_names(&same.request).contains(&"Authorization"));
+    }
+
+    #[test]
+    fn cross_origin_drops_auth() {
+        let req = Request::get("https://api.test/").auth(Auth::Bearer { token: "t".into() });
+        let next = hop(&req, &redirect(302, "https://api.test:8443/"));
+        assert!(next.request.auth.is_none());
+        assert_eq!(
+            next.notes,
+            ["cross-origin redirect: not sending bearer auth"]
+        );
+        let same = hop(&req, &redirect(302, "/elsewhere"));
+        assert_eq!(same.request.auth, req.auth);
     }
 
     #[test]

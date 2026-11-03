@@ -21,6 +21,17 @@ pub const DEFAULT_SENSITIVE_HEADERS: [&str; 7] = [
     "x-auth-token",
 ];
 
+/// Characters `url` percent-encodes in paths and queries.
+const URL_UNSAFE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}');
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Redactor {
     /// Lowercase header names.
@@ -36,23 +47,34 @@ impl Redactor {
                 .iter()
                 .map(|h| h.trim().to_ascii_lowercase())
                 .collect(),
-            // Longest first, so a secret that contains another is hidden whole.
-            secrets: {
-                let mut s: Vec<String> =
-                    secrets.iter().filter(|s| !s.is_empty()).cloned().collect();
-                s.sort_by_key(|s| std::cmp::Reverse(s.len()));
-                s
-            },
+            secrets: Vec::new(),
         }
+        .with_secrets(secrets)
+    }
+
+    fn with_secrets(mut self, secrets: &[String]) -> Self {
+        for s in secrets {
+            self.add_secret(s);
+        }
+        self
     }
 
     /// Hides `secret` from now on. Values derived automatically are only added when
     /// they are long enough not to blank out unrelated text.
     pub(crate) fn add_secret(&mut self, secret: &str) {
-        if secret.is_empty() || self.secrets.iter().any(|s| s == secret) {
+        if secret.is_empty() {
             return;
         }
-        self.secrets.push(secret.to_owned());
+        // Also the forms the value takes inside a URL, where a secret query parameter
+        // (an API key, for example) shows up encoded.
+        let form: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
+        let percent = percent_encoding::utf8_percent_encode(secret, URL_UNSAFE).to_string();
+        for variant in [secret.to_owned(), form, percent] {
+            if !self.secrets.contains(&variant) {
+                self.secrets.push(variant);
+            }
+        }
+        // Longest first, so a secret that contains another is hidden whole.
         self.secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
     }
 
@@ -239,6 +261,15 @@ mod tests {
             "https://a.test/?key=<redacted>&x=<redacted>"
         );
         assert_eq!(r.header_value("X-Custom", "pre-tok-123"), "pre-<redacted>");
+    }
+
+    #[test]
+    fn url_encoded_forms_of_secrets_are_hidden() {
+        let r = redactor(&["a b&c"]);
+        assert_eq!(
+            r.text("http://x/?k=a+b%26c&p=/a%20b&c"),
+            "http://x/?k=<redacted>&p=/<redacted>"
+        );
     }
 
     #[test]

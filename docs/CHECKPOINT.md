@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 4 Authentication helpers, starting (Phases 0–3 complete)
-- **Current checkpoint:** P4.1, Basic, Bearer and API-key auth
+- **Phase:** 4 Authentication helpers, in progress (Phases 0–3 complete)
+- **Current checkpoint:** P4.2, Digest auth
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,13 +25,29 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is set to 1.85 (minimum for edition 2024); only checked in CI, not locally.
 
 ## Next steps
-1. P4.1: auth in the model and the collection format. Core: `snapreq_core::model::Auth` enum (None, Basic{user,pass},
-   Bearer{token}, ApiKey{name, value, location: header|query}) on `Request`, applied by the engine when building the
-   request (so redirects can drop it cross-origin: credentials must follow the same rule as Authorization headers),
-   values learned as secrets for redaction. Collection format: `[auth]` table with `type = "basic" | "bearer" |
-   "api_key" | "none" | "inherit"` (default inherit) in snapreq.toml / folder.toml / request files; interpolated.
-   CLI: `--auth basic:user:pass`? Prefer `-u user[:pass]` (curl) and `--bearer TOKEN`. Update FORMAT.md + CLI.md.
-   Then P4.2 Digest, P4.3 OAuth 2.0, P4.4 AWS SigV4, P4.5 inheritance details.
+1. P4.2 Digest (RFC 7616: MD5, SHA-256, `-sess`, qop=auth): `Auth::Digest { username, password }`. Needs a
+   challenge round trip: send without credentials, on 401 with `WWW-Authenticate: Digest` compute the response
+   and resend once (body must be re-sendable; `EncodedBody` already supports `to_body()` again). Track nonce
+   count per client. Both exchanges belong in one trace (an `info` event between them). Collection
+   `type = "digest"`, CLI `--digest` (curl) with `-u`.
+2. Then P4.3 OAuth 2.0, P4.4 AWS SigV4, P4.5 inheritance details (basic `[auth]` inheritance with
+   `inherit`/`none` already landed in P4.1; P4.5 is left for OAuth token sharing across a collection and showing
+   the effective auth in `snapreq ls`/`-v`).
+
+## Auth notes (P4.1)
+- Model: `snapreq_core::model::Auth` (`None`, `Basic`, `Bearer`, `ApiKey { name, value, location }`), field
+  `Request::auth` (JSON `{"type": ...}`, omitted when none). `Request::secrets()` = `settings.secrets` + auth
+  credentials (password, base64 Basic credential, token, key); used by the engine's redactor and CLI scrubbing.
+- Engine: `src/auth.rs` (crate-private). Header added in `build::prepare` after user headers unless an enabled
+  user header has the same name (then an `info` event says auth was not applied). Query keys are added in
+  `Request::effective_url()` and re-applied to redirect targets (replacing same-name params, so never doubled).
+  `redirect::next_hop` sets `auth = None` on a cross-origin hop with a note. Invalid header characters give an
+  error that does not echo the credential.
+- Redactor now also hides the form-urlencoded and percent-encoded forms of every secret (query values in URLs).
+- Collection: `AuthSpec` (`inherit` | `none` | `basic` | `bearer` | `api_key`) as `[auth]` in all three file kinds;
+  `build_request` picks the innermost non-`inherit` and interpolates only that one (errors name its file).
+- CLI: `-u USER[:PASS]` (prompts with rpassword on a TTY when no `:`), `--bearer`, `--api-key NAME=VALUE`
+  `--api-key-in header|query`, `--no-auth`; mutually exclusive via clap `conflicts_with`.
 
 ## CLI collection notes (P3.6)
 - `crates/snapreq-cli/src/collection_cmd.rs`: `resolve_target` (`-c DIR KEY`, a `.toml` path inside a collection, or a key from inside a collection dir; otherwise URL), `build` (load → env → `--var` runtime scope → `Secrets::fill` → `build_request` → `apply_overrides`), `ls`, `new_collection`, `new_request`, `secret_set` (rpassword prompt or stdin).
@@ -182,7 +198,7 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 | 1 Core HTTP engine | ✅ done |
 | 2 CLI MVP | ✅ done |
 | 3 Collections & environments | ✅ done |
-| 4 Auth helpers | ⬜ |
+| 4 Auth helpers | 🟨 |
 | 5 Assertions & runner | ⬜ |
 | 6 Self-hosted server | ⬜ |
 | 7 Web UI | ⬜ |
@@ -222,6 +238,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P3.4 — 2026-10-31 — Secrets from SNAPREQ_SECRET_* env vars and git-ignored `.secrets/` files. 217 tests total.
 - P3.5 — 2026-10-31 — Header and settings inheritance from collection and folders. 220 tests total.
 - P3.6 — 2026-10-31 — CLI: send collection requests (-c/-e/--var), ls, new, secret set. Phase 3 complete. 227 tests total.
+- P4.1 — 2026-11-03 — Basic, Bearer and API-key auth in core, collections (`[auth]` with inherit/none) and CLI; URL-encoded secrets redacted. 247 tests total.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -236,3 +253,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-10-31 (10):** Phase 2 (CLI MVP) complete: send command, pretty output, verbose trace, waterfall, JSON output, snapshots. CI watcher now polls once a minute (GitHub's 60 requests/hour unauthenticated limit).
 - **2026-10-31 (11):** P3.1 CI failed on Windows (CRLF fixtures) — fixed in the P3.3 commit. GitHub API rate limit was exhausted by CI polling; watcher now polls every 60 s.
 - **2026-10-31 (12):** Phase 3 (collections, environments, variables, secrets, inheritance, CLI) complete. Windows CRLF CI failure fixed and confirmed green.
+- **2026-11-03 (13):** P4.1 done (auth model, engine application with redirect rules, collection `[auth]` inheritance, CLI flags). Found and fixed: secrets inside URLs were only hidden in their raw form, not URL-encoded.

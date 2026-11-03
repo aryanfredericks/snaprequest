@@ -4,12 +4,14 @@
 //! All types serialize to stable JSON; this is the format of `--output json`,
 //! the server API and stored history.
 
+pub(crate) mod auth;
 mod body;
 mod request;
 mod response;
 mod settings;
 mod trace;
 
+pub use auth::{ApiKeyLocation, Auth};
 pub(crate) use body::guess_content_type;
 pub use body::{Body, KeyValue, MultipartPart, PartValue};
 pub use request::Request;

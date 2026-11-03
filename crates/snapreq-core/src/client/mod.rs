@@ -154,8 +154,16 @@ impl Client {
 
         let mut rec = Recorder::new(redact::Redactor::new(
             &self.inner.config.sensitive_headers,
-            &req.settings.secrets,
+            &req.secrets(),
         ));
+        if let Some(name) = crate::auth::shadowed_by_header(req) {
+            rec.record(TraceEvent::Info {
+                message: format!(
+                    "{} auth not applied: the request sets the {name} header itself",
+                    req.auth.kind()
+                ),
+            });
+        }
         let result = match req.settings.timeout {
             Some(limit) => {
                 match tokio::time::timeout(limit, self.follow(req, url, first, &mut rec)).await {
@@ -265,12 +273,14 @@ impl Client {
             for message in next.notes {
                 rec.record(TraceEvent::Info { message });
             }
-            hop = match self.prepare_hop(&next.request, &next.url).await {
+            let mut next_url = next.url;
+            crate::auth::apply_to_url(&next.request.auth, &mut next_url);
+            hop = match self.prepare_hop(&next.request, &next_url).await {
                 Ok(hop) => hop,
                 Err(e) => return Err(rec.fail(format!("cannot follow redirect: {e}"), false)),
             };
             current = next.request;
-            url = next.url;
+            url = next_url;
         }
     }
 

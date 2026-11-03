@@ -144,6 +144,20 @@ pub(crate) async fn prepare(
         };
         headers.append(name, value);
     }
+    if let Some((name, value)) = crate::auth::header(&req.auth)
+        && !has_header(req, name)
+    {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| Error::InvalidRequest(format!("invalid API key header name `{name}`")))?;
+        // The message must not include the credential.
+        let value = HeaderValue::from_str(&value).map_err(|_| {
+            Error::InvalidRequest(format!(
+                "{} auth: the credential contains characters not allowed in a header",
+                req.auth.kind()
+            ))
+        })?;
+        headers.append(name, value);
+    }
     if !has_header(req, "user-agent") {
         headers.insert(header::USER_AGENT, header_value(user_agent)?);
     }

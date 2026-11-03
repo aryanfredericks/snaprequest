@@ -4,7 +4,7 @@ use http::Method;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::{Body, KeyValue, RequestSettings};
+use super::{Auth, Body, KeyValue, RequestSettings};
 use crate::{Error, Result};
 
 /// A fully resolved request (variables already interpolated) ready to be executed.
@@ -28,6 +28,9 @@ pub struct Request {
     /// Request body.
     #[serde(default, skip_serializing_if = "Body::is_none")]
     pub body: Body,
+    /// Authentication, applied by the engine to every hop on the original origin.
+    #[serde(default, skip_serializing_if = "Auth::is_none")]
+    pub auth: Auth,
     /// Per-request execution settings.
     #[serde(default)]
     pub settings: RequestSettings,
@@ -42,6 +45,7 @@ impl Request {
             query: Vec::new(),
             headers: Vec::new(),
             body: Body::None,
+            auth: Auth::None,
             settings: RequestSettings::default(),
         }
     }
@@ -72,12 +76,32 @@ impl Request {
         self
     }
 
+    /// Sets the authentication.
+    #[must_use]
+    pub fn auth(mut self, auth: Auth) -> Self {
+        self.auth = auth;
+        self
+    }
+
+    /// Every value that must be hidden in traces and output: `settings.secrets` plus
+    /// the credentials of `auth`.
+    pub fn secrets(&self) -> Vec<String> {
+        let mut out = self.settings.secrets.clone();
+        for s in self.auth.secrets() {
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
+    }
+
     /// Enabled headers, in order.
     pub fn enabled_headers(&self) -> impl Iterator<Item = &KeyValue> {
         self.headers.iter().filter(|h| h.enabled)
     }
 
-    /// Parses `url` and appends the enabled `query` parameters.
+    /// Parses `url` and appends the enabled `query` parameters and a query API key
+    /// from `auth`: the URL that is actually requested.
     ///
     /// Only `http` and `https` URLs with a host are accepted.
     pub fn effective_url(&self) -> Result<Url> {
@@ -104,6 +128,7 @@ impl Request {
                 pairs.append_pair(&q.name, &q.value);
             }
         }
+        crate::auth::apply_to_url(&self.auth, &mut url);
         Ok(url)
     }
 }

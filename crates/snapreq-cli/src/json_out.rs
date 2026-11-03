@@ -16,8 +16,13 @@ use snapreq_core::{Error, Request, Response};
 /// Removes the request's secrets from a URL shown in the output.
 fn scrub(req: &Request, url: &str) -> String {
     let mut url = url.to_owned();
-    for secret in req.settings.secrets.iter().filter(|s| !s.is_empty()) {
+    let mut secrets = req.secrets();
+    secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    for secret in secrets.iter().filter(|s| !s.is_empty()) {
+        // Also the form a value takes inside a query string.
+        let encoded: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
         url = url.replace(secret.as_str(), "<redacted>");
+        url = url.replace(&encoded, "<redacted>");
     }
     url
 }

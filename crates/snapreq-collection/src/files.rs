@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use snapreq_core::model::{HttpVersionPref, ProxyMode, TlsVersion};
+use snapreq_core::model::{ApiKeyLocation, HttpVersionPref, ProxyMode, TlsVersion};
 
 use crate::kv::KeyValues;
 use crate::vars::Variables;
@@ -25,6 +25,8 @@ pub struct CollectionFile {
     pub vars: Variables,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub headers: KeyValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthSpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
 }
@@ -38,6 +40,7 @@ impl CollectionFile {
             order: Vec::new(),
             vars: Variables::default(),
             headers: KeyValues::default(),
+            auth: None,
             settings: Settings::default(),
         }
     }
@@ -57,6 +60,8 @@ pub struct FolderFile {
     pub vars: Variables,
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub headers: KeyValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthSpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
 }
@@ -84,6 +89,8 @@ pub struct RequestFile {
     #[serde(default, skip_serializing_if = "KeyValues::is_empty")]
     pub headers: KeyValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<BodySpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
@@ -100,6 +107,7 @@ impl RequestFile {
             vars: Variables::default(),
             query: KeyValues::default(),
             headers: KeyValues::default(),
+            auth: None,
             body: None,
             settings: Settings::default(),
         }
@@ -115,6 +123,7 @@ impl RequestFile {
         if self.url.trim().is_empty() {
             return Err("`url` must not be empty".into());
         }
+
         match &self.body {
             Some(BodySpec::Text { content, file, .. } | BodySpec::Json { content, file }) => {
                 match (content, file) {
@@ -153,6 +162,34 @@ fn method<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     http::Method::from_bytes(upper.as_bytes())
         .map_err(|_| serde::de::Error::custom(format!("invalid HTTP method `{raw}`")))?;
     Ok(Some(upper))
+}
+
+/// An `[auth]` table. Missing means `inherit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AuthSpec {
+    /// Use the auth of the enclosing folder or collection.
+    Inherit,
+    /// No auth, even if the folder or collection has one.
+    None,
+    Basic {
+        username: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        password: String,
+    },
+    Bearer {
+        token: String,
+    },
+    ApiKey {
+        name: String,
+        value: String,
+        #[serde(default, skip_serializing_if = "is_header")]
+        location: ApiKeyLocation,
+    },
+}
+
+fn is_header(l: &ApiKeyLocation) -> bool {
+    *l == ApiKeyLocation::Header
 }
 
 /// A request body in a file.

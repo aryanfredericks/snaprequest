@@ -120,6 +120,50 @@ pub(crate) struct SendArgs {
     #[arg(long = "var", value_name = "NAME=VALUE", help_heading = "Collection")]
     pub vars: Vec<String>,
 
+    // --- Auth --------------------------------------------------------------------
+    /// Basic auth, `USER[:PASSWORD]`. Without a password you are asked for one
+    /// (on a terminal), which keeps it out of the shell history.
+    #[arg(
+        short = 'u',
+        long = "user",
+        value_name = "USER[:PASSWORD]",
+        help_heading = "Auth",
+        conflicts_with_all = ["bearer", "api_key", "no_auth"]
+    )]
+    pub user: Option<String>,
+
+    /// Bearer token auth (`Authorization: Bearer TOKEN`).
+    #[arg(
+        long,
+        value_name = "TOKEN",
+        help_heading = "Auth",
+        conflicts_with_all = ["api_key", "no_auth"]
+    )]
+    pub bearer: Option<String>,
+
+    /// API key auth, `NAME=VALUE`; sent as a header unless `--api-key-in query`.
+    #[arg(
+        long = "api-key",
+        value_name = "NAME=VALUE",
+        help_heading = "Auth",
+        conflicts_with = "no_auth"
+    )]
+    pub api_key: Option<String>,
+
+    /// Where `--api-key` goes.
+    #[arg(
+        long = "api-key-in",
+        value_name = "WHERE",
+        default_value = "header",
+        requires = "api_key",
+        help_heading = "Auth"
+    )]
+    pub api_key_in: ApiKeyInArg,
+
+    /// Send no auth, even if the collection or folder defines one.
+    #[arg(long = "no-auth", help_heading = "Auth")]
+    pub no_auth: bool,
+
     // --- Request -----------------------------------------------------------------
     /// Request header, `Name: value`. Repeatable.
     #[arg(
@@ -307,6 +351,12 @@ pub(crate) struct SendArgs {
     /// Value to hide in all output (for example a token). Repeatable.
     #[arg(long = "secret", value_name = "VALUE", help_heading = "Output")]
     pub secrets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ApiKeyInArg {
+    Header,
+    Query,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

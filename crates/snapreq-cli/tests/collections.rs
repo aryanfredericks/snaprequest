@@ -384,3 +384,51 @@ async fn env_and_var_need_a_collection_request() {
         err(&o)
     );
 }
+
+#[tokio::test]
+async fn collection_auth_is_applied_and_command_line_auth_wins() {
+    let addr = server().await;
+    let dir = collection("auth");
+    let manifest = dir.join("snapreq.toml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        format!("{text}\n[auth]\ntype = \"api_key\"\nname = \"X-API-Key\"\nvalue = \"{{{{api_key}}}}\"\n"),
+    )
+    .unwrap();
+    let base = format!("base_url=http://{addr}");
+    let send = |extra: &'static [&'static str]| {
+        let mut args = vec![
+            "send",
+            "-c",
+            dir.to_str().unwrap(),
+            "health",
+            "--var",
+            &base,
+            "--var",
+            "api_key=key-from-var",
+        ];
+        args.extend_from_slice(extra);
+        let args: Vec<String> = args.into_iter().map(str::to_owned).collect();
+        async move {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            run(&args, None, None, &[]).await
+        }
+    };
+
+    let o = send(&[]).await;
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(out(&o).contains("x-api-key: key-from-var\n"), "{}", out(&o));
+
+    let o = send(&["-u", "me:pw"]).await;
+    let text = out(&o);
+    assert!(text.contains("authorization: Basic bWU6cHc=\n"), "{text}");
+    assert!(!text.contains("x-api-key"), "{text}");
+
+    let o = send(&["--no-auth"]).await;
+    let text = out(&o);
+    assert!(
+        !text.contains("x-api-key") && !text.contains("authorization"),
+        "{text}"
+    );
+}

@@ -43,6 +43,10 @@ base_url = "http://localhost:3000"
 [headers]                          # optional; sent with every request in the collection
 Accept = "application/json"
 
+[auth]                             # optional; auth for every request (see "Auth")
+type = "bearer"
+token = "{{token}}"
+
 [settings]                         # optional; defaults for every request (see "Settings")
 timeout_ms = 10000
 ```
@@ -114,6 +118,31 @@ content_type = "image/jpeg"        # optional; guessed from the extension
 enabled = true                     # optional
 ```
 
+### Auth
+
+`[auth]` has a `type`. Every value may contain placeholders.
+
+| `type` | Keys | Sent as |
+|---|---|---|
+| `"inherit"` | | The auth of the enclosing folder or collection. Same as no `[auth]` table. |
+| `"none"` | | No auth, even if a folder or the collection has one. |
+| `"basic"` | `username`, optional `password` | `Authorization: Basic base64(username:password)` (UTF-8) |
+| `"bearer"` | `token` | `Authorization: Bearer <token>` |
+| `"api_key"` | `name`, `value`, optional `location` | header `name: value`, or with `location = "query"` the query parameter `name=value` |
+
+```toml
+[auth]
+type = "api_key"
+name = "X-API-Key"
+value = "{{api_key}}"
+location = "header"                # "header" (default) | "query"
+```
+
+Auth is applied to every hop of a redirect chain on the same origin and dropped on a redirect to
+another origin. A header with the same name set in `[headers]` wins over `[auth]`. Credential values
+are hidden in traces and output, whether or not they come from secret variables; keeping them in
+secret variables keeps them out of the collection files.
+
 ### Settings
 
 All keys are optional; anything not set comes from the folder, then the collection, then the
@@ -140,7 +169,7 @@ tls_max_version = "1.3"
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,
-`[headers]`, `[settings]`.
+`[headers]`, `[auth]`, `[settings]`.
 
 ## Variables
 
@@ -175,8 +204,8 @@ variables are deliberate local overrides.
 - `{{name}}` is replaced by the variable's value; spaces inside the braces are allowed (`{{ name }}`).
 - Values may contain placeholders themselves (`base_url = "https://{{host}}"`); variables that refer
   to each other in a loop are an error.
-- Placeholders work in the URL, query, headers, body content, form and multipart values, file paths
-  and the proxy setting. Disabled entries are left as written.
+- Placeholders work in the URL, query, headers, auth values, body content, form and multipart values,
+  file paths and the proxy setting. Disabled entries are left as written.
 - Built-in dynamic values, generated anew for every placeholder: `{{$uuid}}`, `{{$timestamp}}`
   (Unix seconds), `{{$isoTimestamp}}` (RFC 3339, UTC) and `{{$randomInt}}` (0 to 1000).
 - `\{{` produces a literal `{{`.
@@ -213,13 +242,15 @@ Unix. Secret values are hidden in every trace and output.
 
 ## Inheritance
 
-Headers and settings flow from `snapreq.toml`, through each enclosing `folder.toml` (outermost first),
+Headers, auth and settings flow from `snapreq.toml`, through each enclosing `folder.toml` (outermost first),
 down to the request file.
 
 - **Headers:** inherited headers come first. A header with the same name (case-insensitive) as an
   inherited one replaces all inherited headers of that name. A disabled entry
   (`X-Trace = { value = "on", enabled = false }`) switches the inherited header off for this folder
   or request.
+- **Auth:** the innermost `[auth]` that is not `inherit` applies; `none` switches it off. Only the auth
+  that applies is interpolated, so an overridden one may use variables that are not defined.
 - **Settings:** each key overrides the inherited value; keys that are not set are inherited. Relative
   paths (`ca_cert`, `client_cert`, `client_key`) resolve against the directory of the file that set them.
 - **Variables:** see "Variables" for how `[vars]` tables combine.
