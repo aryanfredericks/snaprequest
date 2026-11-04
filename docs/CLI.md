@@ -56,6 +56,26 @@ snapreq secret set token -e prod [-c my-api]       # prompts for the value (hidd
 echo "$TOKEN" | snapreq secret set token -e prod   # or reads it from stdin
 ```
 
+### Importing (`snapreq import`)
+
+```sh
+snapreq import shop.postman_collection.json --env dev.postman_environment.json   # Postman v2.1 + environments
+snapreq import openapi.yaml --into petstore           # OpenAPI 3.0/3.1, JSON or YAML
+snapreq import insomnia-export.json                   # Insomnia v4 JSON or v5 YAML
+snapreq import recording.har                          # browser/proxy recording
+snapreq import smoke.hurl                             # Hurl file → smoke/flow.flow.toml
+snapreq import - --into scratch < copied-curl.txt      # one or more curl commands
+```
+
+The format is detected (`--format curl|postman|openapi|insomnia|har|hurl` overrides it). The collection is
+written into `--into DIR` (default: a directory named after the collection), which must be missing or empty;
+`--name` sets its name and `--json` prints a summary. Things that could not be imported exactly (scripts,
+unsupported auth or asserts, file paths to copy, variables nothing defines) are printed as warnings.
+
+Credentials in the file (passwords, tokens, API keys, cookies, client secrets) are never written into
+collection files: they become secret variables, and their values are stored in `.secrets/` (sealed when
+`SNAPREQ_SECRET_KEY` is set). What each format maps to is described in ADR-029 (`docs/DECISIONS.md`).
+
 Secret values are looked up in `--var`, then `SNAPREQ_SECRET_<NAME>` environment variables, then
 `.secrets/<env>.toml` and `.secrets/shared.toml` (never committed; see FORMAT.md). They are hidden in
 every trace and output, including when given with `--var`.

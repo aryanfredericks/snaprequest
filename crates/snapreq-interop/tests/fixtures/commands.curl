@@ -1,0 +1,8 @@
+# Copied from the API docs
+curl -sS -X POST 'https://api.example.com/v1/users?notify=true' \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer sk_live_curl_token" \
+  --data-raw '{"name": "snap", "tags": ["a", "b"]}' --compressed -L -m 5
+
+curl https://api.example.com/v1/upload -u ana:curl-pass -F title=Holiday -F 'photo=@beach.jpg;type=image/jpeg'
+curl -G https://api.example.com/v1/search --data-urlencode 'q=hello world' -d limit=3 -k

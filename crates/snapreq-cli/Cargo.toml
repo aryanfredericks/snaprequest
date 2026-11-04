@@ -14,6 +14,7 @@ snapreq-core.workspace = true
 snapreq-collection.workspace = true
 snapreq-test.workspace = true
 snapreq-server.workspace = true
+snapreq-interop.workspace = true
 anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true

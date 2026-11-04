@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: Petstore
+  description: A sample pet store.
+  version: 1.0.0
+servers:
+  - url: https://petstore.example.com/{version}
+    description: Production
+    variables:
+      version:
+        default: v1
+  - url: http://localhost:8080/v1
+    description: Local
+tags:
+  - name: pets
+    description: Everything about pets
+  - name: store
+security:
+  - bearerAuth: []
+paths:
+  /pets:
+    get:
+      tags: [pets]
+      summary: List pets
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 20 }
+        - name: status
+          in: query
+          required: true
+          schema: { type: string, enum: [available, sold] }
+        - $ref: '#/components/parameters/TraceId'
+      responses:
+        '200': { description: ok }
+    post:
+      tags: [pets]
+      summary: Create a pet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewPet' }
+      responses:
+        '201': { description: created }
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema: { type: integer, example: 7 }
+    get:
+      tags: [pets]
+      operationId: getPet
+      responses:
+        '200': { description: ok }
+    delete:
+      tags: [pets]
+      summary: Delete a pet
+      security:
+        - apiKey: []
+      responses:
+        '204': { description: deleted }
+  /pets/{petId}/photo:
+    post:
+      tags: [pets]
+      summary: Upload a photo
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                caption: { type: string, example: "Rex at the beach" }
+                photo: { type: string, format: binary }
+      responses:
+        '200': { description: ok }
+  /store/inventory:
+    get:
+      tags: [store]
+      summary: Inventory
+      security: []
+      responses:
+        '200': { description: ok }
+  /health:
+    get:
+      summary: Health
+      security: []
+      responses:
+        '200': { description: ok }
+components:
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      schema: { type: string, format: uuid }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        id: { type: integer, readOnly: true }
+        name: { type: string, example: "Rex {{not a var}}" }
+        tag: { type: string }
+        born: { type: string, format: date }
+        owner: { $ref: '#/components/schemas/Owner' }
+    Owner:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        pets:
+          type: array
+          items: { $ref: '#/components/schemas/NewPet' }

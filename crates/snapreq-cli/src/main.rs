@@ -5,6 +5,7 @@ mod cli;
 mod collection_cmd;
 #[cfg(test)]
 mod fixtures;
+mod import_cmd;
 mod json_out;
 mod output;
 mod run_cmd;
@@ -99,6 +100,7 @@ async fn main() -> ExitCode {
                     send::ArgError("no cache directory (set SNAPREQ_CACHE_DIR or HOME)".into())
                 }),
         ),
+        Command::Import(args) => report(import_cmd::run(&args)),
         Command::User(args) => user_cmd::run(&args).await,
         Command::Audit(args) => user_cmd::audit(&args).await,
         Command::Backup(args) => user_cmd::backup(&args).await,

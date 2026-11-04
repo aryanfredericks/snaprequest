@@ -1,0 +1,142 @@
+{
+  "info": {
+    "_postman_id": "5b0c8a52-1d5e-4b9a-9b8e-1f2e3d4c5b6a",
+    "name": "Shop API",
+    "description": "Orders and users.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000", "type": "string" },
+    { "key": "page size", "value": "50" },
+    { "key": "limit", "value": 25 }
+  ],
+  "event": [
+    { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [""] } }
+  ],
+  "item": [
+    {
+      "name": "Users",
+      "description": "User management",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-Debug", "value": "1", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users?page=1&size={{limit}}&draft=true",
+              "host": ["{{base_url}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "size", "value": "{{limit}}" },
+                { "key": "draft", "value": "true", "disabled": true }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/users/:id",
+              "host": ["{{base_url}}"],
+              "path": ["users", ":id"],
+              "variable": [{ "key": "id", "value": "42" }]
+            }
+          }
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"name\": \"snap\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{base_url}}/users"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "ana" },
+                { "key": "password", "value": "{{password}}" },
+                { "key": "remember", "value": "1", "disabled": true }
+              ]
+            },
+            "url": "{{base_url}}/login"
+          }
+        },
+        {
+          "name": "Upload avatar",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "multipart/form-data; boundary=xyz" }],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "me", "type": "text" },
+                { "key": "file", "type": "file", "src": "/home/ana/me.png" }
+              ]
+            },
+            "url": "{{base_url}}/avatar"
+          }
+        },
+        {
+          "name": "Search (GraphQL)",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "graphql",
+              "graphql": { "query": "{ users { id } }", "variables": "{\"n\": 1}" }
+            },
+            "url": "{{base_url}}/graphql"
+          }
+        },
+        {
+          "name": "Partner feed",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                { "key": "key", "value": "X-Partner-Key" },
+                { "key": "value", "value": "pk_live_1234567890" },
+                { "key": "in", "value": "header" }
+              ]
+            },
+            "method": "GET",
+            "header": [{ "key": "Cookie", "value": "session=abc123secret" }],
+            "url": "{{base_url}}/feed?ts={{$timestamp}}&r={{$randomColor}}"
+          }
+        }
+      ]
+    }
+  ]
+}

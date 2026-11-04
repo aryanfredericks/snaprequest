@@ -1051,3 +1051,98 @@ async fn run_writes_junit_html_and_json_reports_without_secrets() {
         err(&o)
     );
 }
+
+#[tokio::test]
+async fn import_a_public_postman_collection_and_run_it() {
+    let addr = server().await;
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../snapreq-interop/tests/fixtures");
+    // Newman's sample collection, pointed at the local echo server instead of postman-echo.com.
+    let sample = std::fs::read_to_string(fixtures.join("postman-newman-sample.json"))
+        .unwrap()
+        .replace("https://postman-echo.com", &format!("http://{addr}"));
+    let work = std::env::temp_dir().join(format!("snapreq-cli-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("sample.json"), sample).unwrap();
+
+    let o = run(&["import", "sample.json", "--json"], Some(&work), None, &[]).await;
+    assert!(o.status.success(), "{}", err(&o));
+    let doc: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(doc["format"], "postman");
+    assert_eq!(doc["requests"], 3);
+    assert_eq!(doc["dir"], "sample-postman-collection");
+    assert!(
+        err(&o).contains("warning: 1 Postman script(s)"),
+        "{}",
+        err(&o)
+    );
+
+    let dir = work.join("sample-postman-collection");
+    let o = run(
+        &["run", dir.to_str().unwrap(), "--color", "never"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    let o = run(
+        &[
+            "send",
+            "-c",
+            dir.to_str().unwrap(),
+            "a-simple-post-request-with-json-body",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let echoed = out(&o);
+    assert!(echoed.contains("POST /post"), "{echoed}");
+    assert!(
+        echoed.contains("content-type: application/json"),
+        "{echoed}"
+    );
+    assert!(echoed.contains("Duis posuere"), "{echoed}");
+
+    // Importing again into the same directory is refused.
+    let o = run(&["import", "sample.json"], Some(&work), None, &[]).await;
+    assert!(!o.status.success());
+    assert!(err(&o).contains("not empty"), "{}", err(&o));
+}
+
+#[tokio::test]
+async fn import_a_curl_command_from_stdin_keeps_the_token_secret() {
+    let addr = server().await;
+    let work = std::env::temp_dir().join(format!("snapreq-cli-import-curl-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).unwrap();
+    let cmd = format!("curl http://{addr}/me -H 'Authorization: Bearer tok-from-clipboard'\n");
+    let o = run(
+        &["import", "-", "--into", "scratch", "--name", "Scratch"],
+        Some(&work),
+        Some(&cmd),
+        &[],
+    )
+    .await;
+    assert!(o.status.success(), "{}", err(&o));
+    assert!(err(&o).contains("1 secret value stored"), "{}", err(&o));
+    let file = std::fs::read_to_string(work.join("scratch/get-me.toml")).unwrap();
+    assert!(
+        !file.contains("tok-from-clipboard") && file.contains("{{token}}"),
+        "{file}"
+    );
+    let o = run(&["send", "-c", "scratch", "get-me"], Some(&work), None, &[]).await;
+    assert!(o.status.success(), "{}", err(&o));
+    // The echo shows the header was sent (secret values are masked in output).
+    assert!(out(&o).contains("authorization: Bearer"), "{}", out(&o));
+    let o = run(
+        &["import", "-", "--format", "yaml"],
+        Some(&work),
+        Some(""),
+        &[],
+    )
+    .await;
+    assert!(err(&o).contains("unknown format `yaml`"), "{}", err(&o));
+}

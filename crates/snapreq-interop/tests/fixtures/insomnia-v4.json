@@ -1,0 +1,31 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_source": "insomnia.desktop.app:v2023.5.8",
+  "resources": [
+    { "_id": "wrk_1", "_type": "workspace", "name": "Weather", "parentId": null },
+    { "_id": "env_base", "_type": "environment", "parentId": "wrk_1", "name": "Base Environment",
+      "data": { "host": "https://api.weather.test", "api": { "version": "v2" } } },
+    { "_id": "env_prod", "_type": "environment", "parentId": "env_base", "name": "Production",
+      "data": { "host": "https://api.weather.example" } },
+    { "_id": "fld_1", "_type": "request_group", "parentId": "wrk_1", "name": "Forecasts",
+      "metaSortKey": -10, "environment": { "units": "metric" } },
+    { "_id": "req_2", "_type": "request", "parentId": "fld_1", "name": "Daily", "metaSortKey": 2,
+      "method": "GET", "url": "{{ _.host }}/{{ _.api.version }}/daily",
+      "parameters": [ { "name": "units", "value": "{{ _.units }}" }, { "name": "days", "value": "7", "disabled": true } ],
+      "headers": [ { "name": "X-Request-Id", "value": "{% uuid 'v4' %}" } ],
+      "authentication": { "type": "bearer", "token": "wx-live-token-999", "prefix": "" },
+      "body": {} },
+    { "_id": "req_1", "_type": "request", "parentId": "fld_1", "name": "Hourly", "metaSortKey": 1,
+      "method": "POST", "url": "{{ _.host }}/hourly",
+      "headers": [ { "name": "Content-Type", "value": "application/json" } ],
+      "authentication": {},
+      "body": { "mimeType": "application/json", "text": "{\"city\": \"Oslo\", \"at\": \"{% now 'iso-8601', '' %}\"}" } },
+    { "_id": "req_3", "_type": "request", "parentId": "wrk_1", "name": "Login", "metaSortKey": 5,
+      "method": "POST", "url": "{{ _.host }}/login",
+      "authentication": { "type": "basic", "username": "ana", "password": "hunter2-insomnia" },
+      "body": { "mimeType": "application/x-www-form-urlencoded",
+                "params": [ { "name": "remember", "value": "true" } ] } },
+    { "_id": "req_4", "_type": "grpc_request", "parentId": "wrk_1", "name": "Stream" }
+  ]
+}

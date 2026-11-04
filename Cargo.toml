@@ -17,6 +17,7 @@ snapreq-core = { path = "crates/snapreq-core", version = "0.1.0" }
 snapreq-collection = { path = "crates/snapreq-collection", version = "0.1.0" }
 snapreq-test = { path = "crates/snapreq-test", version = "0.1.0" }
 snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
+snapreq-interop = { path = "crates/snapreq-interop", version = "0.1.0" }
 
 # Shared external dependencies (add new ones here, then use `dep.workspace = true`)
 anstream = "1"
@@ -54,6 +55,8 @@ rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_json_path = "0.7"
+# YAML input only (OpenAPI, Insomnia v5): panic-free parsing with resource budgets.
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
 tar = "0.4"
 terminal_size = "0.4"
 thiserror = "2"

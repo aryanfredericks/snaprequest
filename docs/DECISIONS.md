@@ -332,3 +332,33 @@ database, config, key and workspace; non-empty targets need `--force`. Both are 
 machine: there is no admin role for an API endpoint, and Docker users run them with `docker exec`.
 **Consequences:** One file to copy off-site; restores are all-or-nothing per archive. The key needs its own backup.
 
+## ADR-029: Imports live in a `snapreq-interop` crate and move credentials into secret variables
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P9.1: import cURL, Postman v2.1 (with environments), OpenAPI 3.x, Insomnia, HAR and Hurl, from
+the CLI and the web UI. Exported files and copied commands routinely contain live passwords, tokens and cookies,
+and collections are meant to be committed to git.
+**Decision:** A new library crate `snapreq-interop` (no I/O except writing the result; `thiserror`) parses each
+format into an intermediate `Imported` collection, which writes ordinary collection files (`docs/FORMAT.md`) and
+loads them back as a check. Shared by `snapreq import` and `POST /api/v1/collections/import`; P9.2 exports will
+live there too. Choices:
+- **Credentials:** literal values of passwords, bearer/basic `Authorization` headers, API keys, cookies,
+  OAuth client secrets and AWS secret keys become secret variables (`{ secret = true }` in `snapreq.toml`) whose
+  values go to `.secrets/` (sealed on the server, and by the CLI when `SNAPREQ_SECRET_KEY` is set). Values that
+  already are placeholders (`{{token}}`) stay as they are; names the source uses are not taken (`password_2`).
+- **Placeholders:** `{{name}}` is shared by Postman, Insomnia (`{{ _.name }}`), Hurl and cURL commands, and kept.
+  Recorded or example text (HAR, OpenAPI examples) is literal, so `{{` is escaped there (`\{{`). Dynamic variables
+  are mapped where an equivalent exists (`{{$guid}}`, `{% uuid %}`, `newUuid` → `{{$uuid}}`); the rest are warned
+  about. Every import ends with a warning listing variables used but defined nowhere.
+- **YAML** (OpenAPI, Insomnia v5) is read with `serde-saphyr` (MIT/Apache, MSRV 1.89, deserialize only): pure
+  Rust, panic-free on hostile input, with resource budgets; `serde_yaml` is unmaintained.
+- **OpenAPI:** one request per operation in a folder per first tag; servers become `base_url` (and environments
+  when there are several); security schemes become collection or request auth backed by declared secrets;
+  bodies and parameters get examples (`example`, `examples`, `default`, `enum`, or generated from the schema,
+  stopping at a `$ref` that repeats). Swagger 2.0 is refused with a hint to convert it.
+- **Hurl** files become one flow (inline steps, captures, asserts, retries); **HAR** skips static assets and uses
+  `{{base_url}}` when there is one origin.
+- Anything that cannot be represented (scripts, unsupported auth, xpath asserts, file paths that must be copied)
+  is a warning in the result, never silently dropped. Inputs are capped at 64 MiB (32 MiB per API request).
+**Consequences:** Imported collections are safe to commit as they are, but runs need the `.secrets/` values on the
+machine that runs them (or `SNAPREQ_SECRET_*` variables). Postman scripts are not run: P9.3/P9.4 add scripting and
+translate simple `pm.test` scripts.

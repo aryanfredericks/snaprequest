@@ -2,9 +2,12 @@
   import { app } from "../state/app.svelte";
   import { canDrop, nodeId, tree } from "../state/tree.svelte";
   import CollectionTree from "./CollectionTree.svelte";
+  import ImportDialog from "./ImportDialog.svelte";
   import ItemMenu, { type MenuItem } from "./ItemMenu.svelte";
+  import { workspaces } from "../state/workspaces.svelte";
 
   let dropRoot = $state<string | null>(null);
+  let importer: ImportDialog | undefined = $state();
 
   $effect(() => {
     void app.loadCollections();
@@ -75,6 +78,9 @@
     <h2>Collections</h2>
     <span>
       <button type="button" class="icon" title="New collection" aria-label="New collection" onclick={() => app.createCollection()}>⊞</button>
+      {#if workspaces.canEdit}
+        <button type="button" class="icon" title="Import (cURL, Postman, OpenAPI, Insomnia, HAR, Hurl)" aria-label="Import" onclick={() => importer?.open()}>⇩</button>
+      {/if}
       <button type="button" class="icon" title="New request (Alt+N)" aria-label="New request" onclick={() => app.newRequest()}>＋</button>
     </span>
   </div>
@@ -153,6 +159,7 @@
       </li>
     {/each}
   </ul>
+  <ImportDialog bind:this={importer} />
 </nav>
 
 <style>

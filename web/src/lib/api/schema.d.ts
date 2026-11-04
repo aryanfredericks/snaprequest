@@ -171,6 +171,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collections/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["import_collection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections/{id}": {
         parameters: {
             query?: never;
@@ -613,6 +629,18 @@ export interface components {
             url: string;
             /** @description The workspace of `collection`. */
             workspace?: string | null;
+        };
+        ImportBody: {
+            /** @description The file's text. */
+            content: string;
+            /** @description Postman environment files to add as environments. */
+            environments?: string[];
+            /** @description `curl`, `postman`, `openapi`, `insomnia`, `har` or `hurl`; detected when absent. */
+            format?: string | null;
+            /** @description Id of the new collection; default: derived from its name. */
+            id?: string | null;
+            /** @description Collection name; default: from the file. */
+            name?: string | null;
         };
         /** @enum {string} */
         ItemKind: "request" | "folder" | "flow";
@@ -1159,6 +1187,57 @@ export interface operations {
             };
             /** @description Does not validate */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    import_collection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportBody"];
+            };
+        };
+        responses: {
+            /** @description Imported: `id`, `format`, counts, `environments`, `secrets` and `warnings` */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+            /** @description Not a supported format, or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Viewers cannot import */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The id is taken */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

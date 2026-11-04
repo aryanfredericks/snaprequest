@@ -47,6 +47,7 @@ fn every_route_is_described() {
         "GET /api/v1/runs/{id}/report/{format}",
         "GET /api/v1/collections",
         "POST /api/v1/collections",
+        "POST /api/v1/collections/import",
         "GET /api/v1/collections/{id}",
         "PUT /api/v1/collections/{id}",
         "DELETE /api/v1/collections/{id}",

@@ -470,6 +470,66 @@
         }
       }
     },
+    "/api/v1/collections/import": {
+      "post": {
+        "tags": [
+          "collections"
+        ],
+        "operationId": "import_collection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Imported: `id`, `format`, counts, `environments`, `secrets` and `warnings`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a supported format, or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot import",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The id is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/collections/{id}": {
       "get": {
         "tags": [
@@ -2933,6 +2993,47 @@
             "description": "The workspace of `collection`."
           }
         }
+      },
+      "ImportBody": {
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The file's text."
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Postman environment files to add as environments."
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`curl`, `postman`, `openapi`, `insomnia`, `har` or `hurl`; detected when absent."
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the new collection; default: derived from its name."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Collection name; default: from the file."
+          }
+        },
+        "additionalProperties": false
       },
       "ItemKind": {
         "type": "string",

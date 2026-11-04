@@ -318,6 +318,7 @@ is a 400; a state that is no longer available is a 409.
 |---|---|---|
 | `GET /api/v1/collections` | | `{ "collections": [{ "id", "name", "description", "requests", "flows" }] }` (or `{ "id", "error" }` for one that does not load) |
 | `POST /api/v1/collections` | `{ "id", "name"? }` | 201 `{ "id", "file" }`; 409 if it exists |
+| `POST /api/v1/collections/import` | `{ "content", "format"?, "id"?, "name"?, "environments"?: [Postman environment texts] }` | 201 `{ "id", "format", "name", "requests", "folders", "flows", "environments", "secrets", "warnings" }`: a cURL command, Postman, OpenAPI, Insomnia, HAR or Hurl file as a new collection (editors; bodies up to 32 MiB; credentials sealed into `.secrets`); 400 if it cannot be read, 409 if the id is taken |
 | `GET /api/v1/collections/{id}` | | `{ "id", "file", "items": [tree], "flows": [{ "key", "name", "steps" }], "environments": [names] }` |
 | `PUT /api/v1/collections/{id}` | `snapreq.toml` as JSON | the saved file |
 | `DELETE /api/v1/collections/{id}` | | 204; removes the directory |

@@ -38,6 +38,7 @@ Or with Docker: `docker compose up -d` (see [`docs/SERVER.md`](docs/SERVER.md)).
 | `crates/snapreq-core` | HTTP engine, request/response model, trace events |
 | `crates/snapreq-collection` | Collection and environment file format, variables |
 | `crates/snapreq-test` | Assertions, collection runner, reporters |
+| `crates/snapreq-interop` | Import from cURL, Postman, OpenAPI, Insomnia, HAR and Hurl |
 | `crates/snapreq-server` | Self-hosted server: API, storage, auth |
 | `crates/snapreq-cli` | The `snapreq` binary |
 | `web/` | The web UI (Svelte 5 + TypeScript), embedded into the server |

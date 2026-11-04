@@ -41,6 +41,11 @@ Drag requests and folders to move or reorder them (or use *Move up*, *Move down*
 an item's `⋯` menu); the menus also create, rename, duplicate and delete items, open collection and
 folder settings (variables, headers, auth, settings that requests inherit) and start runs.
 
+**Import** (`⇩` next to *New collection*) turns a file or pasted text into a new collection: a cURL
+command, a Postman collection (with environment files), an OpenAPI document, an Insomnia export, a HAR
+recording or a Hurl file (which becomes a flow). Credentials found in it are stored as secret values, and
+anything that could not be imported exactly is listed before the dialog closes.
+
 The environment picker at the top selects the environment for the current collection. An
 environment's editor lists its variables; variables marked secret keep their values out of the file:
 **Set value…** stores one in the collection's git-ignored `.secrets/` directory, and it is never shown

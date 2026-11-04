@@ -1,0 +1,39 @@
+type: collection.insomnia.rest/5.0
+name: Notes
+meta:
+  id: wrk_notes
+collection:
+  - name: Notes
+    meta:
+      sortKey: 1
+    children:
+      - url: "{{ _.base }}/notes"
+        name: List notes
+        method: GET
+        meta:
+          sortKey: 2
+        parameters:
+          - name: tag
+            value: work
+      - url: "{{ _.base }}/notes"
+        name: Add note
+        method: POST
+        meta:
+          sortKey: 1
+        body:
+          mimeType: application/json
+          text: '{"text": "hello"}'
+        authentication:
+          type: apikey
+          key: X-Notes-Key
+          value: "{{ _.notes_key }}"
+          addTo: header
+environments:
+  name: Base Environment
+  data:
+    base: http://notes.local
+  subEnvironments:
+    - name: Staging
+      data:
+        base: https://staging.notes.example
+        notes_key: staging-key-abc

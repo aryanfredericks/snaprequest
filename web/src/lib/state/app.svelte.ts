@@ -13,6 +13,7 @@ import type {
   VarsTable,
 } from "../api/types";
 import { jobs } from "../api/ws";
+import type { ImportRequest, ImportSummary } from "../model/importing";
 import { draftFromFile, draftToCore, draftToFile, uid } from "../model/draft";
 import { draftFromHistory } from "../model/history";
 import { flowToFile } from "../model/flow";
@@ -136,6 +137,14 @@ class AppState {
       await this.refresh(v.id!);
       this.notify(`Created ${v.id}`);
     }
+  }
+
+  /** Imports a file from another tool as a new collection; throws with the server's message. */
+  async importCollection(body: ImportRequest): Promise<ImportSummary> {
+    const summary = unwrap(await api.POST("/api/v1/collections/import", { body })) as unknown as ImportSummary;
+    await this.refresh(summary.id);
+    this.notify(`Imported ${summary.name} into ${summary.id}`);
+    return summary;
   }
 
   async deleteCollection(id: string) {

@@ -55,6 +55,21 @@ pub(crate) enum Command {
     /// List the folders, requests and flows of a collection.
     Ls(LsArgs),
 
+    /// Import requests into a new collection: cURL commands, Postman collections (v2.1, with
+    /// environments), OpenAPI 3.x, Insomnia exports, HAR recordings and Hurl files (as a flow).
+    ///
+    /// Credentials found in the file (passwords, tokens, API keys, cookies) become secret
+    /// variables; their values are stored in the collection's .secrets directory, never in
+    /// collection files.
+    ///
+    /// Examples:
+    ///   snapreq import shop.postman_collection.json --env dev.postman_environment.json
+    ///   snapreq import openapi.yaml --into petstore
+    ///   snapreq import - --into scratch < copied-curl.txt
+    ///   snapreq import smoke.hurl && snapreq run smoke/flow.flow.toml
+    #[command(verbatim_doc_comment)]
+    Import(ImportArgs),
+
     /// Create a collection or a request file.
     #[command(subcommand)]
     New(NewCommand),
@@ -305,6 +320,28 @@ pub(crate) struct ServeArgs {
     /// `SNAPREQ_ALLOW_REMOTE=1`).
     #[arg(long)]
     pub allow_remote: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ImportArgs {
+    /// File to import (`-` reads stdin).
+    #[arg(value_name = "FILE")]
+    pub file: PathBuf,
+    /// Directory to create; must be missing or empty (default: named after the collection).
+    #[arg(long, short = 'o', value_name = "DIR")]
+    pub into: Option<PathBuf>,
+    /// Format of FILE (default: detected): curl, postman, openapi, insomnia, har or hurl.
+    #[arg(long, value_name = "FORMAT")]
+    pub format: Option<String>,
+    /// Collection name (default: from the file).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// A Postman environment file to add as an environment (repeatable).
+    #[arg(long = "env", short = 'e', value_name = "FILE")]
+    pub envs: Vec<PathBuf>,
+    /// Print what was imported as JSON on stdout.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
