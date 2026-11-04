@@ -2249,7 +2249,9 @@ dependencies = [
 name = "snapreq-collection"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "http",
+ "ring",
  "serde",
  "serde_json",
  "snapreq-core",

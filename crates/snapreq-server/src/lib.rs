@@ -70,6 +70,42 @@ pub struct AppState {
     pub flow_states: flow_states::FlowStates,
     /// Single sign-on, when `[oidc]` is configured.
     pub oidc: Option<oidc::Oidc>,
+    /// Seals the secret values the server writes (ADR-026).
+    pub secret_key: snapreq_collection::sealed::SecretKey,
+}
+
+/// Seals plain secret values of every collection in every workspace; returns how many.
+fn seal_workspace(
+    root: &std::path::Path,
+    key: &snapreq_collection::sealed::SecretKey,
+) -> Result<usize> {
+    use snapreq_collection::load::COLLECTION_FILE;
+    let dirs = |d: &std::path::Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(d)
+            .map(|it| {
+                it.filter_map(std::result::Result::ok)
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut sealed = 0;
+    for dir in dirs(root) {
+        let collections = if dir.join(COLLECTION_FILE).is_file() {
+            vec![dir]
+        } else {
+            dirs(&dir)
+                .into_iter()
+                .filter(|d| d.join(COLLECTION_FILE).is_file())
+                .collect()
+        };
+        for c in collections {
+            sealed += snapreq_collection::secrets::seal_all(&c, key)
+                .map_err(|e| Error::Config(e.to_string()))?;
+        }
+    }
+    Ok(sealed)
 }
 
 /// How often history is pruned while the server runs.
@@ -251,6 +287,20 @@ impl Server {
             _ => {}
         }
         let oidc = config.oidc.clone().map(oidc::Oidc::new).transpose()?;
+        let secret_key = snapreq_collection::sealed::load_or_create(
+            std::env::var(snapreq_collection::sealed::KEY_ENV)
+                .ok()
+                .as_deref(),
+            &config.data_dir,
+        )
+        .map_err(Error::Config)?;
+        let sealed = seal_workspace(&config.workspace, &secret_key)?;
+        if sealed > 0 {
+            tracing::info!(
+                values = sealed,
+                "sealed plain secret values in the workspace"
+            );
+        }
         Ok(Self {
             listener,
             state: Arc::new(AppState {
@@ -259,6 +309,7 @@ impl Server {
                 client,
                 flow_states: Default::default(),
                 oidc,
+                secret_key,
             }),
         })
     }

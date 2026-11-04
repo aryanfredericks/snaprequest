@@ -8,11 +8,16 @@
 //!
 //! The `.secrets` directory contains a `.gitignore` with `*`, written by SnapRequest, so the
 //! files stay out of git even when the project's own `.gitignore` does not mention them.
+//!
+//! Values in the files may be sealed (`enc:v1:…`, see [`crate::sealed`]); the server always
+//! seals what it writes. Sealed values open with the secret key; without it they count as unset
+//! and their names are listed by [`Secrets::locked`].
 
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::load::Collection;
+use crate::sealed::SecretKey;
 use crate::vars::{Scopes, Variable, Variables};
 
 /// Directory (inside the collection) holding local secret values.
@@ -44,6 +49,8 @@ pub struct Secrets {
     files: Vec<(PathBuf, Variables)>,
     /// Snapshot of `SNAPREQ_SECRET_*` variables (name → value).
     env: Vec<(String, String)>,
+    /// Sealed values that could not be opened (no key, or another key).
+    locked: Vec<String>,
 }
 
 /// `SNAPREQ_SECRET_<NAME>` for a variable name.
@@ -63,14 +70,31 @@ pub fn env_var_name(name: &str) -> String {
 
 impl Secrets {
     /// Loads the secret files of `collection` for `environment`, and takes the
-    /// `SNAPREQ_SECRET_*` variables from `env_vars` (normally `std::env::vars()`).
+    /// `SNAPREQ_SECRET_*` variables from `env_vars` (normally `std::env::vars()`). Sealed values
+    /// open with the key in `SNAPREQ_SECRET_KEY`, if `env_vars` has it.
     pub fn load(
         collection: &Collection,
         environment: Option<&str>,
         env_vars: impl IntoIterator<Item = (String, String)>,
     ) -> Result<Self> {
+        let env_vars: Vec<(String, String)> = env_vars.into_iter().collect();
+        let key = env_vars
+            .iter()
+            .find(|(k, _)| k == crate::sealed::KEY_ENV)
+            .and_then(|(_, v)| SecretKey::decode(v).ok());
+        Self::load_with_key(collection, environment, env_vars, key.as_ref())
+    }
+
+    /// [`Secrets::load`] with an explicit key for sealed values.
+    pub fn load_with_key(
+        collection: &Collection,
+        environment: Option<&str>,
+        env_vars: impl IntoIterator<Item = (String, String)>,
+        key: Option<&SecretKey>,
+    ) -> Result<Self> {
         let dir = collection.root.join(SECRETS_DIR);
         let mut files = Vec::new();
+        let mut locked = Vec::new();
         let mut candidates = Vec::new();
         if let Some(env) = environment {
             candidates.push(dir.join(format!("{env}.toml")));
@@ -79,16 +103,31 @@ impl Secrets {
         for path in candidates {
             if path.is_file() {
                 let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
-                let vars: Variables =
+                let mut vars: Variables =
                     toml::from_str(&text).map_err(|e| Error::toml(&path, &text, &e))?;
+                for v in &mut vars.0 {
+                    let Some(stored) = v.value.as_deref().filter(|s| crate::sealed::is_sealed(s))
+                    else {
+                        continue;
+                    };
+                    v.value = key.and_then(|k| k.open(&v.name, stored).ok());
+                    if v.value.is_none() && !locked.contains(&v.name) {
+                        locked.push(v.name.clone());
+                    }
+                }
                 files.push((path, vars));
             }
         }
         let env = env_vars
             .into_iter()
-            .filter(|(k, _)| k.starts_with("SNAPREQ_SECRET_"))
+            .filter(|(k, _)| k.starts_with("SNAPREQ_SECRET_") && k != crate::sealed::KEY_ENV)
             .collect();
-        Ok(Self { files, env })
+        Ok(Self { files, env, locked })
+    }
+
+    /// Names of sealed values that could not be opened (they count as unset).
+    pub fn locked(&self) -> &[String] {
+        &self.locked
     }
 
     /// The value of secret `name` and where it came from.
@@ -115,12 +154,14 @@ impl Secrets {
 }
 
 /// Stores a secret value in `.secrets/<environment>.toml` (or `shared.toml` when
-/// `environment` is `None`), creating the directory and its `.gitignore`.
+/// `environment` is `None`), creating the directory and its `.gitignore`. With a `key` the value
+/// is sealed; other values in the file are kept as they are.
 pub fn store(
     collection_root: &Path,
     environment: Option<&str>,
     name: &str,
     value: &str,
+    key: Option<&SecretKey>,
 ) -> Result<PathBuf> {
     if !crate::vars::valid_name(name) {
         return Err(Error::invalid(
@@ -148,8 +189,14 @@ pub fn store(
     } else {
         Variables::default()
     };
-    // Stored as plain values: this file *is* the secret store.
-    vars.set(name, value);
+    // This file *is* the secret store: plain or sealed values, not declarations.
+    let value = match key {
+        Some(k) => k
+            .seal(name, value)
+            .map_err(|e| Error::invalid(collection_root, e))?,
+        None => value.to_owned(),
+    };
+    vars.set(name, &value);
     let mut text = String::from("# Secret values for SnapRequest. Do not commit this file.\n");
     let mut doc = toml_edit::DocumentMut::new();
     for v in &vars.0 {
@@ -159,6 +206,43 @@ pub fn store(
     std::fs::write(&path, text).map_err(|e| Error::io(&path, e))?;
     restrict_permissions(&path)?;
     Ok(path)
+}
+
+/// Seals every plain value in the `.secrets` files of the collection at `collection_root`;
+/// returns how many were sealed.
+pub fn seal_all(collection_root: &Path, key: &SecretKey) -> Result<usize> {
+    let dir = collection_root.join(SECRETS_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(0);
+    };
+    let mut sealed = 0;
+    for entry in entries.filter_map(std::result::Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "toml") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
+        let vars: Variables = toml::from_str(&text).map_err(|e| Error::toml(&path, &text, &e))?;
+        let plain: Vec<(String, String)> = vars
+            .0
+            .iter()
+            .filter_map(|v| Some((v.name.clone(), v.value.clone()?)))
+            .filter(|(_, v)| !crate::sealed::is_sealed(v))
+            .collect();
+        if plain.is_empty() {
+            continue;
+        }
+        let env = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| *s != "shared")
+            .map(str::to_owned);
+        for (name, value) in plain {
+            store(collection_root, env.as_deref(), &name, &value, Some(key))?;
+            sealed += 1;
+        }
+    }
+    Ok(sealed)
 }
 
 /// Makes a secrets file readable by its owner only (Unix), like SSH keys.

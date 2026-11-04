@@ -115,7 +115,7 @@ files stay hand-editable and can be kept in git per workspace. Each member has a
 
 | Role | May |
 |---|---|
-| `viewer` | list and read collections, execute and run them |
+| `viewer` | list and read collections, execute and run saved requests (without unsaved edits, variables or data rows, which could send the workspace's secrets elsewhere) |
 | `editor` | also create, change and delete collections, requests, folders, flows, environments and secrets |
 | `owner` | also rename and delete the workspace and add, change and remove members |
 
@@ -138,6 +138,22 @@ workspace named by the **`X-SnapReq-Workspace`** header, `default` without one; 
 | `GET /api/v1/workspaces/{ws}/members` | `{ "members": [{ "username", "role" }] }`, owners first |
 | `PUT /api/v1/workspaces/{ws}/members/{username}` | `{ "role" }` → the member (owner); 404 for an unknown user, 409 if no owner would be left |
 | `DELETE /api/v1/workspaces/{ws}/members/{username}` | 204 (owner, or the member leaving) |
+
+## Secret values at rest
+
+Secret variable values live in each collection's `.secrets/*.toml` (gitignored, owner-only). The server
+**seals** every value it writes (UI, `PUT …/secrets/…`) with AES-256-GCM, bound to the variable's name:
+`token = "enc:v1:…"`. At start it also seals plain values it finds in the workspace. Values are opened
+only in memory, when a request needs them; the API never returns them.
+
+The key is `SNAPREQ_SECRET_KEY` (base64 of 32 bytes; e.g. a Docker or Kubernetes secret), or else
+`secret.key` in the data directory, created on first start (owner-only). **Back the key up separately
+from the data directory**: without it, sealed values cannot be opened (they count as unset). Generate a
+key with `head -c32 /dev/urandom | base64`.
+
+The CLI opens sealed values with `SNAPREQ_SECRET_KEY` or, on the server's machine, the key file of the
+default data directory (or `SNAPREQ_DATA_DIR`); it warns when it cannot. `snapreq secret set` seals only
+when `SNAPREQ_SECRET_KEY` is set.
 
 ## Outbound request policy
 

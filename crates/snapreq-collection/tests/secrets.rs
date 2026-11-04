@@ -45,7 +45,7 @@ fn scopes_with_secrets(c: &Collection, env: &str, env_vars: Vec<(String, String)
 #[test]
 fn stored_secrets_fill_variables_and_are_redacted() {
     let root = copy_fixture("store");
-    let path = store(&root, Some("dev"), "token", "file-token-123").unwrap();
+    let path = store(&root, Some("dev"), "token", "file-token-123", None).unwrap();
     assert_eq!(path, root.join(".secrets").join("dev.toml"));
     // The directory ignores itself in git.
     let ignore = std::fs::read_to_string(root.join(".secrets").join(".gitignore")).unwrap();
@@ -76,7 +76,7 @@ fn stored_secrets_fill_variables_and_are_redacted() {
 #[test]
 fn priority_env_var_then_environment_file_then_shared_file() {
     let root = copy_fixture("priority");
-    store(&root, None, "token", "shared-value").unwrap();
+    store(&root, None, "token", "shared-value", None).unwrap();
     let (c, _) = Collection::load(&root).unwrap();
 
     let s = Secrets::load(&c, Some("dev"), vec![]).unwrap();
@@ -87,7 +87,7 @@ fn priority_env_var_then_environment_file_then_shared_file() {
         SecretSource::File(root.join(".secrets").join("shared.toml"))
     );
 
-    store(&root, Some("dev"), "token", "dev-value").unwrap();
+    store(&root, Some("dev"), "token", "dev-value", None).unwrap();
     let s = Secrets::load(&c, Some("dev"), vec![]).unwrap();
     assert_eq!(s.get("token").unwrap().0, "dev-value");
     // Another environment only sees the shared value.
@@ -116,16 +116,16 @@ fn priority_env_var_then_environment_file_then_shared_file() {
 #[test]
 fn storing_again_replaces_the_value() {
     let root = copy_fixture("replace");
-    store(&root, Some("dev"), "token", "one").unwrap();
-    store(&root, Some("dev"), "other", "two").unwrap();
-    store(&root, Some("dev"), "token", "three").unwrap();
+    store(&root, Some("dev"), "token", "one", None).unwrap();
+    store(&root, Some("dev"), "other", "two", None).unwrap();
+    store(&root, Some("dev"), "token", "three", None).unwrap();
     let text = std::fs::read_to_string(root.join(".secrets/dev.toml")).unwrap();
     assert!(
         text.ends_with("token = \"three\"\nother = \"two\"\n"),
         "{text}"
     );
 
-    assert!(store(&root, None, "bad name", "x").is_err());
+    assert!(store(&root, None, "bad name", "x", None).is_err());
 }
 
 #[test]
@@ -140,4 +140,57 @@ fn missing_secret_still_reports_how_to_provide_it() {
         err.contains("secret variable `token` has no value"),
         "{err}"
     );
+}
+
+#[test]
+fn sealed_values_open_with_the_key_only() {
+    use snapreq_collection::sealed::SecretKey;
+    let root = copy_fixture("sealed");
+    let (c, _) = Collection::load(&root).unwrap();
+    let key = SecretKey::generate().unwrap();
+    let path = store(&root, Some("dev"), "token", "file-token-123", Some(&key)).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("enc:v1:") && !text.contains("file-token-123"),
+        "{text}"
+    );
+    let open = Secrets::load_with_key(&c, Some("dev"), vec![], Some(&key)).unwrap();
+    assert_eq!(open.get("token").unwrap().0, "file-token-123");
+    assert!(open.locked().is_empty());
+    // Without the key (or with another) it is unset and reported.
+    let locked = Secrets::load(&c, Some("dev"), vec![]).unwrap();
+    assert!(locked.get("token").is_none());
+    assert_eq!(locked.locked(), ["token"]);
+    let other = SecretKey::generate().unwrap();
+    assert!(
+        Secrets::load_with_key(&c, Some("dev"), vec![], Some(&other))
+            .unwrap()
+            .get("token")
+            .is_none()
+    );
+    // SNAPREQ_SECRET_KEY opens it too.
+    let env = vec![("SNAPREQ_SECRET_KEY".to_owned(), key.encode())];
+    assert_eq!(
+        Secrets::load(&c, Some("dev"), env)
+            .unwrap()
+            .get("token")
+            .unwrap()
+            .0,
+        "file-token-123"
+    );
+
+    // seal_all seals the plain values that are left, once.
+    store(&root, None, "token", "shared-plain", None).unwrap();
+    assert_eq!(
+        snapreq_collection::secrets::seal_all(&root, &key).unwrap(),
+        1
+    );
+    assert_eq!(
+        snapreq_collection::secrets::seal_all(&root, &key).unwrap(),
+        0
+    );
+    let shared = std::fs::read_to_string(root.join(".secrets/shared.toml")).unwrap();
+    assert!(!shared.contains("shared-plain"));
+    let s = Secrets::load_with_key(&c, None, vec![], Some(&key)).unwrap();
+    assert_eq!(s.get("token").unwrap().0, "shared-plain");
 }

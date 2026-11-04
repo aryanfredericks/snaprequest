@@ -294,6 +294,7 @@ pub struct SecretBody {
 #[utoipa::path(put, path = "/collections/{id}/secrets/{scope}/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("scope" = String, Path, description = "An environment name, or `shared` for every environment"), ("name" = String, Path, description = "Variable name")), request_body = SecretBody, responses((status = 204, description = "Stored in `.secrets/<scope>.toml` (never returned)"), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 /// Like `snapreq secret set`: stores a secret value in the collection's `.secrets/` directory.
 async fn set_secret(
+    axum::extract::State(state): crate::api::Shared,
     space: EditSpace,
     UrlPath((id, scope, name)): UrlPath<(String, String, String)>,
     Json(body): Json<SecretBody>,
@@ -311,8 +312,14 @@ async fn set_secret(
         snapreq_collection::Environment::load(&c, env)
             .map_err(|e| ApiError::not_found(e.to_string()))?;
     }
-    let path: PathBuf = snapreq_collection::secrets::store(&c.root, env, &name, &body.value)
-        .map_err(|e| ApiError::invalid(e.to_string()))?;
+    let path: PathBuf = snapreq_collection::secrets::store(
+        &c.root,
+        env,
+        &name,
+        &body.value,
+        Some(&state.secret_key),
+    )
+    .map_err(|e| ApiError::invalid(e.to_string()))?;
     tracing::info!(collection = %id, scope = %scope, variable = %name, file = %path.display(), "secret stored");
     Ok(StatusCode::NO_CONTENT)
 }

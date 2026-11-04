@@ -11,6 +11,7 @@ pub mod interp;
 pub mod kv;
 pub mod load;
 pub mod save;
+pub mod sealed;
 pub mod secrets;
 pub mod vars;
 

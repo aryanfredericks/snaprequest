@@ -285,3 +285,19 @@ to an existing account by name. `allowed_domains` admits only `email_verified` a
 testing) would let a network attacker forge logins. Linking an existing local account to an identity, and
 signature checks for front-channel tokens, are not supported.
 
+## ADR-026: Secret values sealed in place with AES-256-GCM
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P8.4 asks for encrypted secret storage on the server. Secret values are kept in
+`<collection>/.secrets/*.toml`, which the CLI also reads, and backups copy the data directory.
+**Decision:** Keep the files and their layout; seal values in place as `enc:v1:` + base64url(nonce ‖ AES-256-GCM
+ciphertext), with the variable name as associated data (`ring`, already a dependency). `snapreq-collection`
+opens sealed values when loading secrets (`Secrets::load_with_key`); values it cannot open count as unset and are
+listed (`Secrets::locked`). The server seals everything it writes and, at start, every plain value in the
+workspace. The key comes from `SNAPREQ_SECRET_KEY` or `<data dir>/secret.key` (created with mode 0600); the CLI
+looks in the same places. Found in passing: viewers could read secrets by sending unsaved edits or variable
+overrides to their own host, so viewers now send saved requests only, and the final URL of a live response hides
+secret values like the trace does.
+**Consequences:** A copy of the workspace or the data directory without the key reveals no secret values. The key
+must be backed up separately (P8.6 says so). Key rotation is not supported yet (re-seal with a new key would be a
+small CLI command).
+

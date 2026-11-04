@@ -127,7 +127,7 @@ pub(crate) fn build(
         &Variables::default(),
         &runtime,
     );
-    Secrets::load(&collection, args.env.as_deref(), std::env::vars())
+    load_secrets(&collection, args.env.as_deref())
         .map_err(|e| ArgError(e.to_string()))?
         .fill(&mut scopes);
 
@@ -283,6 +283,41 @@ pub(crate) fn new_request(
     Ok(path.to_path_buf())
 }
 
+/// The key for sealed secret values (written by a server): `SNAPREQ_SECRET_KEY`, or the key file
+/// of the local server's data directory (`SNAPREQ_DATA_DIR` or the platform default).
+pub(crate) fn secret_key() -> Option<snapreq_collection::sealed::SecretKey> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let dir = env("SNAPREQ_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| snapreq_server::config::default_data_dir(env));
+    match snapreq_collection::sealed::find(
+        env(snapreq_collection::sealed::KEY_ENV).as_deref(),
+        dir.as_deref(),
+    ) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            None
+        }
+    }
+}
+
+/// The secret values of a collection; warns about sealed values that cannot be opened.
+pub(crate) fn load_secrets(
+    collection: &Collection,
+    env: Option<&str>,
+) -> snapreq_collection::Result<Secrets> {
+    let s = Secrets::load_with_key(collection, env, std::env::vars(), secret_key().as_ref())?;
+    if !s.locked().is_empty() {
+        eprintln!(
+            "warning: sealed secret values cannot be opened ({}): set {} to the server's key",
+            s.locked().join(", "),
+            snapreq_collection::sealed::KEY_ENV
+        );
+    }
+    Ok(s)
+}
+
 /// `snapreq secret set`.
 pub(crate) fn secret_set(
     name: &str,
@@ -305,5 +340,11 @@ pub(crate) fn secret_set(
     if value.is_empty() {
         return Err(ArgError("the value is empty".into()));
     }
-    secrets::store(&root, env, name, &value).map_err(|e| ArgError(e.to_string()))
+    // Sealed only when a key is given explicitly; the file itself is owner-only and gitignored.
+    let key = std::env::var(snapreq_collection::sealed::KEY_ENV)
+        .ok()
+        .map(|k| snapreq_collection::sealed::SecretKey::decode(&k))
+        .transpose()
+        .map_err(|e| ArgError(format!("{}: {e}", snapreq_collection::sealed::KEY_ENV)))?;
+    secrets::store(&root, env, name, &value, key.as_ref()).map_err(|e| ArgError(e.to_string()))
 }

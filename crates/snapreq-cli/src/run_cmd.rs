@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
-use snapreq_collection::{Collection, Environment, FLOW_SUFFIX, Scopes, Secrets};
+use snapreq_collection::{Collection, Environment, FLOW_SUFFIX, Scopes};
 use snapreq_core::{Error, Request};
 use snapreq_test::report::{counts, lines, request_line, secrets_of};
 use snapreq_test::{
@@ -132,7 +132,7 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
         Ok(e) => e,
         Err(e) => return invalid(e.to_string()),
     };
-    let secrets = match Secrets::load(&collection, args.env.as_deref(), std::env::vars()) {
+    let secrets = match crate::collection_cmd::load_secrets(&collection, args.env.as_deref()) {
         Ok(s) => s,
         Err(e) => return invalid(e.to_string()),
     };

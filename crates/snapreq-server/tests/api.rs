@@ -808,7 +808,8 @@ async fn folders_moves_order_and_secrets() {
         .await;
     assert_eq!(status, 204, "{doc}");
     let stored = std::fs::read_to_string(api.workspace.join("app/.secrets/dev.toml")).unwrap();
-    assert!(stored.contains("s3cr3t-value"));
+    assert!(!stored.contains("s3cr3t-value"), "sealed at rest: {stored}");
+    assert!(stored.contains("token = \"enc:v1:"), "{stored}");
     assert!(api.workspace.join("app/.secrets/.gitignore").is_file());
     let (_, doc) = api
         .call("GET", "/collections/app/variables?env=dev", None)

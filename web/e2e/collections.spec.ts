@@ -86,7 +86,10 @@ test("environments hold variables and secrets, and switching them changes what r
   expect(file).toContain('base_url = "http://staging.invalid"');
   expect(file).toContain("api_key = { secret = true }");
   expect(file).not.toContain("very-secret-key");
-  expect(readFileSync(`${WORKSPACE}/shop/.secrets/staging.toml`, "utf8")).toContain("very-secret-key");
+  // Stored sealed (docs/SERVER.md, "Secret values at rest").
+  const sealed = readFileSync(`${WORKSPACE}/shop/.secrets/staging.toml`, "utf8");
+  expect(sealed).toContain('api_key = "enc:v1:');
+  expect(sealed).not.toContain("very-secret-key");
 
   // The request's URL resolves against the selected environment.
   await tree(page).getByRole("button", { name: "GET Health", exact: true }).click();

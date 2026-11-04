@@ -28,7 +28,7 @@ use utoipa_axum::routes;
 use crate::AppState;
 use crate::auth::Identity;
 use crate::store::{HistoryEntry, HistoryQuery, Owner, RunEntry};
-use crate::workspaces::{EditSpace, Space};
+use crate::workspaces::{EditSpace, Role, Space};
 
 pub(crate) type Shared = State<Arc<AppState>>;
 
@@ -191,6 +191,28 @@ pub(crate) fn key_path(key: &str, suffix: &str) -> ApiResult<PathBuf> {
     Ok(path)
 }
 
+/// Viewers send saved requests only: unsaved edits, variables and data rows could point the
+/// workspace's secrets at another host.
+fn viewer_overrides(space: &Space) -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        format!(
+            "viewers of workspace `{}` send saved requests only, without unsaved edits, variables or data",
+            space.id
+        ),
+    )
+}
+
+/// The secret values of a collection, sealed ones opened with the server's key.
+pub(crate) fn load_secrets(
+    state: &AppState,
+    c: &Collection,
+    env: Option<&str>,
+) -> snapreq_collection::Result<Secrets> {
+    Secrets::load_with_key(c, env, std::env::vars(), Some(&state.secret_key))
+}
+
 pub(crate) fn remove_file(path: &Path, what: &str) -> ApiResult<StatusCode> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
@@ -240,7 +262,12 @@ fn exchange_json(history_id: Option<i64>, run: &snapreq_test::RequestRun) -> Val
     let mut assertions = run.assertions.clone();
     scrub_outcomes(&mut assertions, &secrets);
     let (response, error) = match &run.outcome {
-        RunOutcome::Response(r) => (json!(r), Value::Null),
+        RunOutcome::Response(r) => {
+            let mut doc = json!(r);
+            // The final URL can carry secret values (`?key={{token}}`); the trace hides them too.
+            doc["url"] = json!(snapreq_test::report::hide(&r.url, &secrets));
+            (doc, Value::Null)
+        }
         RunOutcome::Invalid(why) => (
             Value::Null,
             json!({ "kind": "invalid_request", "message": why }),
@@ -319,6 +346,12 @@ pub(crate) async fn execute_body(
         }
         (None, Some(cid), Some(key)) => {
             let space = Space::resolve(state, identity, ws).await?;
+            if body.file.is_some() || !body.vars.is_empty() {
+                // Edits and overrides could send the workspace's secrets anywhere.
+                space
+                    .require(Role::Editor)
+                    .map_err(|_| viewer_overrides(&space))?;
+            }
             let mut collection = load_collection(&space, &cid)?;
             if let Some(file) = body.file {
                 file.validate().map_err(ApiError::invalid)?;
@@ -338,7 +371,7 @@ pub(crate) async fn execute_body(
                 .map(|e| Environment::load(&collection, e))
                 .transpose()
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
-            let secrets = Secrets::load(&collection, body.env.as_deref(), std::env::vars())
+            let secrets = load_secrets(state, &collection, body.env.as_deref())
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
             let mut session = Session::new(
                 &collection,
@@ -548,6 +581,11 @@ pub(crate) async fn run_body(
     body: RunBody,
     live: Option<snapreq_test::session::Live>,
 ) -> ApiResult<Value> {
+    if !body.vars.is_empty() || !body.data.is_empty() {
+        space
+            .require(Role::Editor)
+            .map_err(|_| viewer_overrides(space))?;
+    }
     let collection = load_collection(space, &body.collection)?;
     // Flow states are kept per workspace and collection.
     let state_key = format!("{}/{}", space.id, body.collection);
@@ -558,7 +596,7 @@ pub(crate) async fn run_body(
         .map(|e| Environment::load(&collection, e))
         .transpose()
         .map_err(|e| ApiError::invalid(e.to_string()))?;
-    let secrets = Secrets::load(&collection, body.env.as_deref(), std::env::vars())
+    let secrets = load_secrets(state, &collection, body.env.as_deref())
         .map_err(|e| ApiError::invalid(e.to_string()))?;
     if !body.data.is_empty() && body.iterations.is_some() {
         return Err(ApiError::bad_request("give either `data` or `iterations`"));
@@ -1116,6 +1154,7 @@ struct VariablesParams {
 /// The variables a request sees, with the scope each comes from (for highlighting
 /// placeholders in the UI).
 async fn list_variables(
+    State(state): Shared,
     space: Space,
     UrlPath(id): UrlPath<String>,
     Query(p): Query<VariablesParams>,
@@ -1127,8 +1166,8 @@ async fn list_variables(
         .map(|e| Environment::load(&c, e))
         .transpose()
         .map_err(|e| ApiError::not_found(e.to_string()))?;
-    let secrets = Secrets::load(&c, p.env.as_deref(), std::env::vars())
-        .map_err(|e| ApiError::invalid(e.to_string()))?;
+    let secrets =
+        load_secrets(&state, &c, p.env.as_deref()).map_err(|e| ApiError::invalid(e.to_string()))?;
     let key = p.key.as_deref().unwrap_or("").trim_matches('/');
     let mut scopes = snapreq_collection::Scopes::for_request(
         &c,
