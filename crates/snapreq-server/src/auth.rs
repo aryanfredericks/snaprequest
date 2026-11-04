@@ -27,6 +27,7 @@ use crate::AppState;
 use crate::accounts::{ApiToken, User};
 use crate::api::{ApiError, ApiResult, ErrorBody, Shared};
 use crate::config::AuthMode;
+use crate::security::{Audit, ClientIp, too_many};
 use crate::store::Owner;
 
 /// Name of the session cookie.
@@ -62,6 +63,8 @@ pub struct Identity {
     /// `None` on a server without accounts.
     pub user: Option<User>,
     pub via: Via,
+    /// The client's address (for the audit log).
+    pub ip: Option<std::net::IpAddr>,
 }
 
 impl Identity {
@@ -69,6 +72,7 @@ impl Identity {
         Self {
             user: None,
             via: Via::Local,
+            ip: None,
         }
     }
 
@@ -189,6 +193,7 @@ async fn identify(state: &AppState, headers: &HeaderMap) -> ApiResult<Option<Ide
             Some(user) => Ok(Some(Identity {
                 user: Some(user),
                 via: Via::Token(token.to_owned()),
+                ip: None,
             })),
             None => Err(unauthorized("invalid or expired API token")),
         };
@@ -202,6 +207,7 @@ async fn identify(state: &AppState, headers: &HeaderMap) -> ApiResult<Option<Ide
             .map(|user| Identity {
                 user: Some(user),
                 via: Via::Session(secret.to_owned()),
+                ip: None,
             }));
     }
     Ok(None)
@@ -214,14 +220,45 @@ pub async fn guard(State(state): State<Arc<AppState>>, mut req: Request, next: N
     if !is_api(&path) {
         return next.run(req).await; // the UI's files and `/healthz`
     }
+    // A server without a login answers only to names that cannot be rebound to another site.
+    if state.config.auth.mode == AuthMode::None
+        && !state.config.allow_remote
+        && !crate::security::host_allowed(
+            req.headers()
+                .get(axum::http::header::HOST)
+                .and_then(|v| v.to_str().ok()),
+            &state.config.auth.allowed_hosts,
+        )
+    {
+        tracing::warn!("refused a request for an unknown host name");
+        return forbidden(
+            "unknown host name: a server without accounts only answers to localhost and loopback addresses (add others to auth.allowed_hosts)",
+        )
+        .into_response();
+    }
+    let ip = crate::security::ClientIp(
+        req.extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip()),
+    );
+    req.extensions_mut().insert(ip);
+    let bearer_sent = bearer(req.headers()).is_some();
+    if bearer_sent && let Some(left) = state.limits.token_ip.blocked(&ip.key()) {
+        return crate::security::too_many(left, "unknown API tokens");
+    }
     if path == "/api/v1/ws" && !same_origin(req.headers()) {
         tracing::warn!("refused a WebSocket from another origin");
         return forbidden("WebSocket connections must come from this server's pages")
             .into_response();
     }
     let identity = match identify(&state, req.headers()).await {
-        Ok(i) => i,
-        Err(e) => return e.into_response(),
+        Ok(i) => i.map(|i| Identity { ip: ip.0, ..i }),
+        Err(e) => {
+            if bearer_sent && e.status == StatusCode::UNAUTHORIZED {
+                state.limits.token_ip.fail(&ip.key());
+            }
+            return e.into_response();
+        }
     };
     let changes = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
     let by_cookie = matches!(
@@ -323,21 +360,54 @@ pub(crate) fn session_cookie(
 
 #[utoipa::path(post, path = "/auth/login", tag = "auth", request_body = LoginBody, responses((status = 200, description = "Logged in; sets the session cookie", body = AuthStatus), (status = 401, description = "Wrong user name or password", body = ErrorBody), (status = 409, description = "The server has no accounts", body = ErrorBody)))]
 /// `POST /api/v1/auth/login`: checks the password and starts a session (an HttpOnly cookie).
-async fn login(State(state): Shared, Json(body): Json<LoginBody>) -> ApiResult<Response> {
+async fn login(
+    State(state): Shared,
+    ip: Option<Extension<ClientIp>>,
+    Json(body): Json<LoginBody>,
+) -> ApiResult<Response> {
     if state.config.auth.mode != AuthMode::Accounts {
         return Err(accounts_off());
+    }
+    let ip = ip.map_or(ClientIp(None), |Extension(i)| i);
+    let user_key = body.username.trim().to_lowercase();
+    let limits = &state.limits;
+    if let Some(left) = limits
+        .login_user
+        .blocked(&user_key)
+        .or_else(|| limits.login_ip.blocked(&ip.key()))
+    {
+        return Ok(too_many(left, "failed logins"));
     }
     let Some(user) = state
         .store
         .check_login(&body.username, &body.password)
         .await?
     else {
+        limits.login_user.fail(&user_key);
+        limits.login_ip.fail(&ip.key());
         tracing::warn!(username = %body.username, "failed login");
+        state
+            .store
+            .audit(
+                Audit::new("auth.login_failed")
+                    .target(body.username.clone())
+                    .ip(ip),
+            )
+            .await;
         return Err(unauthorized("wrong user name or password"));
     };
+    limits.login_user.reset(&user_key);
     let ttl = state.config.auth.session_ttl;
     let secret = state.store.create_session(user.id, ttl).await?;
     tracing::info!(username = %user.username, "logged in");
+    state
+        .store
+        .audit(Audit {
+            user_id: Some(user.id),
+            username: Some(user.username.clone()),
+            ..Audit::new("auth.login").ip(ip)
+        })
+        .await;
     let cookie = session_cookie(&state, &secret, ttl.as_secs())?;
     Ok((
         [(header::SET_COOKIE, cookie)],
@@ -355,6 +425,10 @@ async fn login(State(state): Shared, Json(body): Json<LoginBody>) -> ApiResult<R
 async fn logout(State(state): Shared, identity: Identity) -> ApiResult<Response> {
     if let Via::Session(secret) = &identity.via {
         state.store.delete_session(secret).await?;
+        state
+            .store
+            .audit(Audit::new("auth.logout").by(&identity))
+            .await;
     }
     let cookie = session_cookie(&state, "", 0)?;
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response())
@@ -387,6 +461,10 @@ async fn change_password(
         .await?
         .is_none()
     {
+        state
+            .store
+            .audit(Audit::new("auth.password_change_failed").by(&identity))
+            .await;
         return Err(forbidden("the current password is wrong"));
     }
     let keep = match &identity.via {
@@ -398,6 +476,10 @@ async fn change_password(
         .set_password(&user.username, &body.new, keep)
         .await?;
     tracing::info!(username = %user.username, "password changed");
+    state
+        .store
+        .audit(Audit::new("auth.password_changed").by(&identity))
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -449,6 +531,14 @@ async fn create_token(
     };
     let (token, secret) = state.store.create_token(user.id, &body.name, ttl).await?;
     tracing::info!(username = %user.username, token = token.id, "API token created");
+    state
+        .store
+        .audit(
+            Audit::new("auth.token_created")
+                .by(&identity)
+                .target(format!("{} ({})", token.name, token.id)),
+        )
+        .await;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "token": token, "secret": secret })),
@@ -465,6 +555,14 @@ async fn delete_token(
     let user = identity.account()?;
     if state.store.delete_token(user.id, id).await? {
         tracing::info!(username = %user.username, token = id, "API token revoked");
+        state
+            .store
+            .audit(
+                Audit::new("auth.token_revoked")
+                    .by(&identity)
+                    .target(id.to_string()),
+            )
+            .await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found(format!("no token {id}")))

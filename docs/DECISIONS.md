@@ -301,3 +301,21 @@ secret values like the trace does.
 must be backed up separately (P8.6 says so). Key rotation is not supported yet (re-seal with a new key would be a
 small CLI command).
 
+## ADR-027: Hardening: in-memory failure limits, header middleware, Host allowlist, SQLite audit log
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P8.5: audit log, rate limiting, CSRF protection, security headers; ADR-023 left login limits
+and DNS rebinding for this checkpoint.
+**Decision:** Rate limits count *failures* only (logins per user name and per client address, unknown tokens per
+address) in fixed 15-minute windows in memory; legitimate use is never slowed, and a restart clears them. The
+client address is the TCP peer (`X-Forwarded-For` is not trusted; behind a proxy every client shares the proxy's
+address, so the per-name limit is the effective one). One middleware sets security headers without overriding
+those a handler chose (report downloads keep `sandbox`). A no-login server on loopback (no `allow_remote`) answers
+API requests only for loopback host names plus `auth.allowed_hosts`: with accounts, rebinding gains nothing
+because the attacker's origin has no cookie. The audit log is a SQLite table (migration 6) without a foreign key
+to users, so events outlive deleted accounts; it records actions and names, never values, and is pruned after a
+year. Visibility follows ownership (own events, plus events in workspaces one owns); the server's command line
+sees all, as there is no admin role.
+**Consequences:** Anonymous failed-login events are only visible on the server machine. A distributed password
+guess against many names from many addresses is slowed only by Argon2. Per-request rate limits for authenticated
+users were not added (self-hosted, users are known).
+

@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1–P8.4 done)
-- **Current checkpoint:** P8.5, audit log, rate limiting, CSRF, security headers
+- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1–P8.5 done)
+- **Current checkpoint:** P8.6, backup and restore
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -27,8 +27,14 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 ## Next steps
 1. P8.4 encrypted secret storage, P8.5 hardening, P8.6 backup/restore, then the Phase 8 security
    checklist (maintainer asked for all of Phase 8, then a report before Phase 9).
-2. P8.5 leftovers noted in ADR-023: login rate limiting, security headers, audit log, a `Host` check
-   against DNS rebinding for a no-login loopback server.
+
+## Hardening notes (P8.5)
+- `security.rs`: `Limiter`/`Limits` (failures only: login per name 10 and per IP 50, unknown tokens per
+  IP 50, 15 min), `too_many` (429 + Retry-After), `ClientIp` extension (TCP peer; serve uses
+  `into_make_service_with_connect_info`), `headers` middleware, `host_allowed` (no-login loopback
+  servers; `[auth] allowed_hosts`), audit (`Audit` builder, `Store::audit/audit_log/prune_audit`,
+  migration 6, `GET /api/v1/audit`). `Identity.ip`. CLI `snapreq audit`; `snapreq user` ops audited.
+  UI: "Recent activity" in the account dialog.
 
 ## Sealed secret notes (P8.4)
 - `snapreq-collection::sealed` (SecretKey, seal/open AES-256-GCM with the name as AAD, `find`,
@@ -597,6 +603,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P8.5 — 2026-11-04 — Audit log (API, CLI, UI), failure rate limits, security headers, Host allowlist against DNS rebinding. ADR-027.
 - P8.4 — 2026-11-04 — Secret values sealed at rest (AES-256-GCM, key from env or data dir), existing plain values sealed at start, CLI opens them; viewers limited to saved requests without overrides. ADR-026.
 - P8.3 — 2026-11-04 — OIDC login (code flow + PKCE, state cookie, nonce), automatic accounts with optional verified-domain allowlist, "Log in with …" button. ADR-025.
 - P8.2 — 2026-11-04 — Workspaces with owner/editor/viewer roles: directories under the workspace dir (`default` = the dir itself), members and roles in SQLite, `X-SnapReq-Workspace` header, workspace picker and dialog in the UI. ADR-024. Cross-user isolation and role rules tested in Rust and Playwright.

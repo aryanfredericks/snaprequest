@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -512,6 +528,27 @@ export interface components {
             last_used_at?: number | null;
             name: string;
         };
+        /** @description A recorded action. */
+        AuditEvent: {
+            /** @description E.g. `auth.login`, `workspace.member_set`, `secret.set`. */
+            action: string;
+            /**
+             * Format: int64
+             * @description Unix milliseconds.
+             */
+            at: number;
+            /** Format: int64 */
+            id: number;
+            /** @description The client's address. */
+            ip?: string | null;
+            target?: string | null;
+            /** @description Who did it; `null` for failed logins and the command line. */
+            username?: string | null;
+            workspace?: string | null;
+        };
+        AuditList: {
+            events: components["schemas"]["AuditEvent"][];
+        };
         /** @description `{ mode, user }` */
         AuthStatus: {
             /** @description `none` (no login) or `accounts`. */
@@ -740,6 +777,30 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_audit: {
+        parameters: {
+            query?: {
+                /** @description Only events with an id below this (paging). */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's events and those of the workspaces they own, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditList"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;

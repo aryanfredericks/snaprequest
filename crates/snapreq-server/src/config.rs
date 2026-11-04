@@ -122,6 +122,9 @@ pub struct AuthConfig {
     /// Mark the session cookie `Secure` (set it when users reach the server over HTTPS,
     /// e.g. behind a TLS-terminating proxy).
     pub secure_cookies: bool,
+    /// Without accounts on a loopback address, host names besides `localhost` and loopback
+    /// addresses that the server answers to (DNS-rebinding protection).
+    pub allowed_hosts: Vec<String>,
 }
 
 /// Default session length in days.
@@ -134,6 +137,7 @@ impl Default for AuthConfig {
             mode: AuthMode::None,
             session_ttl: std::time::Duration::from_secs(DEFAULT_SESSION_DAYS * 24 * 3600),
             secure_cookies: false,
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -145,6 +149,8 @@ struct AuthFile {
     mode: Option<AuthMode>,
     session_days: Option<u64>,
     secure_cookies: Option<bool>,
+    #[serde(default)]
+    allowed_hosts: Vec<String>,
 }
 
 /// `[history]` in the config file; `0` means no limit.
@@ -281,6 +287,7 @@ impl Config {
             mode,
             session_ttl: std::time::Duration::from_secs(session_days * 24 * 3600),
             secure_cookies: file.auth.secure_cookies.unwrap_or(false),
+            allowed_hosts: file.auth.allowed_hosts.clone(),
         };
         // Cloud metadata endpoints are blocked by default whenever others can reach the server.
         let outbound = OutboundPolicy::from_config(&file.outbound, allow_remote || remote)

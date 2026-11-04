@@ -69,6 +69,10 @@ class AuthState {
     return unwrap(await api.POST("/api/v1/auth/tokens", { body: { name, expires_in_days: expiresInDays } }));
   }
 
+  async activity(): Promise<Schemas["AuditEvent"][]> {
+    return unwrap(await api.GET("/api/v1/audit", { params: { query: { limit: 20 } } })).events;
+  }
+
   async revokeToken(id: number) {
     const r = await api.DELETE("/api/v1/auth/tokens/{id}", { params: { path: { id } } });
     if (r.error !== undefined) unwrap(r);

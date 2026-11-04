@@ -24,6 +24,7 @@ use utoipa_axum::routes;
 
 use crate::api::{ApiError, ApiResult, ErrorBody, Shared, valid_segment};
 use crate::auth::Identity;
+use crate::security::Audit;
 use crate::store::{Owner, Store, db_err, now_ms};
 use crate::{AppState, Error, Result};
 
@@ -488,6 +489,14 @@ async fn create_workspace(
         )));
     }
     tracing::info!(workspace = %ws.id, "workspace created");
+    state
+        .store
+        .audit(
+            Audit::new("workspace.created")
+                .by(&identity)
+                .workspace(&ws.id),
+        )
+        .await;
     Ok((StatusCode::CREATED, Json(json!(ws))))
 }
 
@@ -514,6 +523,15 @@ async fn update_workspace(
     owned(&state, &identity, &ws).await?;
     check_name(&body.name)?;
     state.store.rename_workspace(&ws, &body.name).await?;
+    state
+        .store
+        .audit(
+            Audit::new("workspace.renamed")
+                .by(&identity)
+                .workspace(&ws)
+                .target(body.name.clone()),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -540,6 +558,10 @@ async fn delete_workspace(
     let _ = std::fs::remove_dir(&space.dir);
     state.store.delete_workspace(&ws).await?;
     tracing::info!(workspace = %ws, "workspace deleted");
+    state
+        .store
+        .audit(Audit::new("workspace.deleted").by(&identity).workspace(&ws))
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -589,6 +611,15 @@ async fn put_member(
         .await
         .map_err(member_error)?;
     tracing::info!(workspace = %ws, member = %username, role = body.role.as_str(), "member set");
+    state
+        .store
+        .audit(
+            Audit::new("workspace.member_set")
+                .by(&identity)
+                .workspace(&ws)
+                .target(format!("{username}: {}", body.role.as_str())),
+        )
+        .await;
     Ok(Json(json!(member)))
 }
 
@@ -610,6 +641,15 @@ async fn delete_member(
         .await
         .map_err(member_error)?;
     tracing::info!(workspace = %ws, member = %username, "member removed");
+    state
+        .store
+        .audit(
+            Audit::new("workspace.member_removed")
+                .by(&identity)
+                .workspace(&ws)
+                .target(username.clone()),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

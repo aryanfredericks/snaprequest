@@ -28,6 +28,7 @@ fn every_route_is_described() {
         "GET /api/v1/auth/tokens",
         "POST /api/v1/auth/tokens",
         "DELETE /api/v1/auth/tokens/{id}",
+        "GET /api/v1/audit",
         "GET /api/v1/workspaces",
         "POST /api/v1/workspaces",
         "PUT /api/v1/workspaces/{ws}",

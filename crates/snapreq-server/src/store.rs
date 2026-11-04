@@ -119,6 +119,20 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (issuer, subject)
     );
     CREATE INDEX identities_user ON identities (user_id);",
+    // 6: the audit log (P8.5); users may be deleted, their name stays
+    "CREATE TABLE audit (
+        id INTEGER PRIMARY KEY,
+        at INTEGER NOT NULL,
+        user_id INTEGER,
+        username TEXT,
+        workspace TEXT,
+        action TEXT NOT NULL,
+        target TEXT,
+        ip TEXT
+    );
+    CREATE INDEX audit_at ON audit (at);
+    CREATE INDEX audit_user ON audit (user_id, id);
+    CREATE INDEX audit_workspace ON audit (workspace, id);",
 ];
 
 /// Whose history and runs: a user id, or `None` for the single user of a server without

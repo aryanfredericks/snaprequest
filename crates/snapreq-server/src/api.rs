@@ -27,6 +27,7 @@ use utoipa_axum::routes;
 
 use crate::AppState;
 use crate::auth::Identity;
+use crate::security::Audit;
 use crate::store::{HistoryEntry, HistoryQuery, Owner, RunEntry};
 use crate::workspaces::{EditSpace, Role, Space};
 
@@ -879,6 +880,8 @@ struct NewCollection {
 
 #[utoipa::path(post, path = "/collections", tag = "collections", request_body = NewCollection, responses((status = 201, description = "Created", body = JsonDocument), (status = 409, description = "Exists", body = ErrorBody), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn create_collection(
+    State(state): Shared,
+    identity: Identity,
     space: EditSpace,
     Json(body): Json<NewCollection>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
@@ -893,6 +896,15 @@ async fn create_collection(
     let file = CollectionFile::new(body.name.unwrap_or_else(|| body.id.clone()));
     save_collection(&dir.join(COLLECTION_FILE), &file)
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    state
+        .store
+        .audit(
+            Audit::new("collection.created")
+                .by(&identity)
+                .workspace(&space.id)
+                .target(body.id.clone()),
+        )
+        .await;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "id": body.id, "file": file })),
@@ -962,6 +974,8 @@ async fn put_collection(
 
 #[utoipa::path(delete, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_collection(
+    State(state): Shared,
+    identity: Identity,
     space: EditSpace,
     UrlPath(id): UrlPath<String>,
 ) -> ApiResult<StatusCode> {
@@ -970,6 +984,15 @@ async fn delete_collection(
         return Err(ApiError::not_found(format!("no collection `{id}`")));
     }
     std::fs::remove_dir_all(&dir).map_err(|e| ApiError::internal(e.to_string()))?;
+    state
+        .store
+        .audit(
+            Audit::new("collection.deleted")
+                .by(&identity)
+                .workspace(&space.id)
+                .target(id),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

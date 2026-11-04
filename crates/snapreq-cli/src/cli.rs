@@ -78,6 +78,24 @@ pub(crate) enum Command {
     ///   snapreq user list
     #[command(verbatim_doc_comment)]
     User(UserArgs),
+
+    /// Show the server's audit log (logins, tokens, workspaces, members, secrets), newest first.
+    Audit(AuditArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AuditArgs {
+    /// How many events to show.
+    #[arg(short = 'n', long, default_value_t = 50)]
+    pub limit: usize,
+
+    /// The server's data directory (env `SNAPREQ_DATA_DIR`; default: as `snapreq serve`).
+    #[arg(long, value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    /// The server's config file (env `SNAPREQ_CONFIG`).
+    #[arg(long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

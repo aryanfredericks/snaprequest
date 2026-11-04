@@ -11,6 +11,7 @@
   let next = $state("");
   let repeat = $state("");
   let passwordNote = $state<string | null>(null);
+  let events = $state<Awaited<ReturnType<typeof auth.activity>>>([]);
 
   export function open() {
     created = null;
@@ -22,6 +23,7 @@
 
   async function load() {
     try {
+      events = await auth.activity();
       tokens = await auth.tokens();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -137,6 +139,28 @@
       <button type="submit">Change password</button>
     </form>
     {#if passwordNote}<p role="status">{passwordNote}</p>{/if}
+  </section>
+
+  <section aria-labelledby="activity-title">
+    <h3 id="activity-title">Recent activity</h3>
+    <p class="muted">Your logins and changes, and changes in workspaces you own.</p>
+    {#if events.length}
+      <table>
+        <thead><tr><th>When</th><th>What</th><th>Who</th><th>Details</th></tr></thead>
+        <tbody>
+          {#each events as e (e.id)}
+            <tr>
+              <td>{new Date(e.at).toLocaleString()}</td>
+              <td><code>{e.action}</code></td>
+              <td>{e.username ?? "–"}</td>
+              <td>{[e.workspace ? `in ${e.workspace}` : "", e.target ?? "", e.ip ? `from ${e.ip}` : ""].filter(Boolean).join(" · ")}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      <p class="muted">Nothing yet.</p>
+    {/if}
   </section>
 
   <footer>

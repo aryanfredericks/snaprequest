@@ -127,6 +127,19 @@ async fn accounts_are_managed_from_the_command_line() {
     assert_eq!(user(&data, &["remove", "bo"], "").0, 0);
     assert_eq!(user(&data, &["remove", "bo"], "").0, 3);
     assert_eq!(user(&data, &["list"], "").1, "ana\n");
+    let audit = snapreq()
+        .args(["audit", "--data-dir"])
+        .arg(&data)
+        .output()
+        .unwrap();
+    let log = String::from_utf8_lossy(&audit.stdout);
+    for line in ["user.created", "user.password_set", "user.removed"] {
+        assert!(log.contains(line), "{log}");
+    }
+    assert!(
+        !log.contains("new-password") && !log.contains("ana-password"),
+        "no secrets: {log}"
+    );
 
     // The server logs her in with the new password.
     let mut child = snapreq()

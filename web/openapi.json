@@ -12,6 +12,47 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/audit": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_audit",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only events with an id below this (paging).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's events and those of the workspaces they own, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -2629,6 +2670,70 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "AuditEvent": {
+        "type": "object",
+        "description": "A recorded action.",
+        "required": [
+          "id",
+          "at",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "E.g. `auth.login`, `workspace.member_set`, `secret.set`."
+          },
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix milliseconds."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's address."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who did it; `null` for failed logins and the command line."
+          },
+          "workspace": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AuditList": {
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            }
           }
         }
       },

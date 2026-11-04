@@ -295,6 +295,7 @@ pub struct SecretBody {
 /// Like `snapreq secret set`: stores a secret value in the collection's `.secrets/` directory.
 async fn set_secret(
     axum::extract::State(state): crate::api::Shared,
+    identity: crate::auth::Identity,
     space: EditSpace,
     UrlPath((id, scope, name)): UrlPath<(String, String, String)>,
     Json(body): Json<SecretBody>,
@@ -321,5 +322,14 @@ async fn set_secret(
     )
     .map_err(|e| ApiError::invalid(e.to_string()))?;
     tracing::info!(collection = %id, scope = %scope, variable = %name, file = %path.display(), "secret stored");
+    state
+        .store
+        .audit(
+            crate::security::Audit::new("secret.set")
+                .by(&identity)
+                .workspace(&space.id)
+                .target(format!("{id}/{scope}/{name}")),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }

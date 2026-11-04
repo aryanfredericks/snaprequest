@@ -456,6 +456,7 @@ struct CallbackParams {
 /// `GET /api/v1/auth/oidc/callback`: where the provider sends the browser back.
 async fn callback(
     State(state): Shared,
+    ip: Option<axum::Extension<crate::security::ClientIp>>,
     headers: HeaderMap,
     Query(p): Query<CallbackParams>,
 ) -> ApiResult<Response> {
@@ -487,6 +488,18 @@ async fn callback(
         tracing::info!(username = %user.username, "account created by single sign-on");
     }
     tracing::info!(username = %user.username, "logged in with single sign-on");
+    let ip = ip.map_or(crate::security::ClientIp(None), |axum::Extension(i)| i);
+    let event = |action| crate::security::Audit {
+        user_id: Some(user.id),
+        username: Some(user.username.clone()),
+        ..crate::security::Audit::new(action)
+            .ip(ip)
+            .target(issuer.clone())
+    };
+    if created {
+        state.store.audit(event("user.created_by_oidc")).await;
+    }
+    state.store.audit(event("auth.oidc_login")).await;
     let ttl = state.config.auth.session_ttl;
     let secret = state.store.create_session(user.id, ttl).await?;
     let session = crate::auth::session_cookie(&state, &secret, ttl.as_secs())?;

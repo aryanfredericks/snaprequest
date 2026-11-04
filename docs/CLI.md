@@ -108,6 +108,8 @@ snapreq user passwd ana                              # also logs ana out everywh
 snapreq user remove ana                              # with her tokens, history, runs and memberships
 ```
 
+`snapreq audit [-n 50]` prints the server's audit log (docs/SERVER.md, "Hardening").
+
 They work on the server's database (`--data-dir`, `--config` and the environment variables as for
 `snapreq serve`), also while the server runs. User names are case-insensitive; passwords need at least
 8 characters. The first account owns the `default` workspace; other users are added to workspaces in the

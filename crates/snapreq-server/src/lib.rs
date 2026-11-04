@@ -10,6 +10,7 @@ pub mod config;
 pub mod flow_states;
 pub mod oidc;
 pub mod outbound;
+pub mod security;
 pub mod store;
 pub mod tree;
 pub mod ui;
@@ -72,6 +73,8 @@ pub struct AppState {
     pub oidc: Option<oidc::Oidc>,
     /// Seals the secret values the server writes (ADR-026).
     pub secret_key: snapreq_collection::sealed::SecretKey,
+    /// Limits on failed logins and unknown tokens.
+    pub limits: security::Limits,
 }
 
 /// Seals plain secret values of every collection in every workspace; returns how many.
@@ -128,6 +131,7 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
             api::router()
                 .merge(auth::router())
                 .merge(oidc::router())
+                .merge(security::router())
                 .merge(workspaces::router()),
         )
         .split_for_parts();
@@ -177,6 +181,10 @@ pub fn app(state: Arc<AppState>) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::guard,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            security::headers,
         ))
         .layer(
             TraceLayer::new_for_http()
@@ -269,6 +277,7 @@ impl Server {
             ..snapreq_core::ClientConfig::default()
         })?;
         let pruned = store.prune(config.retention).await?;
+        store.prune_audit().await?;
         if pruned != store::Pruned::default() {
             tracing::info!(
                 history = pruned.history,
@@ -310,6 +319,7 @@ impl Server {
                 flow_states: Default::default(),
                 oidc,
                 secret_key,
+                limits: Default::default(),
             }),
         })
     }
@@ -332,15 +342,21 @@ impl Server {
                 if let Err(e) = store.prune(retention).await {
                     tracing::warn!("pruning history failed: {e}");
                 }
+                if let Err(e) = store.prune_audit().await {
+                    tracing::warn!("pruning the audit log failed: {e}");
+                }
             }
         });
-        let result = axum::serve(self.listener, app(self.state))
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(|source| Error::Io {
-                context: "server failed".into(),
-                source,
-            });
+        let result = axum::serve(
+            self.listener,
+            app(self.state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(|source| Error::Io {
+            context: "server failed".into(),
+            source,
+        });
         pruner.abort();
         result
     }

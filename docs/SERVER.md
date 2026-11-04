@@ -52,6 +52,7 @@ collections belong to [workspaces](#workspaces). The first account owns the `def
 mode = "accounts"
 session_days = 14       # how long a login lasts (1–365)
 secure_cookies = false  # set to true when users reach the server over HTTPS (e.g. behind a proxy)
+allowed_hosts = []      # without accounts: host names to answer besides localhost (DNS rebinding)
 ```
 
 Two ways to authenticate:
@@ -139,6 +140,25 @@ workspace named by the **`X-SnapReq-Workspace`** header, `default` without one; 
 | `PUT /api/v1/workspaces/{ws}/members/{username}` | `{ "role" }` → the member (owner); 404 for an unknown user, 409 if no owner would be left |
 | `DELETE /api/v1/workspaces/{ws}/members/{username}` | 204 (owner, or the member leaving) |
 
+## Hardening
+
+- **Security headers** on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy:
+  same-origin`; API responses add `Cache-Control: no-store` and a `default-src 'none'` CSP (the UI's pages
+  have their own CSP). With `secure_cookies = true`, `Strict-Transport-Security` too.
+- **Rate limits** (per 15 minutes): 10 failed logins per user name and 50 per client address, 50 unknown
+  API tokens per client address. Then 429 `rate_limited` with `Retry-After`.
+- **CSRF**: see [Accounts](#accounts) (the `X-SnapReq-CSRF` header, `SameSite=Strict`, the WebSocket
+  origin check, the OIDC `state` cookie).
+- **DNS rebinding**: a server without accounts on a loopback address only answers API requests for
+  `localhost`, `*.localhost` and loopback addresses, so a web page cannot reach it through a domain that
+  resolves to 127.0.0.1. Add other names with `[auth] allowed_hosts = ["devbox"]`.
+- **Audit log**: logins (also failed ones), logouts, password changes, API tokens, single-sign-on accounts,
+  workspaces, members, collections created and deleted, and secrets set (name only), with user, workspace
+  and client address; kept for a year. `GET /api/v1/audit?before=&limit=` shows a user their own events and
+  those of workspaces they own; `snapreq audit` on the server shows everything. The account dialog in the UI
+  shows recent activity.
+
 ## Secret values at rest
 
 Secret variable values live in each collection's `.secrets/*.toml` (gitignored, owner-only). The server
@@ -185,7 +205,7 @@ A server reachable from the network without any policy logs a warning at start.
 
 - Base path `/api/v1`; JSON in and out.
 - Errors: an HTTP status and `{ "error": { "kind": "bad_request" | "unauthorized" | "forbidden" |
-  "not_found" | "conflict" | "invalid" | "internal", "message": "…" } }`. `invalid` (422) is a file or request that does not validate.
+  "not_found" | "conflict" | "invalid" | "rate_limited" | "internal", "message": "…" } }`. `invalid` (422) is a file or request that does not validate.
 - Collection ids, request and flow keys use letters, digits, `_`, `-` and `.` per segment and cannot
   leave the collection or name collection files (`snapreq`, `folder`, `environments/…`, `.…`).
 
