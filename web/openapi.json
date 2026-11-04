@@ -12,6 +12,270 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/login`: checks the password and starts a session (an HttpOnly cookie).",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in; sets the session cookie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong user name or password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server has no accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/logout`",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "The session is ended and its cookie removed"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/password`: changes the caller's password.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Changed; the user's other sessions are ended (API tokens stay valid)"
+          },
+          "403": {
+            "description": "The current password is wrong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server has no accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The new password is not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/status": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "Whether the server has accounts, and who is logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/tokens": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_tokens",
+        "responses": {
+          "200": {
+            "description": "The caller's API tokens, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenList"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server has no accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`POST /api/v1/auth/tokens`: creates an API token for the caller.",
+        "operationId": "create_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The token, with its secret (shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewToken"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server has no accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name or expiry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`DELETE /api/v1/auth/tokens/{id}`: revokes one of the caller's tokens.",
+        "operationId": "delete_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Token id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server has no accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/collections": {
       "get": {
         "tags": [
@@ -1891,6 +2155,72 @@
   },
   "components": {
     "schemas": {
+      "ApiToken": {
+        "type": "object",
+        "description": "An API token as listed (the secret itself is shown only when it is created).",
+        "required": [
+          "id",
+          "name",
+          "hint",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix milliseconds; `null`: never expires."
+          },
+          "hint": {
+            "type": "string",
+            "description": "The last four characters of the token, to tell tokens apart."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_used_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthStatus": {
+        "type": "object",
+        "description": "`{ mode, user }`",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "`none` (no login) or `accounts`."
+          },
+          "user": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/User",
+                "description": "The logged-in user; `null` when not logged in or without accounts."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "description": "`{ \"error\": { \"kind\", \"message\" } }`",
@@ -1912,7 +2242,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "`bad_request`, `not_found`, `conflict`, `invalid` or `internal`."
+            "description": "`bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid` or\n`internal`."
           },
           "message": {
             "type": "string"
@@ -2058,6 +2388,22 @@
         "type": "object",
         "description": "A JSON document; its shape is described in `docs/SERVER.md`."
       },
+      "LoginBody": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "MoveBody": {
         "type": "object",
         "required": [
@@ -2111,6 +2457,38 @@
               "string",
               "null"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewToken": {
+        "type": "object",
+        "description": "A new token: `secret` is shown only in this response.",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/ApiToken"
+          }
+        }
+      },
+      "PasswordBody": {
+        "type": "object",
+        "required": [
+          "current",
+          "new"
+        ],
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -2294,6 +2672,65 @@
           }
         },
         "additionalProperties": false
+      },
+      "TokenBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "expires_in_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Days until it expires; absent: never.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "What the token is for, e.g. `ci`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TokenList": {
+        "type": "object",
+        "required": [
+          "tokens"
+        ],
+        "properties": {
+          "tokens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiToken"
+            }
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "description": "An account.",
+        "required": [
+          "id",
+          "username",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix milliseconds."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
       }
     }
   },
@@ -2301,6 +2738,10 @@
     {
       "name": "server",
       "description": "Health and version"
+    },
+    {
+      "name": "auth",
+      "description": "Login, sessions and API tokens"
     },
     {
       "name": "requests",

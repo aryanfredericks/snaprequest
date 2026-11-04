@@ -65,9 +65,10 @@ every trace and output, including when given with `--var`.
 ```sh
 snapreq serve                                        # http://127.0.0.1:7878
 snapreq serve --bind 127.0.0.1:9000 --data-dir ./snapreq-data
+snapreq serve --bind 0.0.0.0:7878                    # accounts on: create users with `snapreq user add`
 ```
 
-Starts the self-hosted server (the API grows through Phase 6; the web UI comes in Phase 7). It prints
+Starts the self-hosted server (API and web UI, docs/SERVER.md). It prints
 `snapreq server listening on http://ADDR (data: DIR)` on stderr, logs one line per API request (`info`
 level; change with `--log-level` or `SNAPREQ_LOG`) and stops gracefully on Ctrl-C or SIGTERM.
 
@@ -76,7 +77,8 @@ level; change with `--log-level` or `SNAPREQ_LOG`) and stops gracefully on Ctrl-
 | Listen address | `--bind IP:PORT` | `SNAPREQ_BIND` | `bind` | `127.0.0.1:7878` |
 | Data directory | `--data-dir DIR` | `SNAPREQ_DATA_DIR` | `data_dir` | `$XDG_DATA_HOME/snapreq`, `~/.local/share/snapreq`, `~/Library/Application Support/snapreq`, `%APPDATA%\snapreq` |
 | Config file | `--config FILE` | `SNAPREQ_CONFIG` | | `config.toml` in the data directory, if present |
-| Non-loopback address | `--allow-remote` | `SNAPREQ_ALLOW_REMOTE=1` | `allow_remote = true` | off |
+| Login | `--auth none\|accounts` | `SNAPREQ_AUTH` | `[auth] mode` | `none` on loopback, `accounts` otherwise |
+| Non-loopback address without accounts | `--allow-remote` | `SNAPREQ_ALLOW_REMOTE=1` | `allow_remote = true` | off |
 
 Flags win over environment variables, which win over the config file. Unknown config keys are errors.
 
@@ -92,8 +94,23 @@ max_age_days = 30     # default 30; 0 = keep forever
 max_mb = 512          # history and runs together; default 512; 0 = no limit
 ```
 
-The server has no authentication yet (Phase 8) and sends requests on behalf of whoever calls it, so it
-refuses non-loopback addresses unless `--allow-remote` is given. Only use that on a trusted network.
+The server sends requests on behalf of whoever calls it. On a non-loopback address it therefore turns
+accounts on (a login for the UI, a token for scripts; docs/SERVER.md, "Accounts"); serving such an
+address without accounts needs `--allow-remote`, which says the network is trusted.
+
+### Accounts (`snapreq user`)
+
+```sh
+snapreq user add ana                                 # asks for the password twice (hidden)
+echo "$PASSWORD" | snapreq user add ci-bot           # or the first line of stdin
+snapreq user list
+snapreq user passwd ana                              # also logs ana out everywhere
+snapreq user remove ana                              # with her tokens, history and runs
+```
+
+They work on the server's database (`--data-dir`, `--config` and the environment variables as for
+`snapreq serve`), also while the server runs. User names are case-insensitive; passwords need at least
+8 characters.
 
 Endpoints so far: `GET /healthz` → `{"status":"ok"}`, `GET /api/v1/version` →
 `{"name":"snapreq","version":"…","api":1}`.

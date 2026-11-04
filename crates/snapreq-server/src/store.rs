@@ -1,4 +1,4 @@
-//! SQLite storage: request history and run results (ADR-006, ADR-019).
+//! SQLite storage: request history, run results and accounts (ADR-006, ADR-019, ADR-023).
 //!
 //! One database file, `snapreq.db` in the data directory. Calls run on Tokio's blocking
 //! pool; a single connection is shared behind a mutex (the server is the only writer).
@@ -58,15 +58,49 @@ const MIGRATIONS: &[&str] = &[
     // 2: the JUnit XML and HTML renderings of each run's report
     "ALTER TABLE runs ADD COLUMN junit TEXT;
     ALTER TABLE runs ADD COLUMN html TEXT;",
+    // 3: local accounts, browser sessions and API tokens (P8.1); history and runs get an
+    // owner (`NULL`: the single user of a server without accounts)
+    "CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE sessions (
+        token_hash BLOB PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX sessions_user ON sessions (user_id);
+    CREATE TABLE api_tokens (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        token_hash BLOB NOT NULL UNIQUE,
+        hint TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER,
+        last_used_at INTEGER
+    );
+    CREATE INDEX api_tokens_user ON api_tokens (user_id);
+    ALTER TABLE history ADD COLUMN user_id INTEGER REFERENCES users (id) ON DELETE CASCADE;
+    ALTER TABLE runs ADD COLUMN user_id INTEGER REFERENCES users (id) ON DELETE CASCADE;
+    CREATE INDEX history_user ON history (user_id, id);
+    CREATE INDEX runs_user ON runs (user_id, id);",
 ];
 
-fn now_ms() -> i64 {
+/// Whose history and runs: a user id, or `None` for the single user of a server without
+/// accounts. Every query of history and runs is limited to one owner.
+pub type Owner = Option<i64>;
+
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-fn db_err(e: rusqlite::Error) -> Error {
+pub(crate) fn db_err(e: rusqlite::Error) -> Error {
     Error::Storage(e.to_string())
 }
 
@@ -318,6 +352,8 @@ impl Store {
     pub async fn in_memory() -> Result<Self> {
         let conn = blocking(|| {
             let conn = Connection::open_in_memory().map_err(db_err)?;
+            conn.execute_batch("PRAGMA foreign_keys = ON;")
+                .map_err(db_err)?;
             migrate(&conn)?;
             Ok(conn)
         })
@@ -327,7 +363,7 @@ impl Store {
         })
     }
 
-    async fn with<T: Send + 'static>(
+    pub(crate) async fn with<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
@@ -350,15 +386,15 @@ impl Store {
         .await
     }
 
-    pub async fn add_history(&self, e: HistoryEntry) -> Result<i64> {
+    pub async fn add_history(&self, owner: Owner, e: HistoryEntry) -> Result<i64> {
         self.with(move |c| {
             let request = e.request.to_string();
             let response = e.response.as_ref().map(Value::to_string);
             let size = (request.len() + response.as_ref().map_or(0, String::len) + e.url.len()) as i64;
             c.execute(
-                "INSERT INTO history (created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json, size_bytes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![now_ms(), e.method, e.url, e.status, e.duration_ms, e.error, e.collection, e.request_key, request, response, size],
+                "INSERT INTO history (created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json, size_bytes, user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![now_ms(), e.method, e.url, e.status, e.duration_ms, e.error, e.collection, e.request_key, request, response, size, owner],
             )
             .map_err(db_err)?;
             Ok(c.last_insert_rowid())
@@ -367,12 +403,12 @@ impl Store {
     }
 
     /// History, newest first.
-    pub async fn history(&self, q: HistoryQuery) -> Result<Vec<HistorySummary>> {
+    pub async fn history(&self, owner: Owner, q: HistoryQuery) -> Result<Vec<HistorySummary>> {
         self.with(move |c| {
             let mut sql = String::from(
-                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key FROM history WHERE 1 = 1",
+                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key FROM history WHERE user_id IS ?",
             );
-            let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+            let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(owner)];
             if let Some(u) = q.url_contains {
                 sql.push_str(" AND instr(lower(url), lower(?)) > 0");
                 args.push(Box::new(u));
@@ -415,22 +451,25 @@ impl Store {
     }
 
     /// Deletes one entry (`id`) or every entry (`None`); returns how many were deleted.
-    pub async fn delete_history(&self, id: Option<i64>) -> Result<usize> {
+    pub async fn delete_history(&self, owner: Owner, id: Option<i64>) -> Result<usize> {
         self.with(move |c| {
             match id {
-                Some(id) => c.execute("DELETE FROM history WHERE id = ?1", [id]),
-                None => c.execute("DELETE FROM history", []),
+                Some(id) => c.execute(
+                    "DELETE FROM history WHERE id = ?1 AND user_id IS ?2",
+                    params![id, owner],
+                ),
+                None => c.execute("DELETE FROM history WHERE user_id IS ?1", [owner]),
             }
             .map_err(db_err)
         })
         .await
     }
 
-    pub async fn history_entry(&self, id: i64) -> Result<Option<HistoryRecord>> {
+    pub async fn history_entry(&self, owner: Owner, id: i64) -> Result<Option<HistoryRecord>> {
         self.with(move |c| {
             c.query_row(
-                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json FROM history WHERE id = ?1",
-                [id],
+                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json FROM history WHERE id = ?1 AND user_id IS ?2",
+                params![id, owner],
                 |r| {
                     let request: String = r.get(9)?;
                     let response: Option<String> = r.get(10)?;
@@ -447,15 +486,15 @@ impl Store {
         .await
     }
 
-    pub async fn add_run(&self, e: RunEntry) -> Result<i64> {
+    pub async fn add_run(&self, owner: Owner, e: RunEntry) -> Result<i64> {
         self.with(move |c| {
             let report = e.report.to_string();
             let size = (report.len()
                 + e.junit.as_ref().map_or(0, String::len)
                 + e.html.as_ref().map_or(0, String::len)) as i64;
             c.execute(
-                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, junit, html) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size, e.junit, e.html],
+                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, junit, html, user_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size, e.junit, e.html, owner],
             )
             .map_err(db_err)?;
             Ok(c.last_insert_rowid())
@@ -464,13 +503,13 @@ impl Store {
     }
 
     /// Runs, newest first.
-    pub async fn runs(&self, limit: usize) -> Result<Vec<RunSummary>> {
+    pub async fn runs(&self, owner: Owner, limit: usize) -> Result<Vec<RunSummary>> {
         self.with(move |c| {
             let mut stmt = c
-                .prepare("SELECT id, created_at, kind, target_key, name, passed FROM runs ORDER BY id DESC LIMIT ?1")
+                .prepare("SELECT id, created_at, kind, target_key, name, passed FROM runs WHERE user_id IS ?1 ORDER BY id DESC LIMIT ?2")
                 .map_err(db_err)?;
             let rows = stmt
-                .query_map([limit.clamp(1, 1000) as i64], |r| {
+                .query_map(params![owner, limit.clamp(1, 1000) as i64], |r| {
                     Ok(RunSummary {
                         id: r.get(0)?,
                         created_at: r.get(1)?,
@@ -487,12 +526,14 @@ impl Store {
     }
 
     /// The stored report of a run.
-    pub async fn run_report(&self, id: i64) -> Result<Option<Value>> {
+    pub async fn run_report(&self, owner: Owner, id: i64) -> Result<Option<Value>> {
         self.with(move |c| {
             let text: Option<String> = c
-                .query_row("SELECT report_json FROM runs WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT report_json FROM runs WHERE id = ?1 AND user_id IS ?2",
+                    params![id, owner],
+                    |r| r.get(0),
+                )
                 .optional()
                 .map_err(db_err)?;
             Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
@@ -501,7 +542,12 @@ impl Store {
     }
 
     /// A stored rendering of a run's report (`None`: no such run, or not stored for it).
-    pub async fn run_rendering(&self, id: i64, format: ReportFormat) -> Result<Option<String>> {
+    pub async fn run_rendering(
+        &self,
+        owner: Owner,
+        id: i64,
+        format: ReportFormat,
+    ) -> Result<Option<String>> {
         let column = match format {
             ReportFormat::Json => "report_json",
             ReportFormat::Junit => "junit",
@@ -509,8 +555,8 @@ impl Store {
         };
         self.with(move |c| {
             c.query_row(
-                &format!("SELECT {column} FROM runs WHERE id = ?1"),
-                [id],
+                &format!("SELECT {column} FROM runs WHERE id = ?1 AND user_id IS ?2"),
+                params![id, owner],
                 |r| r.get::<_, Option<String>>(0),
             )
             .optional()

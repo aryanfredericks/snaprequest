@@ -169,7 +169,7 @@ unless `--allow-remote` / `SNAPREQ_ALLOW_REMOTE=1` / `allow_remote = true` is se
 logged. Configuration precedence: flags > `SNAPREQ_*` environment variables > config file > defaults.
 **Consequences:** Safe by default for local use. Containers (P6.7) must set `SNAPREQ_ALLOW_REMOTE=1` and bind
 `0.0.0.0` inside the container while publishing the port on the host's loopback. Revisit once P8.1 lands:
-remote binds should then require authentication instead of a flag.
+remote binds should then require authentication instead of a flag. **Amended by ADR-023.**
 
 ## ADR-019: rusqlite instead of sqlx; MSRV 1.89 (amends ADR-006 and ADR-012)
 **Status:** Accepted (2026-11-03), chosen by the maintainer.
@@ -227,3 +227,26 @@ response only lists the steps that can be resumed.
 **Consequences:** Resuming works across edits of later steps and keeps secrets hidden as in a full run.
 States are lost when the server restarts or after an hour (a 409 asks to run from the start). With
 multiple users (Phase 8) states must be scoped to their owner.
+
+## ADR-023: Local accounts, hashed sessions and API tokens; remote binds default to accounts (amends ADR-018)
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P8.1 needs local accounts, sessions and API tokens, and a single-user mode without a login
+for localhost. ADR-018 refused non-loopback binds until authentication existed, with `--allow-remote` as the
+escape hatch, which the Docker image sets. The UI talks to the API with `fetch` and a WebSocket.
+**Decision:** `auth.mode` is `none` or `accounts` (`--auth`, `SNAPREQ_AUTH`, `[auth] mode`). The default is
+`accounts` on a non-loopback address and `none` otherwise; `none` on a non-loopback address still needs
+`allow_remote`, which now means "trusted network, no login" (so the Docker image keeps working as before).
+Passwords are Argon2id (`argon2` crate, default parameters, hashed off the async threads; unknown users are
+verified against a dummy hash). Sessions are an HttpOnly `SameSite=Strict` cookie, API tokens a
+`snapreq_pat_` bearer token; both are 256 random bits from `ring` and stored only as SHA-256 digests. One
+axum middleware identifies the caller for every `/api` route. Cookie-authenticated requests that change
+something, and the login, must carry `X-SnapReq-CSRF` (a custom header forces a CORS preflight, which the
+server never grants; `SameSite` alone does not cover other ports of the same host). The WebSocket handshake
+must have this server's `Origin`, and the socket re-checks its session or token before each job. History,
+runs and flow states carry an owner (`NULL` without accounts) and every query filters by it; collections stay
+shared until workspaces (P8.2). Accounts are managed with `snapreq user …` on the server's database; there is
+no sign-up and no admin role yet (P8.2).
+**Consequences:** Exposing the server no longer needs a flag, only a user. Entries made without accounts are
+not visible to accounts later (and the reverse). Login rate limiting, security headers and an audit log
+remain for P8.5; DNS-rebinding protection for a no-login loopback server (a `Host` check) as well.
+

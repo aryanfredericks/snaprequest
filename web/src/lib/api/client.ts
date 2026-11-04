@@ -18,9 +18,37 @@ export class ApiError extends Error {
   }
 }
 
+/** Header the server requires on cookie-authenticated requests that change something (CSRF). */
+export const CSRF_HEADER = "X-SnapReq-CSRF";
+
+/** Called when the server answers 401 (the session ended); set by the auth state. */
+let unauthorized: () => void = () => {};
+/** Called when something failed in a way an ended session could explain (a refused WebSocket). */
+let mayHaveEnded: () => void = () => {};
+export function onUnauthorized(handler: () => void, check: () => void = () => {}) {
+  unauthorized = handler;
+  mayHaveEnded = check;
+}
+export function sessionEnded() {
+  unauthorized();
+}
+export function sessionMayHaveEnded() {
+  mayHaveEnded();
+}
+
 /** A client for the server the UI is served from (or `baseUrl`, e.g. in tests). */
 export function createApi(baseUrl = "", fetchImpl?: typeof fetch) {
-  return createClient<paths>({ baseUrl, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
+  const client = createClient<paths>({
+    baseUrl,
+    headers: { [CSRF_HEADER]: "1" },
+    ...(fetchImpl ? { fetch: fetchImpl } : {}),
+  });
+  client.use({
+    onResponse({ request, response }) {
+      if (response.status === 401 && !new URL(request.url, "http://x").pathname.endsWith("/auth/login")) unauthorized();
+    },
+  });
+  return client;
 }
 
 /** Unwraps an openapi-fetch result: the data, or an `ApiError`. */

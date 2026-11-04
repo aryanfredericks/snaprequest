@@ -1,7 +1,7 @@
 // Client for `GET /api/v1/ws` (docs/SERVER.md, "Live traces and run progress"): one JSON message
 // per job; the server answers with `trace` and `progress` events and then a `result` or `error`.
 import type { ExecuteResult, RunReport, TraceEntry } from "./types";
-import { ApiError } from "./client";
+import { ApiError, sessionEnded, sessionMayHaveEnded } from "./client";
 
 export type ProgressEvent =
   | { event: "request_started"; iteration: number; key: string }
@@ -90,6 +90,7 @@ export class JobClient {
       s.onerror = () => {
         if (this.opening) {
           this.opening = null;
+          sessionMayHaveEnded();
           reject(new ApiError(0, "connection", "cannot connect to the server's WebSocket"));
         }
       };
@@ -110,6 +111,15 @@ export class JobClient {
     try {
       msg = JSON.parse(String(data)) as Message;
     } catch {
+      return;
+    }
+    if (msg.type === "error" && msg.error.kind === "unauthorized") {
+      // The session ended: the server closes the connection; nothing pending will finish.
+      for (const [id, p] of this.pending) {
+        p.reject(new ApiError(401, "unauthorized", msg.error.message));
+        this.pending.delete(id);
+      }
+      sessionEnded();
       return;
     }
     const p = this.pending.get(msg.id);

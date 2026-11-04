@@ -67,6 +67,7 @@ impl Api {
             allow_remote: false,
             retention: Retention::default(),
             outbound,
+            auth: snapreq_server::config::AuthConfig::default(),
         };
         let server = Server::bind(config).await.unwrap();
         let addr = server.local_addr().unwrap();

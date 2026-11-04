@@ -26,7 +26,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::AppState;
-use crate::store::{HistoryEntry, HistoryQuery, RunEntry};
+use crate::auth::Identity;
+use crate::store::{HistoryEntry, HistoryQuery, Owner, RunEntry};
 
 pub(crate) type Shared = State<Arc<AppState>>;
 
@@ -76,7 +77,10 @@ impl IntoResponse for ApiError {
 
 impl From<crate::Error> for ApiError {
     fn from(e: crate::Error) -> Self {
-        Self::internal(e.to_string())
+        match e {
+            crate::Error::Account(message) => Self::invalid(message),
+            other => Self::internal(other.to_string()),
+        }
     }
 }
 
@@ -112,7 +116,8 @@ pub struct ErrorBody {
 
 #[derive(Debug, utoipa::ToSchema)]
 pub struct ErrorDetail {
-    /// `bad_request`, `not_found`, `conflict`, `invalid` or `internal`.
+    /// `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid` or
+    /// `internal`.
     pub kind: String,
     pub message: String,
 }
@@ -267,15 +272,19 @@ fn error_json(e: &snapreq_core::Error) -> Value {
 /// `POST /api/v1/requests/execute`
 async fn execute_request(
     State(state): Shared,
+    identity: Identity,
     Json(body): Json<ExecuteBody>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(execute_body(&state, body, None).await?))
+    Ok(Json(
+        execute_body(&state, identity.owner(), body, None).await?,
+    ))
 }
 
 /// Executes an [`ExecuteBody`] (also used by the WebSocket endpoint, which passes a
 /// trace sink for live events).
 pub(crate) async fn execute_body(
     state: &AppState,
+    owner: Owner,
     body: ExecuteBody,
     trace: Option<snapreq_core::client::TraceSink>,
 ) -> ApiResult<Value> {
@@ -292,7 +301,10 @@ pub(crate) async fn execute_body(
             let result = state.client.execute_with(&req, trace).await;
             let id = state
                 .store
-                .add_history(HistoryEntry::from_exchange(&req, result.as_ref(), None))
+                .add_history(
+                    owner,
+                    HistoryEntry::from_exchange(&req, result.as_ref(), None),
+                )
                 .await?;
             Ok(match result {
                 Ok(resp) => json!({ "history_id": id, "response": resp, "error": null }),
@@ -360,7 +372,7 @@ pub(crate) async fn execute_body(
                     .response
                     .map(|r| snapreq_test::report::hide_json(r, &captured));
             }
-            let id = state.store.add_history(entry).await?;
+            let id = state.store.add_history(owner, entry).await?;
             Ok(exchange_json(Some(id), &run))
         }
         _ => Err(ApiError::bad_request(
@@ -408,43 +420,59 @@ struct HistoryParams {
 /// `GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=`
 async fn list_history(
     State(state): Shared,
+    identity: Identity,
     Query(p): Query<HistoryParams>,
 ) -> ApiResult<Json<Value>> {
     let entries = state
         .store
-        .history(HistoryQuery {
-            url_contains: p.url,
-            method: p.method,
-            status: p.status,
-            status_class: p.class.filter(|c| (1..=5).contains(c)),
-            failed: p.failed,
-            collection: p.collection,
-            before_id: p.before,
-            limit: p.limit.unwrap_or(50),
-        })
+        .history(
+            identity.owner(),
+            HistoryQuery {
+                url_contains: p.url,
+                method: p.method,
+                status: p.status,
+                status_class: p.class.filter(|c| (1..=5).contains(c)),
+                failed: p.failed,
+                collection: p.collection,
+                before_id: p.before,
+                limit: p.limit.unwrap_or(50),
+            },
+        )
         .await?;
     Ok(Json(json!({ "entries": entries })))
 }
 
 #[utoipa::path(get, path = "/history/{id}", tag = "history", params(("id" = i64, Path, description = "History entry id")), responses((status = 200, description = "Summary with stored request and response", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
-async fn get_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<Json<Value>> {
-    match state.store.history_entry(id).await? {
+async fn get_history(
+    State(state): Shared,
+    identity: Identity,
+    UrlPath(id): UrlPath<i64>,
+) -> ApiResult<Json<Value>> {
+    match state.store.history_entry(identity.owner(), id).await? {
         Some(e) => Ok(Json(json!(e))),
         None => Err(ApiError::not_found(format!("no history entry {id}"))),
     }
 }
 
 #[utoipa::path(delete, path = "/history/{id}", tag = "history", params(("id" = i64, Path, description = "History entry id")), responses((status = 204, description = "Deleted"), (status = 404, description = "Not found", body = ErrorBody)))]
-async fn delete_history(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<StatusCode> {
-    match state.store.delete_history(Some(id)).await? {
+async fn delete_history(
+    State(state): Shared,
+    identity: Identity,
+    UrlPath(id): UrlPath<i64>,
+) -> ApiResult<StatusCode> {
+    match state
+        .store
+        .delete_history(identity.owner(), Some(id))
+        .await?
+    {
         0 => Err(ApiError::not_found(format!("no history entry {id}"))),
         _ => Ok(StatusCode::NO_CONTENT),
     }
 }
 
 #[utoipa::path(delete, path = "/history", tag = "history", responses((status = 200, description = "`{ deleted }`: every entry is removed", body = JsonDocument)))]
-async fn clear_history(State(state): Shared) -> ApiResult<Json<Value>> {
-    let deleted = state.store.delete_history(None).await?;
+async fn clear_history(State(state): Shared, identity: Identity) -> ApiResult<Json<Value>> {
+    let deleted = state.store.delete_history(identity.owner(), None).await?;
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -488,13 +516,18 @@ pub struct RunBody {
 
 #[utoipa::path(post, path = "/runs", tag = "runs", request_body = RunBody, responses((status = 200, description = "The run document plus its stored `id`", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 /// `POST /api/v1/runs`: runs to completion, stores the result and returns its summary.
-async fn start_run(State(state): Shared, Json(body): Json<RunBody>) -> ApiResult<Json<Value>> {
-    Ok(Json(run_body(&state, body, None).await?))
+async fn start_run(
+    State(state): Shared,
+    identity: Identity,
+    Json(body): Json<RunBody>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(run_body(&state, identity.owner(), body, None).await?))
 }
 
 /// Runs a [`RunBody`]; `live` receives progress and trace events (WebSocket).
 pub(crate) async fn run_body(
     state: &AppState,
+    owner: Owner,
     body: RunBody,
     live: Option<snapreq_test::session::Live>,
 ) -> ApiResult<Value> {
@@ -558,7 +591,7 @@ pub(crate) async fn run_body(
             Some(run) => Some(
                 state
                     .flow_states
-                    .get(run, &body.collection, &flow.key, from)
+                    .get(owner, run, &body.collection, &flow.key, from)
                     .ok_or_else(|| {
                         ApiError::new(
                             StatusCode::CONFLICT,
@@ -646,7 +679,7 @@ pub(crate) async fn run_body(
     entry.target_key = format!("{}/{}", body.collection, report.key)
         .trim_end_matches('/')
         .to_owned();
-    let id = state.store.add_run(entry).await?;
+    let id = state.store.add_run(owner, entry).await?;
     let mut summary = report.json(false);
     summary["id"] = json!(id);
     summary["collection"] = json!(body.collection);
@@ -662,7 +695,7 @@ pub(crate) async fn run_body(
             .collect();
         state
             .flow_states
-            .insert(id, &body.collection, &flow.key, run.states.clone());
+            .insert(owner, id, &body.collection, &flow.key, run.states.clone());
         summary["resumable_steps"] = json!(steps);
         summary["range"] = json!([run.range.0, run.range.1]);
     }
@@ -677,15 +710,25 @@ struct LimitParams {
 }
 
 #[utoipa::path(get, path = "/runs", tag = "runs", params(LimitParams), responses((status = 200, description = "Run summaries, newest first", body = RunList)))]
-async fn list_runs(State(state): Shared, Query(p): Query<LimitParams>) -> ApiResult<Json<Value>> {
-    Ok(Json(
-        json!({ "runs": state.store.runs(p.limit.unwrap_or(50)).await? }),
-    ))
+async fn list_runs(
+    State(state): Shared,
+    identity: Identity,
+    Query(p): Query<LimitParams>,
+) -> ApiResult<Json<Value>> {
+    let runs = state
+        .store
+        .runs(identity.owner(), p.limit.unwrap_or(50))
+        .await?;
+    Ok(Json(json!({ "runs": runs })))
 }
 
 #[utoipa::path(get, path = "/runs/{id}", tag = "runs", params(("id" = i64, Path, description = "Run id")), responses((status = 200, description = "The stored detailed report", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
-async fn get_run(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<Json<Value>> {
-    match state.store.run_report(id).await? {
+async fn get_run(
+    State(state): Shared,
+    identity: Identity,
+    UrlPath(id): UrlPath<i64>,
+) -> ApiResult<Json<Value>> {
+    match state.store.run_report(identity.owner(), id).await? {
         Some(r) => Ok(Json(r)),
         None => Err(ApiError::not_found(format!("no run {id}"))),
     }
@@ -695,6 +738,7 @@ async fn get_run(State(state): Shared, UrlPath(id): UrlPath<i64>) -> ApiResult<J
 /// `GET /api/v1/runs/{id}/report/{format}`: the report as a download.
 async fn get_run_report(
     State(state): Shared,
+    identity: Identity,
     UrlPath((id, format)): UrlPath<(i64, String)>,
 ) -> ApiResult<Response> {
     use crate::store::ReportFormat;
@@ -710,7 +754,7 @@ async fn get_run_report(
     };
     let text = state
         .store
-        .run_rendering(id, fmt)
+        .run_rendering(identity.owner(), id, fmt)
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no {format} report for run {id}")))?;
     let text = if fmt == ReportFormat::Json {

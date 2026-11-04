@@ -28,7 +28,9 @@ COPY --from=build /snapreq /usr/local/bin/snapreq
 COPY --from=build --chown=65532:65532 /data /data
 # Inside the container the server must listen on all interfaces; publish the port on the
 # host's loopback (`-p 127.0.0.1:7878:7878`) unless the network is trusted. With
-# SNAPREQ_ALLOW_REMOTE the outbound policy blocks cloud metadata endpoints by default.
+# SNAPREQ_ALLOW_REMOTE the outbound policy blocks cloud metadata endpoints by default and
+# there is no login; set SNAPREQ_AUTH=accounts and run `snapreq user add NAME` in the
+# container to require one (docs/SERVER.md, "Accounts").
 ENV SNAPREQ_BIND=0.0.0.0:7878 \
     SNAPREQ_ALLOW_REMOTE=1 \
     SNAPREQ_DATA_DIR=/data

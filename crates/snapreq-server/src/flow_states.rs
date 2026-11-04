@@ -8,12 +8,15 @@ use std::time::{Duration, Instant};
 
 use snapreq_test::SessionState;
 
+use crate::store::Owner;
+
 /// Runs whose states are kept.
 const KEEP: usize = 50;
 /// How long a state is kept.
 const TTL: Duration = Duration::from_secs(3600);
 
 struct Entry {
+    owner: Owner,
     run_id: i64,
     collection: String,
     flow: String,
@@ -37,6 +40,7 @@ impl std::fmt::Debug for FlowStates {
 impl FlowStates {
     pub fn insert(
         &self,
+        owner: Owner,
         run_id: i64,
         collection: &str,
         flow: &str,
@@ -48,6 +52,7 @@ impl FlowStates {
             entries.pop_front();
         }
         entries.push_back(Entry {
+            owner,
             run_id,
             collection: collection.to_owned(),
             flow: flow.to_owned(),
@@ -56,9 +61,10 @@ impl FlowStates {
         });
     }
 
-    /// The state before `step` saved by run `run_id` of `flow`.
+    /// The state before `step` saved by run `run_id` of `flow`, if `owner` made that run.
     pub fn get(
         &self,
+        owner: Owner,
         run_id: i64,
         collection: &str,
         flow: &str,
@@ -68,12 +74,34 @@ impl FlowStates {
         entries
             .iter()
             .find(|e| {
-                e.run_id == run_id
+                e.owner == owner
+                    && e.run_id == run_id
                     && e.collection == collection
                     && e.flow == flow
                     && e.at.elapsed() < TTL
             })
             .and_then(|e| e.states.iter().find(|(n, _)| *n == step))
             .map(|(_, s)| s.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn states_belong_to_whoever_ran_the_flow() {
+        let states = FlowStates::default();
+        states.insert(
+            Some(1),
+            7,
+            "app",
+            "checkout",
+            vec![(2, SessionState::default())],
+        );
+        assert!(states.get(Some(1), 7, "app", "checkout", 2).is_some());
+        assert!(states.get(Some(2), 7, "app", "checkout", 2).is_none());
+        assert!(states.get(None, 7, "app", "checkout", 2).is_none());
+        assert!(states.get(Some(1), 7, "app", "checkout", 3).is_none());
     }
 }

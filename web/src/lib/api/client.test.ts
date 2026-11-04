@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, createApi, serverVersion, unwrap } from "./client";
+import { ApiError, createApi, onUnauthorized, serverVersion, unwrap } from "./client";
 
 function fakeFetch(status: number, body: unknown, seen: Request[] = []): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -38,5 +38,22 @@ describe("api client", () => {
     expect(url.pathname).toBe("/api/v1/history");
     expect(url.searchParams.get("method")).toBe("GET");
     expect(url.searchParams.get("limit")).toBe("5");
+  });
+
+  it("sends the CSRF header and reports ended sessions", async () => {
+    let ended = 0;
+    onUnauthorized(() => ended++);
+    const seen: Request[] = [];
+    const api = createApi(
+      "http://snapreq.test",
+      fakeFetch(401, { error: { kind: "unauthorized", message: "log in" } }, seen),
+    );
+    await api.DELETE("/api/v1/history");
+    expect(seen[0]?.headers.get("x-snapreq-csrf")).toBe("1");
+    expect(ended).toBe(1);
+    // A wrong password at the login is not an ended session.
+    await api.POST("/api/v1/auth/login", { body: { username: "a", password: "b" } });
+    expect(ended).toBe(1);
+    onUnauthorized(() => {});
   });
 });

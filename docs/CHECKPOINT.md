@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 8 Multi-user and hardening, next (Phases 0–7 complete)
-- **Current checkpoint:** P8.1, local accounts, sessions and API tokens
+- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1 done)
+- **Current checkpoint:** P8.2, workspaces with roles (owner, editor, viewer)
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -21,13 +21,32 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 
 ## Environment (verified 2026-10-31)
 - rustc / cargo 1.99.0, Node v24.18.0, git 2.56.0, Linux (Fedora)
-- `cargo-deny` is **not** installed locally (`cargo install cargo-deny --locked` to run it); the CI job runs it.
+- `cargo-deny` is installed locally (`scripts/check.sh` runs it; 9 duplicate-version warnings, no errors).
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P8.1 local accounts (argon2), sessions, API tokens; single-user mode without login for localhost.
-   Note for Phase 8: flow states (ADR-022), history and runs must be scoped to their owner; CSRF
-   protection is needed before cookies authenticate the WebSocket and REST API (P8.5).
+1. P8.2 workspaces with roles (owner, editor, viewer): collections are still shared by every user
+   (only history, runs and flow states are per user). Needs a product decision on how workspaces map
+   to directories and who may create them (there is no admin role yet).
+2. P8.5 leftovers noted in ADR-023: login rate limiting, security headers, audit log, a `Host` check
+   against DNS rebinding for a no-login loopback server.
+
+## Accounts notes (P8.1)
+- Server: `accounts.rs` (Store methods: users, Argon2id passwords, sessions and `snapreq_pat_` tokens
+  stored as SHA-256), `auth.rs` (`guard` middleware → `Identity` extractor, `/api/v1/auth/*`), config
+  `[auth] mode/session_days/secure_cookies`, `--auth`, `SNAPREQ_AUTH`. Migration 3 adds `users`,
+  `sessions`, `api_tokens` and `user_id` on history/runs; every history/run Store method takes an
+  `Owner` (`Option<i64>`, `NULL` = no accounts). `FlowStates` keyed by owner too.
+- Defaults (ADR-023, amends ADR-018): `accounts` on non-loopback binds, `none` on loopback;
+  `allow_remote` now means "no login on a non-loopback bind" (the Docker image keeps it, so it is
+  unchanged; `SNAPREQ_AUTH=accounts` + `docker exec … snapreq user add` turns logins on).
+- CSRF: cookie-authenticated non-GET requests and the login need `X-SnapReq-CSRF`; WebSocket needs a
+  same-origin `Origin` and re-checks its session/token before each job.
+- CLI: `snapreq user add|list|passwd|remove` (`user_cmd.rs`), password from hidden prompt (twice) or stdin.
+- UI: `Root.svelte` gates on `auth.check()`; `LoginView`, `AccountDialog` (tokens, password, log out),
+  `state/auth.svelte.ts`; `client.ts` sends the CSRF header and calls `onUnauthorized` on 401; the
+  WebSocket client fails pending jobs on an `unauthorized` error. `scripts/web-e2e.sh` starts a second
+  server with accounts (port 7882, users ana/bo) for `e2e/accounts.spec.ts`.
 
 ## Web UI notes (P7.8)
 - Themes: `state/theme.svelte.ts` (system/light/dark, localStorage, applied in `main.ts` before mount;
@@ -546,6 +565,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P8.1 — 2026-11-04 — Local accounts (Argon2id), session cookies, API tokens, `none`/`accounts` auth modes (remote binds default to accounts), per-user history/runs/flow states, CSRF header and WebSocket origin checks, `snapreq user` commands, login page and account dialog in the UI. ADR-023. Two-user isolation tested in Rust and Playwright.
 
 ## Session log
 - **2026-10-31 (1):** Planning. Wrote PLAN.md, DECISIONS.md, CHECKPOINT.md, CLAUDE.md.
@@ -569,3 +589,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (19):** Phase 7 complete (P7.2–P7.8), each checkpoint pushed after scripts/check.sh passed. Added Playwright end-to-end tests (mock shop + real server) and axe audits; ADR-021, ADR-022. GitHub macOS test jobs were cancelled before starting for 4 commits (runner side), fine again from 3bcc73f. The web-e2e CI job failed for P7.7/P7.8: a race in the flow test (old step results looked current while a new run was going), reproduced with `CI=1 taskset -c 0`; fixed by clearing results that a run replaces. Playwright's `github` reporter now turns e2e failures into job annotations.
 - **2026-11-03 (20):** Maintainer testing: the method field (a text box with suggestions) is now a fixed dropdown (`MethodSelect`) in the request builder and flow steps.
 - **2026-11-03 (21):** macOS runners were often unavailable for pushes (jobs queued, then cancelled without running). Maintainer chose: macOS tests run nightly (`.github/workflows/nightly.yml`, 02:17 UTC, also by hand); per-push CI tests Ubuntu and Windows.
+- **2026-11-04 (22):** P8.1 done: accounts, sessions, API tokens, per-user history and runs, CSRF and WebSocket origin checks, `snapreq user`, UI login and account dialog; ADR-023 (remote binds default to accounts, `--allow-remote` keeps no-login for trusted networks and the Docker image). scripts/check.sh and the full Playwright suite pass.

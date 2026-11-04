@@ -19,6 +19,13 @@ fn every_route_is_described() {
     let expected: BTreeSet<String> = [
         "GET /healthz",
         "GET /api/v1/version",
+        "GET /api/v1/auth/status",
+        "POST /api/v1/auth/login",
+        "POST /api/v1/auth/logout",
+        "POST /api/v1/auth/password",
+        "GET /api/v1/auth/tokens",
+        "POST /api/v1/auth/tokens",
+        "DELETE /api/v1/auth/tokens/{id}",
         "POST /api/v1/requests/execute",
         "GET /api/v1/history",
         "GET /api/v1/history/{id}",
@@ -97,6 +104,7 @@ async fn the_document_is_served() {
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
         outbound: Default::default(),
+        auth: snapreq_server::config::AuthConfig::default(),
     };
     let server = snapreq_server::Server::bind(config).await.unwrap();
     let addr = server.local_addr().unwrap();

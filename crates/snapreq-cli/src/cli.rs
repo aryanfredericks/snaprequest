@@ -43,11 +43,12 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Run(RunArgs),
 
-    /// Start the self-hosted server (API, and later the web UI).
+    /// Start the self-hosted server (API and web UI).
     ///
     /// Examples:
     ///   snapreq serve                          # http://127.0.0.1:7878
     ///   snapreq serve --bind 127.0.0.1:9000 --data-dir ./snapreq-data
+    ///   snapreq serve --bind 0.0.0.0:7878          # accounts on: see `snapreq user add`
     #[command(verbatim_doc_comment)]
     Serve(ServeArgs),
 
@@ -65,6 +66,47 @@ pub(crate) enum Command {
     /// Manage cached OAuth 2.0 tokens.
     #[command(subcommand)]
     Tokens(TokensCommand),
+
+    /// Manage the server's accounts (for `snapreq serve` with accounts on).
+    ///
+    /// Works on the server's data directory, also while the server runs. Passwords are read
+    /// from a hidden prompt, or from the first line of stdin when it is not a terminal.
+    ///
+    /// Examples:
+    ///   snapreq user add ana
+    ///   echo "$PASSWORD" | snapreq user add ci-bot --data-dir /data
+    ///   snapreq user list
+    #[command(verbatim_doc_comment)]
+    User(UserArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UserArgs {
+    #[command(subcommand)]
+    pub command: UserCommand,
+
+    /// The server's data directory (env `SNAPREQ_DATA_DIR`; default: as `snapreq serve`).
+    #[arg(long, value_name = "DIR", global = true)]
+    pub data_dir: Option<PathBuf>,
+
+    /// The server's config file (env `SNAPREQ_CONFIG`).
+    #[arg(long, value_name = "FILE", global = true)]
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum UserCommand {
+    /// Create an account.
+    Add {
+        /// User name (letters, digits, `_`, `-`, `.`, `@`; case-insensitive).
+        name: String,
+    },
+    /// List the accounts.
+    List,
+    /// Set a user's password and log them out everywhere (API tokens stay valid).
+    Passwd { name: String },
+    /// Delete an account with its sessions, API tokens, history and runs.
+    Remove { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -177,8 +219,14 @@ pub(crate) struct ServeArgs {
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// Allow a non-loopback address. The server has no authentication yet: only do this
-    /// on a trusted network (env `SNAPREQ_ALLOW_REMOTE=1`).
+    /// Who may use the server: `none` (no login) or `accounts` (env `SNAPREQ_AUTH`; default:
+    /// `none` on a loopback address, `accounts` otherwise). Create accounts with `snapreq user add`.
+    #[arg(long, value_name = "MODE", value_parser = ["none", "accounts"])]
+    pub auth: Option<String>,
+
+    /// Allow a non-loopback address without accounts. Anyone who can reach the server can then
+    /// send requests from this machine: only do this on a trusted network (env
+    /// `SNAPREQ_ALLOW_REMOTE=1`).
     #[arg(long)]
     pub allow_remote: bool,
 }

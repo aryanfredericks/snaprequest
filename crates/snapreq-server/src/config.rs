@@ -24,14 +24,79 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Collections served by the API, one directory each.
     pub workspace: PathBuf,
-    /// Allow binding to a non-loopback address. Off by default: until authentication
-    /// and the outbound request policy exist, a reachable server is an open proxy into
-    /// the network it runs in.
+    /// Allow a non-loopback address without accounts (a trusted network). Off by default:
+    /// without a login, a reachable server is an open proxy into the network it runs in.
     pub allow_remote: bool,
     /// How long and how much history and run results to keep.
     pub retention: Retention,
     /// Which destinations executed requests may reach.
     pub outbound: OutboundPolicy,
+    /// Who may use the server.
+    pub auth: AuthConfig,
+}
+
+/// Whether the server has accounts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMode {
+    /// No login: everyone who can reach the server is its single user. Only allowed on a
+    /// loopback address, unless `allow_remote` says the network is trusted.
+    None,
+    /// Local accounts: the API needs a session cookie or an API token.
+    Accounts,
+}
+
+impl AuthMode {
+    fn parse(text: &str) -> Result<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
+            "accounts" => Ok(Self::Accounts),
+            other => Err(Error::Config(format!(
+                "invalid auth mode `{other}` (expected `none` or `accounts`)"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Accounts => "accounts",
+        }
+    }
+}
+
+/// Authentication settings (`[auth]` in the config file).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthConfig {
+    pub mode: AuthMode,
+    /// How long a login lasts.
+    pub session_ttl: std::time::Duration,
+    /// Mark the session cookie `Secure` (set it when users reach the server over HTTPS,
+    /// e.g. behind a TLS-terminating proxy).
+    pub secure_cookies: bool,
+}
+
+/// Default session length in days.
+pub const DEFAULT_SESSION_DAYS: u64 = 14;
+
+impl Default for AuthConfig {
+    /// No login (a loopback server), default session length, cookies without `Secure`.
+    fn default() -> Self {
+        Self {
+            mode: AuthMode::None,
+            session_ttl: std::time::Duration::from_secs(DEFAULT_SESSION_DAYS * 24 * 3600),
+            secure_cookies: false,
+        }
+    }
+}
+
+/// `[auth]` in the config file.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthFile {
+    mode: Option<AuthMode>,
+    session_days: Option<u64>,
+    secure_cookies: Option<bool>,
 }
 
 /// `[history]` in the config file; `0` means no limit.
@@ -54,6 +119,8 @@ struct FileConfig {
     history: HistoryConfig,
     #[serde(default)]
     outbound: OutboundConfig,
+    #[serde(default)]
+    auth: AuthFile,
 }
 
 /// Values given on the command line; `None` means "not given".
@@ -64,6 +131,8 @@ pub struct Overrides {
     pub workspace: Option<PathBuf>,
     pub config_file: Option<PathBuf>,
     pub allow_remote: bool,
+    /// `none` or `accounts`.
+    pub auth: Option<String>,
 }
 
 impl Config {
@@ -144,9 +213,31 @@ impl Config {
             .or_else(|| env("SNAPREQ_WORKSPACE").map(PathBuf::from))
             .or(file.workspace.clone())
             .unwrap_or_else(|| data_dir.join("workspace"));
-        let outbound =
-            OutboundPolicy::from_config(&file.outbound, allow_remote).map_err(Error::Config)?;
+        let remote = !bind.ip().is_loopback();
+        let mode = match overrides.auth.clone().or_else(|| env("SNAPREQ_AUTH")) {
+            Some(text) => AuthMode::parse(&text)?,
+            None => file.auth.mode.unwrap_or(if remote && !allow_remote {
+                AuthMode::Accounts
+            } else {
+                AuthMode::None
+            }),
+        };
+        let session_days = file.auth.session_days.unwrap_or(DEFAULT_SESSION_DAYS);
+        if session_days == 0 || session_days > 365 {
+            return Err(Error::Config(
+                "auth.session_days must be between 1 and 365".into(),
+            ));
+        }
+        let auth = AuthConfig {
+            mode,
+            session_ttl: std::time::Duration::from_secs(session_days * 24 * 3600),
+            secure_cookies: file.auth.secure_cookies.unwrap_or(false),
+        };
+        // Cloud metadata endpoints are blocked by default whenever others can reach the server.
+        let outbound = OutboundPolicy::from_config(&file.outbound, allow_remote || remote)
+            .map_err(Error::Config)?;
         let config = Self {
+            auth,
             outbound,
             bind,
             workspace,
@@ -159,9 +250,9 @@ impl Config {
     }
 
     fn check(&self) -> Result<()> {
-        if !self.bind.ip().is_loopback() && !self.allow_remote {
+        if !self.bind.ip().is_loopback() && self.auth.mode == AuthMode::None && !self.allow_remote {
             return Err(Error::Config(format!(
-                "refusing to listen on {}: the server has no authentication yet, so anyone who can reach it could send requests from this machine. Use a loopback address, or pass --allow-remote (SNAPREQ_ALLOW_REMOTE=1) if the network is trusted",
+                "refusing to listen on {} without accounts: anyone who can reach it could send requests from this machine. Use accounts (--auth accounts), a loopback address, or pass --allow-remote (SNAPREQ_ALLOW_REMOTE=1) if the network is trusted",
                 self.bind
             )));
         }
@@ -288,26 +379,102 @@ mod tests {
     }
 
     #[test]
-    fn remote_binds_need_permission() {
+    fn remote_binds_need_accounts_or_permission() {
         let o = Overrides {
             bind: Some("0.0.0.0:7878".into()),
             ..Overrides::default()
         };
-        let err = Config::load(&o, env(&[]), Some("/d".into()))
+        // A remote bind turns accounts on by default.
+        let c = Config::load(&o, env(&[]), Some("/d".into())).unwrap();
+        assert_eq!(c.auth.mode, AuthMode::Accounts);
+        assert!(c.outbound.block_metadata);
+        // Without accounts it needs --allow-remote.
+        let none = Overrides {
+            auth: Some("none".into()),
+            ..o.clone()
+        };
+        let err = Config::load(&none, env(&[]), Some("/d".into()))
             .unwrap_err()
             .to_string();
         assert!(err.contains("refusing to listen on 0.0.0.0:7878"), "{err}");
-        assert!(Config::load(&o, env(&[("SNAPREQ_ALLOW_REMOTE", "1")]), Some("/d".into())).is_ok());
+        let trusted =
+            Config::load(&o, env(&[("SNAPREQ_ALLOW_REMOTE", "1")]), Some("/d".into())).unwrap();
+        assert_eq!(
+            trusted.auth.mode,
+            AuthMode::None,
+            "allow_remote keeps no-login"
+        );
         let allowed = Overrides {
             allow_remote: true,
-            ..o
+            ..none
         };
         assert!(Config::load(&allowed, env(&[]), Some("/d".into())).is_ok());
         let v6 = Overrides {
             bind: Some("[::1]:7878".into()),
             ..Overrides::default()
         };
-        assert!(Config::load(&v6, env(&[]), Some("/d".into())).is_ok());
+        assert_eq!(
+            Config::load(&v6, env(&[]), Some("/d".into()))
+                .unwrap()
+                .auth
+                .mode,
+            AuthMode::None
+        );
+    }
+
+    #[test]
+    fn auth_settings() {
+        let dir = temp("auth");
+        let c = Config::load(
+            &Overrides::default(),
+            env(&[("SNAPREQ_AUTH", "accounts")]),
+            Some(dir.clone()),
+        )
+        .unwrap();
+        assert_eq!(c.auth.mode, AuthMode::Accounts);
+        assert_eq!(
+            c.auth.session_ttl,
+            std::time::Duration::from_secs(DEFAULT_SESSION_DAYS * 24 * 3600)
+        );
+        assert!(!c.auth.secure_cookies);
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[auth]\nmode = \"accounts\"\nsession_days = 2\nsecure_cookies = true\n",
+        )
+        .unwrap();
+        let c = Config::load(&Overrides::default(), env(&[]), Some(dir.clone())).unwrap();
+        assert_eq!(c.auth.mode, AuthMode::Accounts);
+        assert_eq!(c.auth.session_ttl.as_secs(), 2 * 24 * 3600);
+        assert!(c.auth.secure_cookies);
+        // The flag beats the file.
+        let flag = Overrides {
+            auth: Some("none".into()),
+            ..Overrides::default()
+        };
+        assert_eq!(
+            Config::load(&flag, env(&[]), Some(dir.clone()))
+                .unwrap()
+                .auth
+                .mode,
+            AuthMode::None
+        );
+        let bad = Overrides {
+            auth: Some("ldap".into()),
+            ..Overrides::default()
+        };
+        assert!(
+            Config::load(&bad, env(&[]), Some(dir.clone()))
+                .unwrap_err()
+                .to_string()
+                .contains("invalid auth mode `ldap`")
+        );
+        std::fs::write(dir.join(CONFIG_FILE), "[auth]\nsession_days = 0\n").unwrap();
+        assert!(
+            Config::load(&Overrides::default(), env(&[]), Some(dir))
+                .unwrap_err()
+                .to_string()
+                .contains("session_days")
+        );
     }
 
     #[test]

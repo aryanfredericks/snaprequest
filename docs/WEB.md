@@ -69,6 +69,14 @@ and choose **Compare** to see the differences in body (JSON pretty-printed), hea
   included, in memory for an hour and never sends them to the browser). Each step's result shows the
   variables captured so far, its checks, response, waterfall and wire log.
 
+## Login and API tokens
+
+On a server with accounts (docs/SERVER.md, "Accounts") the UI opens with a login page. The account
+button in the header (your user name) opens a dialog to create and revoke API tokens (the secret is
+shown once, with a Copy button), change your password and log out. When a session ends while the UI
+is open (it expired, or the password was changed elsewhere), the login comes back and the open tabs are
+kept; logging in as another user starts with a fresh page. History and runs are per user.
+
 ## Themes, keyboard and accessibility
 
 The theme follows the system or is chosen at the top (light, dark). Press `?` for the keyboard
@@ -90,8 +98,8 @@ alternatives and resizing the request/response split (arrow keys on the divider)
 
 ## What the UI does not do (yet)
 
-- No accounts: the server has no authentication until Phase 8, so it listens on loopback only unless
-  started with `--allow-remote` (ADR-018).
+- No user administration: accounts are created on the server with `snapreq user add`, and every user
+  sees the same collections until workspaces with roles (P8.2).
 - The OAuth 2.0 *authorization code* grant needs a browser on the machine that runs the server; use it
   from the CLI, or use another grant.
 - `--secret VALUE` (hiding arbitrary values) has no UI; declare such values as secret variables instead.

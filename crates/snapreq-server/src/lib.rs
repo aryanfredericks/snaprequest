@@ -3,7 +3,9 @@
 //! [`serve`] runs the HTTP server for a [`Config`]; [`app`] is the router on its own (for
 //! tests and embedding).
 
+pub mod accounts;
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod flow_states;
 pub mod outbound;
@@ -40,6 +42,9 @@ pub enum Error {
     /// The database failed.
     #[error("storage: {0}")]
     Storage(String),
+    /// An account operation was refused (invalid name or password, user exists).
+    #[error("{0}")]
+    Account(String),
     /// Starting or running the server failed.
     #[error("{context}: {source}")]
     Io {
@@ -78,7 +83,7 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
     let (router, mut doc) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(version))
-        .nest("/api/v1", api::router())
+        .nest("/api/v1", api::router().merge(auth::router()))
         .split_for_parts();
     // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.
     let paths = std::mem::take(&mut doc.paths.paths);
@@ -98,6 +103,7 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
     ),
     tags(
         (name = "server", description = "Health and version"),
+        (name = "auth", description = "Login, sessions and API tokens"),
         (name = "requests", description = "Executing requests"),
         (name = "history", description = "Stored requests"),
         (name = "runs", description = "Flow, folder and collection runs"),
@@ -121,6 +127,10 @@ pub fn app(state: Arc<AppState>) -> Router {
             }),
         )
         .fallback(ui::serve)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::guard,
+        ))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -219,11 +229,15 @@ impl Server {
                 "pruned old entries"
             );
         }
-        if !config.bind.ip().is_loopback() {
-            tracing::warn!(
+        match config.auth.mode {
+            config::AuthMode::None if !config.bind.ip().is_loopback() => tracing::warn!(
                 bind = %config.bind,
-                "listening on a non-loopback address without authentication"
-            );
+                "listening on a non-loopback address without accounts"
+            ),
+            config::AuthMode::Accounts if store.user_count().await? == 0 => tracing::warn!(
+                "accounts are on but there are none yet: create one with `snapreq user add <name>`"
+            ),
+            _ => {}
         }
         Ok(Self {
             listener,

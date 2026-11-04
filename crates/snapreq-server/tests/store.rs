@@ -56,7 +56,10 @@ async fn start() -> SocketAddr {
 async fn exchange(store: &Store, req: &Request, source: Option<(&str, &str)>) -> i64 {
     let result = Client::default().execute(req).await;
     store
-        .add_history(HistoryEntry::from_exchange(req, result.as_ref(), source))
+        .add_history(
+            None,
+            HistoryEntry::from_exchange(req, result.as_ref(), source),
+        )
         .await
         .unwrap()
 }
@@ -65,7 +68,7 @@ async fn exchange(store: &Store, req: &Request, source: Option<(&str, &str)>) ->
 async fn history_is_stored_without_secrets() {
     let addr = start().await;
     let store = Store::in_memory().await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 2);
+    assert_eq!(store.schema_version().await.unwrap(), 3);
 
     let mut req = Request::new(
         http::Method::POST,
@@ -83,7 +86,7 @@ async fn history_is_stored_without_secrets() {
     req.settings.secrets = vec!["query-secret-9".into(), "var-secret-3".into()];
     let id = exchange(&store, &req, Some(("shop", "orders/create"))).await;
 
-    let record = store.history_entry(id).await.unwrap().unwrap();
+    let record = store.history_entry(None, id).await.unwrap().unwrap();
     let text = serde_json::to_string(&record).unwrap();
     for secret in [
         "query-secret-9",
@@ -117,7 +120,7 @@ async fn history_is_stored_without_secrets() {
             .contains("authorization: Bearer <redacted>")
     );
     assert!(response["trace"].as_array().unwrap().len() > 3);
-    assert!(store.history_entry(id + 100).await.unwrap().is_none());
+    assert!(store.history_entry(None, id + 100).await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -126,7 +129,7 @@ async fn bodies_failures_and_queries() {
     let store = Store::in_memory().await.unwrap();
     let big = exchange(&store, &Request::get(format!("http://{addr}/big")), None).await;
     let r = store
-        .history_entry(big)
+        .history_entry(None, big)
         .await
         .unwrap()
         .unwrap()
@@ -140,7 +143,7 @@ async fn bodies_failures_and_queries() {
 
     let bin = exchange(&store, &Request::get(format!("http://{addr}/bin")), None).await;
     let r = store
-        .history_entry(bin)
+        .history_entry(None, bin)
         .await
         .unwrap()
         .unwrap()
@@ -152,7 +155,7 @@ async fn bodies_failures_and_queries() {
     );
 
     let failed = exchange(&store, &Request::get("http://127.0.0.1:1/down"), None).await;
-    let rec = store.history_entry(failed).await.unwrap().unwrap();
+    let rec = store.history_entry(None, failed).await.unwrap().unwrap();
     assert!(
         rec.summary
             .error
@@ -172,10 +175,13 @@ async fn bodies_failures_and_queries() {
     )
     .await;
     let all = store
-        .history(HistoryQuery {
-            limit: 50,
-            ..HistoryQuery::default()
-        })
+        .history(
+            None,
+            HistoryQuery {
+                limit: 50,
+                ..HistoryQuery::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -195,32 +201,41 @@ async fn bodies_failures_and_queries() {
         |v: Vec<snapreq_server::store::HistorySummary>| v.iter().map(|h| h.id).collect::<Vec<_>>();
     assert_eq!(
         ids(store
-            .history(q(|q| q.url_contains = Some("ORDERS".into())))
+            .history(None, q(|q| q.url_contains = Some("ORDERS".into())))
             .await
             .unwrap()),
         [4]
     );
     assert_eq!(
         ids(store
-            .history(q(|q| q.method = Some("delete".into())))
+            .history(None, q(|q| q.method = Some("delete".into())))
             .await
             .unwrap()),
         [4]
     );
     assert_eq!(
-        ids(store.history(q(|q| q.status = Some(200))).await.unwrap()),
+        ids(store
+            .history(None, q(|q| q.status = Some(200)))
+            .await
+            .unwrap()),
         [4, 2, 1]
     );
     assert_eq!(
-        ids(store.history(q(|q| q.before_id = Some(3))).await.unwrap()),
+        ids(store
+            .history(None, q(|q| q.before_id = Some(3)))
+            .await
+            .unwrap()),
         [2, 1]
     );
     assert_eq!(
         ids(store
-            .history(HistoryQuery {
-                limit: 1,
-                ..HistoryQuery::default()
-            })
+            .history(
+                None,
+                HistoryQuery {
+                    limit: 1,
+                    ..HistoryQuery::default()
+                }
+            )
             .await
             .unwrap()),
         [4]
@@ -239,15 +254,15 @@ async fn runs_and_retention() {
         junit: None,
         html: None,
     };
-    let first = store.add_run(run(true)).await.unwrap();
-    let second = store.add_run(run(false)).await.unwrap();
-    let list = store.runs(10).await.unwrap();
+    let first = store.add_run(None, run(true)).await.unwrap();
+    let second = store.add_run(None, run(false)).await.unwrap();
+    let list = store.runs(None, 10).await.unwrap();
     assert_eq!(
         list.iter().map(|r| (r.id, r.passed)).collect::<Vec<_>>(),
         [(second, false), (first, true)]
     );
     assert_eq!(
-        store.run_report(first).await.unwrap().unwrap()["passed"],
+        store.run_report(None, first).await.unwrap().unwrap()["passed"],
         true
     );
 
@@ -256,11 +271,11 @@ async fn runs_and_retention() {
     store.backdate("runs", first, old).await.unwrap();
     let pruned = store.prune(Retention::default()).await.unwrap();
     assert_eq!((pruned.history, pruned.runs), (0, 1));
-    assert!(store.run_report(first).await.unwrap().is_none());
+    assert!(store.run_report(None, first).await.unwrap().is_none());
 
     // Size: the oldest entries go until everything fits.
     for _ in 0..5 {
-        store.add_run(run(true)).await.unwrap();
+        store.add_run(None, run(true)).await.unwrap();
     }
     let pruned = store
         .prune(Retention {
@@ -270,7 +285,7 @@ async fn runs_and_retention() {
         .await
         .unwrap();
     assert_eq!(pruned.runs, 3);
-    assert_eq!(store.runs(10).await.unwrap().len(), 3);
+    assert_eq!(store.runs(None, 10).await.unwrap().len(), 3);
     let none = store
         .prune(Retention {
             max_age: None,
@@ -297,22 +312,25 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
     {
         let store = Store::open(&path).await.unwrap();
         store
-            .add_run(RunEntry {
-                kind: "collection".into(),
-                target_key: String::new(),
-                name: "x".into(),
-                passed: true,
-                report: serde_json::json!({}),
-                junit: None,
-                html: None,
-            })
+            .add_run(
+                None,
+                RunEntry {
+                    kind: "collection".into(),
+                    target_key: String::new(),
+                    name: "x".into(),
+                    passed: true,
+                    report: serde_json::json!({}),
+                    junit: None,
+                    html: None,
+                },
+            )
             .await
             .unwrap();
     }
     let again = Store::open(&path).await.unwrap();
-    assert_eq!(again.schema_version().await.unwrap(), 2);
+    assert_eq!(again.schema_version().await.unwrap(), 3);
     assert_eq!(
-        again.runs(10).await.unwrap().len(),
+        again.runs(None, 10).await.unwrap().len(),
         1,
         "data survives reopening"
     );
@@ -348,13 +366,13 @@ async fn history_filters_by_class_failure_and_collection_and_deletes() {
         add("POST", Some(201), None),
         add("GET", None, Some("shop")),
     ] {
-        store.add_history(e).await.unwrap();
+        store.add_history(None, e).await.unwrap();
     }
     let ids = |q: HistoryQuery| {
         let store = store.clone();
         async move {
             store
-                .history(HistoryQuery { limit: 50, ..q })
+                .history(None, HistoryQuery { limit: 50, ..q })
                 .await
                 .unwrap()
                 .iter()
@@ -394,9 +412,9 @@ async fn history_filters_by_class_failure_and_collection_and_deletes() {
         .await,
         [4, 1]
     );
-    assert_eq!(store.delete_history(Some(2)).await.unwrap(), 1);
-    assert_eq!(store.delete_history(Some(2)).await.unwrap(), 0);
-    assert_eq!(store.delete_history(None).await.unwrap(), 3);
+    assert_eq!(store.delete_history(None, Some(2)).await.unwrap(), 1);
+    assert_eq!(store.delete_history(None, Some(2)).await.unwrap(), 0);
+    assert_eq!(store.delete_history(None, None).await.unwrap(), 3);
     assert!(ids(HistoryQuery::default()).await.is_empty());
 }
 
@@ -424,31 +442,37 @@ async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
         .unwrap();
     }
     let store = Store::open(&path).await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 2);
+    assert_eq!(store.schema_version().await.unwrap(), 3);
     assert_eq!(
-        store.run_report(1).await.unwrap(),
+        store.run_report(None, 1).await.unwrap(),
         Some(json!({ "format": 1 }))
     );
     use snapreq_server::store::ReportFormat;
     assert_eq!(
-        store.run_rendering(1, ReportFormat::Html).await.unwrap(),
+        store
+            .run_rendering(None, 1, ReportFormat::Html)
+            .await
+            .unwrap(),
         None
     );
     let id = store
-        .add_run(RunEntry {
-            kind: "flow".into(),
-            target_key: "f".into(),
-            name: "F".into(),
-            passed: true,
-            report: json!({}),
-            junit: Some("<testsuites/>".into()),
-            html: Some("<!DOCTYPE html>".into()),
-        })
+        .add_run(
+            None,
+            RunEntry {
+                kind: "flow".into(),
+                target_key: "f".into(),
+                name: "F".into(),
+                passed: true,
+                report: json!({}),
+                junit: Some("<testsuites/>".into()),
+                html: Some("<!DOCTYPE html>".into()),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
         store
-            .run_rendering(id, ReportFormat::Junit)
+            .run_rendering(None, id, ReportFormat::Junit)
             .await
             .unwrap()
             .as_deref(),

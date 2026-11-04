@@ -24,12 +24,17 @@ use tokio::sync::mpsc;
 
 use crate::AppState;
 use crate::api::{ApiError, ExecuteBody, RunBody, execute_body, run_body};
+use crate::auth::Identity;
 
-pub async fn upgrade(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| serve(socket, state))
+pub async fn upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    identity: Identity,
+) -> Response {
+    ws.on_upgrade(move |socket| serve(socket, state, identity))
 }
 
-async fn serve(mut socket: WebSocket, state: Arc<AppState>) {
+async fn serve(mut socket: WebSocket, state: Arc<AppState>, identity: Identity) {
     while let Some(Ok(msg)) = socket.recv().await {
         let text = match msg {
             Message::Text(t) => t.to_string(),
@@ -37,7 +42,17 @@ async fn serve(mut socket: WebSocket, state: Arc<AppState>) {
             // Pings are answered by axum; binary messages are not part of the protocol.
             _ => continue,
         };
-        if job(&mut socket, &state, &text).await.is_err() {
+        // A logout, password change or revoked token ends the connection.
+        if !identity.still_valid(&state).await.unwrap_or(false) {
+            let e = ApiError::new(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "the session has ended; log in again",
+            );
+            let _ = send(&mut socket, &error_message(&Value::Null, &e)).await;
+            break;
+        }
+        if job(&mut socket, &state, &identity, &text).await.is_err() {
             break; // the client went away
         }
     }
@@ -52,7 +67,13 @@ async fn send(socket: &mut WebSocket, v: &Value) -> Result<(), axum::Error> {
 }
 
 /// Runs one job, forwarding its live events while it runs.
-async fn job(socket: &mut WebSocket, state: &AppState, text: &str) -> Result<(), axum::Error> {
+async fn job(
+    socket: &mut WebSocket,
+    state: &AppState,
+    identity: &Identity,
+    text: &str,
+) -> Result<(), axum::Error> {
+    let owner = identity.owner();
     let mut doc: Value = match serde_json::from_str(text) {
         Ok(Value::Object(m)) => Value::Object(m),
         _ => {
@@ -100,7 +121,7 @@ async fn job(socket: &mut WebSocket, state: &AppState, text: &str) -> Result<(),
             "execute" => {
                 drop(progress);
                 let body: ExecuteBody = serde_json::from_value(doc).map_err(bad)?;
-                execute_body(state, body, Some(trace)).await
+                execute_body(state, owner, body, Some(trace)).await
             }
             "run" => {
                 let body: RunBody = serde_json::from_value(doc).map_err(bad)?;
@@ -108,7 +129,7 @@ async fn job(socket: &mut WebSocket, state: &AppState, text: &str) -> Result<(),
                     trace: Some(trace),
                     progress: Some(progress),
                 };
-                run_body(state, body, Some(live)).await
+                run_body(state, owner, body, Some(live)).await
             }
             other => Err(ApiError::new(
                 axum::http::StatusCode::BAD_REQUEST,

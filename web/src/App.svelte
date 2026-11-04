@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api, serverVersion, type ServerVersion } from "./lib/api/client";
+  import AccountDialog from "./lib/components/AccountDialog.svelte";
+  import { auth } from "./lib/state/auth.svelte";
   import DiffView from "./lib/components/DiffView.svelte";
   import EnvView from "./lib/components/EnvView.svelte";
   import FlowView from "./lib/components/FlowView.svelte";
@@ -25,6 +27,7 @@
   let side = $state<Side>((localStorage.getItem("snapreq.side") as Side | null) ?? "collections");
   $effect(() => localStorage.setItem("snapreq.side", side));
   let help: HTMLDialogElement;
+  let account: AccountDialog | undefined = $state();
   let mainEl: HTMLElement;
 
   $effect(() => {
@@ -134,6 +137,11 @@
       </select>
     </label>
     <button type="button" class="icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onclick={() => help.showModal()}>⌨</button>
+    {#if auth.user}
+      <button type="button" class="user" title="Account, API tokens and log out" onclick={() => account?.open()}>
+        <span aria-hidden="true">👤</span> {auth.user.username}
+      </button>
+    {/if}
   </header>
   <aside class="side">
     <div class="switch" role="tablist" aria-label="Sidebar">
@@ -176,6 +184,7 @@
     {/if}
   </main>
   <PromptDialog />
+  {#if auth.user}<AccountDialog bind:this={account} />{/if}
   <dialog bind:this={help} aria-labelledby="help-title" class="help">
     <h2 id="help-title">Keyboard shortcuts</h2>
     <table>
@@ -269,6 +278,10 @@
     border-bottom-width: 2px;
     border-radius: 4px;
     background: var(--bg-soft);
+  }
+  .user {
+    font-size: 0.8rem;
+    padding: 0.15rem 0.5rem;
   }
   .status {
     margin-left: auto;

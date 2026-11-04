@@ -4,6 +4,107 @@
  */
 
 export interface paths {
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /api/v1/auth/login`: checks the password and starts a session (an HttpOnly cookie). */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /api/v1/auth/logout` */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /api/v1/auth/password`: changes the caller's password. */
+        post: operations["change_password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_tokens"];
+        put?: never;
+        /** `POST /api/v1/auth/tokens`: creates an API token for the caller. */
+        post: operations["create_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** `DELETE /api/v1/auth/tokens/{id}`: revokes one of the caller's tokens. */
+        delete: operations["delete_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collections": {
         parameters: {
             query?: never;
@@ -292,12 +393,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description An API token as listed (the secret itself is shown only when it is created). */
+        ApiToken: {
+            /** Format: int64 */
+            created_at: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds; `null`: never expires.
+             */
+            expires_at?: number | null;
+            /** @description The last four characters of the token, to tell tokens apart. */
+            hint: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            last_used_at?: number | null;
+            name: string;
+        };
+        /** @description `{ mode, user }` */
+        AuthStatus: {
+            /** @description `none` (no login) or `accounts`. */
+            mode: string;
+            user?: components["schemas"]["User"] | null;
+        };
         /** @description `{ "error": { "kind", "message" } }` */
         ErrorBody: {
             error: components["schemas"]["ErrorDetail"];
         };
         ErrorDetail: {
-            /** @description `bad_request`, `not_found`, `conflict`, `invalid` or `internal`. */
+            /**
+             * @description `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid` or
+             *     `internal`.
+             */
             kind: string;
             message: string;
         };
@@ -349,6 +476,10 @@ export interface components {
         ItemKind: "request" | "folder" | "flow";
         /** @description A JSON document; its shape is described in `docs/SERVER.md`. */
         JsonDocument: Record<string, unknown>;
+        LoginBody: {
+            password: string;
+            username: string;
+        };
         MoveBody: {
             /** @description Key of the item to move. */
             from: string;
@@ -362,6 +493,15 @@ export interface components {
         NewCollection: {
             id: string;
             name?: string | null;
+        };
+        /** @description A new token: `secret` is shown only in this response. */
+        NewToken: {
+            secret: string;
+            token: components["schemas"]["ApiToken"];
+        };
+        PasswordBody: {
+            current: string;
+            new: string;
         };
         /** @description Where a moved item goes in its folder's order. */
         Place: {
@@ -422,6 +562,29 @@ export interface components {
         SecretBody: {
             value: string;
         };
+        TokenBody: {
+            /**
+             * Format: int64
+             * @description Days until it expires; absent: never.
+             */
+            expires_in_days?: number | null;
+            /** @description What the token is for, e.g. `ci`. */
+            name: string;
+        };
+        TokenList: {
+            tokens: components["schemas"]["ApiToken"][];
+        };
+        /** @description An account. */
+        User: {
+            /**
+             * Format: int64
+             * @description Unix milliseconds.
+             */
+            created_at: number;
+            /** Format: int64 */
+            id: number;
+            username: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -431,6 +594,245 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginBody"];
+            };
+        };
+        responses: {
+            /** @description Logged in; sets the session cookie */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatus"];
+                };
+            };
+            /** @description Wrong user name or password */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session is ended and its cookie removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    change_password: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordBody"];
+            };
+        };
+        responses: {
+            /** @description Changed; the user's other sessions are ended (API tokens stay valid) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The current password is wrong */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The new password is not accepted */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the server has accounts, and who is logged in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatus"];
+                };
+            };
+        };
+    };
+    list_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's API tokens, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenList"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenBody"];
+            };
+        };
+        responses: {
+            /** @description The token, with its secret (shown once) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewToken"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Invalid name or expiry */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Token id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_collections: {
         parameters: {
             query?: never;

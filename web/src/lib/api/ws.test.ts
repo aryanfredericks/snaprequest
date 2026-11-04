@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { onUnauthorized } from "./client";
 import { JobClient, wsUrl, type SocketLike } from "./ws";
 
 class FakeSocket implements SocketLike {
@@ -78,5 +79,23 @@ describe("JobClient", () => {
   it("builds the URL from the page location", () => {
     expect(wsUrl({ protocol: "https:", host: "x:1" })).toBe("wss://x:1/api/v1/ws");
     expect(wsUrl({ protocol: "http:", host: "localhost" })).toBe("ws://localhost/api/v1/ws");
+  });
+
+  it("fails pending jobs when the session ends", async () => {
+    let ended = 0;
+    onUnauthorized(() => ended++);
+    const sockets: FakeSocket[] = [];
+    const client = new JobClient(() => {
+      const s = new FakeSocket();
+      sockets.push(s);
+      return s;
+    });
+    const job = client.execute({ request: { method: "GET", url: "http://a" } });
+    sockets[0]!.accept();
+    await tick();
+    sockets[0]!.push({ type: "error", id: null, error: { kind: "unauthorized", message: "the session has ended" } });
+    await expect(job).rejects.toMatchObject({ status: 401, kind: "unauthorized" });
+    expect(ended).toBe(1);
+    onUnauthorized(() => {});
   });
 });

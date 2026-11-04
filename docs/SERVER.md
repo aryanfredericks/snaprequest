@@ -9,8 +9,9 @@ Configuration (bind address, data directory, workspace, retention) is described 
   The directory name is the collection **id**. Files are the normal collection format, so they can be
   edited by hand, with the CLI, or kept in git.
 - **Storage:** history and run results in `<data dir>/snapreq.db`, redacted (see `docs/CLI.md`).
-- **Security:** no authentication yet (Phase 8). The server listens on loopback only unless
-  `--allow-remote` is given (ADR-018).
+- **Security:** without accounts on loopback addresses, with local accounts otherwise (see
+  [Accounts](#accounts), ADR-023). History and runs belong to the user who made them; collections are
+  shared by every user until workspaces (P8.2).
 
 ## Docker
 
@@ -23,7 +24,61 @@ scripts/docker-smoke.py http://127.0.0.1:7878     # optional check
 or `docker compose up -d` with the included `docker-compose.yml`. The image is distroless and runs as
 a non-root user; state and the workspace are in the `/data` volume. Inside the container the server
 listens on all interfaces with `SNAPREQ_ALLOW_REMOTE=1`, so cloud metadata endpoints are blocked by
-default; publish the port on `127.0.0.1` unless the network is trusted.
+default and there is no login; publish the port on `127.0.0.1` unless the network is trusted. To require
+a login, turn accounts on and create a user in the container:
+
+```sh
+docker run -d -p 7878:7878 -e SNAPREQ_AUTH=accounts -v snapreq-data:/data --name snapreq snapreq
+docker exec -it snapreq snapreq user add ana
+```
+
+## Accounts
+
+`--auth` (`SNAPREQ_AUTH`, `[auth] mode`) chooses who may use the server:
+
+- `none`: no login; everyone who can reach the server is its single user. The default on loopback
+  addresses. On other addresses it needs `--allow-remote` (a trusted network).
+- `accounts`: local accounts. The default on non-loopback addresses. Every API route needs a login,
+  except `GET /healthz`, `/api/v1/version`, `/api/v1/openapi.json`, `/api/v1/auth/status` and
+  `POST /api/v1/auth/login`; the web UI's files load without one and show a login page.
+
+Accounts are created on the server machine with `snapreq user add|list|passwd|remove` (docs/CLI.md).
+Passwords are hashed with Argon2id. Each user has their own history, runs and resumable flow states;
+collections in the workspace are shared until workspaces with roles exist (P8.2).
+
+```toml
+[auth]
+mode = "accounts"
+session_days = 14       # how long a login lasts (1–365)
+secure_cookies = false  # set to true when users reach the server over HTTPS (e.g. behind a proxy)
+```
+
+Two ways to authenticate:
+
+- **Session cookie** (the web UI): `POST /api/v1/auth/login` with `{ "username", "password" }` sets
+  `snapreq_session` (HttpOnly, `SameSite=Strict`). Cookie-authenticated requests other than `GET`/`HEAD`
+  must send the header `X-SnapReq-CSRF: 1` (so must the login itself); pages of other origins cannot
+  send it. `POST /api/v1/auth/logout` ends the session.
+- **API token** (scripts, CI): `Authorization: Bearer snapreq_pat_…`. Create one in the UI (account
+  menu) or with `POST /api/v1/auth/tokens`. A token acts as its user; it needs no CSRF header.
+
+Only SHA-256 digests of session and token secrets are stored. Changing a password ends the user's other
+sessions (tokens stay valid); removing a user deletes their sessions, tokens, history and runs. A
+WebSocket checks its session or token again before every job and is closed once it has ended; its
+handshake must come from the server's own origin (`Origin` matches `Host` or `X-Forwarded-Host`).
+
+| Endpoint | |
+|---|---|
+| `GET /api/v1/auth/status` | `{ "mode": "none" \| "accounts", "user": { "id", "username", "created_at" } \| null }` |
+| `POST /api/v1/auth/login` | `{ "username", "password" }` → status document and the cookie; 401 for a wrong name or password |
+| `POST /api/v1/auth/logout` | 204, clears the cookie |
+| `POST /api/v1/auth/password` | `{ "current", "new" }` → 204; 403 if `current` is wrong, 422 if `new` is shorter than 8 characters |
+| `GET /api/v1/auth/tokens` | `{ "tokens": [{ "id", "name", "hint", "created_at", "expires_at", "last_used_at" }] }` |
+| `POST /api/v1/auth/tokens` | `{ "name", "expires_in_days"? }` → 201 `{ "token", "secret" }`; the secret is shown only here |
+| `DELETE /api/v1/auth/tokens/{id}` | 204 |
+
+Without accounts the login, password and token endpoints answer 409 `conflict`. Missing or ended
+credentials get 401 `unauthorized`; a missing CSRF header or a foreign WebSocket origin 403 `forbidden`.
 
 ## Outbound request policy
 
@@ -36,7 +91,7 @@ deny = ["10.0.0.0/8", "*.internal.example.com"]   # always blocked
 allow = ["api.example.com", "*.staging.example.com", "192.168.50.0/24"]   # if set, nothing else
 block_private = true      # loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7, link-local, 0.0.0.0
 block_metadata = true     # cloud metadata endpoints (169.254.169.254, fd00:ec2::254, metadata.google.internal …)
-                          # and link-local; default: on when --allow-remote is set, off otherwise
+                          # and link-local; default: on for non-loopback addresses or --allow-remote
 ```
 
 Rules are CIDRs, single IPs, host names or `*.domain` (the domain and its subdomains). A `deny`
@@ -54,8 +109,8 @@ A server reachable from the network without any policy logs a warning at start.
 ## Conventions
 
 - Base path `/api/v1`; JSON in and out.
-- Errors: an HTTP status and `{ "error": { "kind": "bad_request" | "not_found" | "conflict" | "invalid" |
-  "internal", "message": "…" } }`. `invalid` (422) is a file or request that does not validate.
+- Errors: an HTTP status and `{ "error": { "kind": "bad_request" | "unauthorized" | "forbidden" |
+  "not_found" | "conflict" | "invalid" | "internal", "message": "…" } }`. `invalid` (422) is a file or request that does not validate.
 - Collection ids, request and flow keys use letters, digits, `_`, `-` and `.` per segment and cannot
   leave the collection or name collection files (`snapreq`, `folder`, `environments/…`, `.…`).
 

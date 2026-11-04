@@ -13,6 +13,7 @@ mod send;
 mod snapshot_tests;
 mod tokens;
 mod trace_view;
+mod user_cmd;
 mod waterfall;
 
 use std::io::IsTerminal;
@@ -98,6 +99,7 @@ async fn main() -> ExitCode {
                     send::ArgError("no cache directory (set SNAPREQ_CACHE_DIR or HOME)".into())
                 }),
         ),
+        Command::User(args) => user_cmd::run(&args).await,
         Command::Secret(SecretCommand::Set {
             name,
             env,
@@ -149,6 +151,7 @@ async fn serve(args: &cli::ServeArgs) -> u8 {
         workspace: args.workspace.clone(),
         config_file: args.config.clone(),
         allow_remote: args.allow_remote,
+        auth: args.auth.clone(),
     };
     let config = match snapreq_server::Config::load(
         &overrides,

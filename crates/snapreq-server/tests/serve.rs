@@ -17,6 +17,7 @@ async fn health_and_version_then_graceful_shutdown() {
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
         outbound: Default::default(),
+        auth: snapreq_server::config::AuthConfig::default(),
     };
     let server = Server::bind(config).await.unwrap();
     assert!(data_dir.is_dir(), "the data directory is created");
@@ -24,7 +25,7 @@ async fn health_and_version_then_graceful_shutdown() {
         data_dir.join("snapreq.db").is_file(),
         "the database is created"
     );
-    assert_eq!(server.store().schema_version().await.unwrap(), 2);
+    assert_eq!(server.store().schema_version().await.unwrap(), 3);
     let addr = server.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let task = tokio::spawn(server.run(async {
@@ -88,6 +89,7 @@ async fn binding_a_busy_port_fails_clearly() {
         allow_remote: false,
         retention: snapreq_server::store::Retention::default(),
         outbound: Default::default(),
+        auth: snapreq_server::config::AuthConfig::default(),
     };
     let err = Server::bind(config).await.unwrap_err().to_string();
     assert!(
