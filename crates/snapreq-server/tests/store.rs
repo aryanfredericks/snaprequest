@@ -68,7 +68,7 @@ async fn exchange(store: &Store, req: &Request, source: Option<(&str, &str)>) ->
 async fn history_is_stored_without_secrets() {
     let addr = start().await;
     let store = Store::in_memory().await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 3);
+    assert_eq!(store.schema_version().await.unwrap(), 4);
 
     let mut req = Request::new(
         http::Method::POST,
@@ -246,6 +246,7 @@ async fn bodies_failures_and_queries() {
 async fn runs_and_retention() {
     let store = Store::in_memory().await.unwrap();
     let run = |passed: bool| RunEntry {
+        workspace: None,
         kind: "flow".into(),
         target_key: "orders/checkout".into(),
         name: "Checkout".into(),
@@ -315,6 +316,7 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
             .add_run(
                 None,
                 RunEntry {
+                    workspace: None,
                     kind: "collection".into(),
                     target_key: String::new(),
                     name: "x".into(),
@@ -328,7 +330,7 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
             .unwrap();
     }
     let again = Store::open(&path).await.unwrap();
-    assert_eq!(again.schema_version().await.unwrap(), 3);
+    assert_eq!(again.schema_version().await.unwrap(), 4);
     assert_eq!(
         again.runs(None, 10).await.unwrap().len(),
         1,
@@ -357,6 +359,7 @@ async fn history_filters_by_class_failure_and_collection_and_deletes() {
         error: status.is_none().then(|| "refused".into()),
         collection: collection.map(Into::into),
         request_key: collection.map(|_| "k".into()),
+        workspace: collection.map(|_| "default".into()),
         request: json!({}),
         response: None,
     };
@@ -407,6 +410,7 @@ async fn history_filters_by_class_failure_and_collection_and_deletes() {
     assert_eq!(
         ids(HistoryQuery {
             collection: Some("shop".into()),
+            workspace: Some("default".into()),
             ..Default::default()
         })
         .await,
@@ -442,7 +446,7 @@ async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
         .unwrap();
     }
     let store = Store::open(&path).await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 3);
+    assert_eq!(store.schema_version().await.unwrap(), 4);
     assert_eq!(
         store.run_report(None, 1).await.unwrap(),
         Some(json!({ "format": 1 }))
@@ -459,6 +463,7 @@ async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
         .add_run(
             None,
             RunEntry {
+                workspace: None,
                 kind: "flow".into(),
                 target_key: "f".into(),
                 name: "F".into(),
@@ -478,4 +483,51 @@ async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
             .as_deref(),
         Some("<testsuites/>")
     );
+}
+
+#[tokio::test]
+async fn accounts_of_a_version_3_database_keep_the_default_workspace() {
+    let dir = std::env::temp_dir().join(format!("snapreq-store-v3-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("snapreq.db");
+    drop(Store::open(&path).await.unwrap());
+    {
+        // Back to schema 3 (before workspaces), with two accounts.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "DROP TABLE members; DROP TABLE workspaces;
+             ALTER TABLE history DROP COLUMN workspace; ALTER TABLE runs DROP COLUMN workspace;
+             INSERT INTO users (username, password_hash, created_at) VALUES ('ana', 'x', 1), ('bo', 'x', 2);
+             INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, user_id)
+                VALUES (1, 'collection', 'shop', 'Shop', 1, '{}', 2, 1);
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).await.unwrap();
+    assert_eq!(store.schema_version().await.unwrap(), 4);
+    let role = |ws: &[snapreq_server::workspaces::Workspace]| {
+        ws.iter()
+            .map(|w| (w.id.clone(), w.role))
+            .collect::<Vec<_>>()
+    };
+    use snapreq_server::workspaces::Role;
+    assert_eq!(
+        role(&store.workspaces(Some(1)).await.unwrap()),
+        [("default".to_owned(), Role::Owner)]
+    );
+    assert_eq!(
+        role(&store.workspaces(Some(2)).await.unwrap()),
+        [("default".to_owned(), Role::Editor)]
+    );
+    assert_eq!(
+        store.runs(Some(1), 10).await.unwrap()[0]
+            .workspace
+            .as_deref(),
+        Some("default")
+    );
+    // Later accounts join nothing.
+    let cy = store.create_user("cy", "cy-password").await.unwrap();
+    assert!(store.workspaces(Some(cy.id)).await.unwrap().is_empty());
 }

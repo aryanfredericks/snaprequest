@@ -163,13 +163,23 @@ impl Store {
                 return Err(Error::Account(format!("user `{username}` already exists")));
             }
             let created_at = now_ms();
-            c.execute(
+            let tx = c.transaction().map_err(db_err)?;
+            tx.execute(
                 "INSERT INTO users (username, password_hash, created_at) VALUES (?1, ?2, ?3)",
                 params![username, hash, created_at],
             )
             .map_err(db_err)?;
+            let id = tx.last_insert_rowid();
+            // The first account owns the default workspace (the collections already there).
+            tx.execute(
+                "INSERT INTO members (workspace_id, user_id, role)
+                 SELECT 'default', ?1, 'owner' WHERE NOT EXISTS (SELECT 1 FROM members WHERE workspace_id = 'default')",
+                [id],
+            )
+            .map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
             Ok(User {
-                id: c.last_insert_rowid(),
+                id,
                 username,
                 created_at,
             })
@@ -200,9 +210,31 @@ impl Store {
         .await
     }
 
-    /// Deletes an account with its sessions, tokens, history and runs. `false`: no such user.
+    /// Deletes an account with its sessions, tokens, history, runs and memberships. `false`: no
+    /// such user. Refused while they are the only owner of a workspace that has other members.
     pub async fn delete_user(&self, username: &str) -> Result<bool> {
         let username = username.to_owned();
+        let name = username.clone();
+        let id: Option<i64> = self
+            .with(move |c| {
+                c.query_row("SELECT id FROM users WHERE username = ?1", [name], |r| {
+                    r.get(0)
+                })
+                .optional()
+                .map_err(db_err)
+            })
+            .await?;
+        let Some(id) = id else { return Ok(false) };
+        let sole = self.sole_ownerships(id).await?;
+        if !sole.is_empty() {
+            return Err(Error::Account(format!(
+                "`{username}` is the only owner of {}: make someone else owner first",
+                sole.iter()
+                    .map(|w| format!("workspace `{w}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
         self.with(move |c| {
             c.execute("DELETE FROM users WHERE username = ?1", [username])
                 .map(|n| n > 0)

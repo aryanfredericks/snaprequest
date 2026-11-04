@@ -28,6 +28,7 @@ use utoipa_axum::routes;
 use crate::AppState;
 use crate::auth::Identity;
 use crate::store::{HistoryEntry, HistoryQuery, Owner, RunEntry};
+use crate::workspaces::{EditSpace, Space};
 
 pub(crate) type Shared = State<Arc<AppState>>;
 
@@ -147,18 +148,18 @@ pub(crate) fn valid_segment(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
-/// The directory of collection `id`, which must be a plain name.
-pub(crate) fn collection_dir(state: &AppState, id: &str) -> ApiResult<PathBuf> {
+/// The directory of collection `id` in the workspace, which must be a plain name.
+pub(crate) fn collection_dir(space: &Space, id: &str) -> ApiResult<PathBuf> {
     if !valid_segment(id) {
         return Err(ApiError::bad_request(format!(
             "invalid collection id `{id}` (letters, digits, `_`, `-`, `.`)"
         )));
     }
-    Ok(state.config.workspace.join(id))
+    Ok(space.dir.join(id))
 }
 
-pub(crate) fn load_collection(state: &AppState, id: &str) -> ApiResult<Collection> {
-    let dir = collection_dir(state, id)?;
+pub(crate) fn load_collection(space: &Space, id: &str) -> ApiResult<Collection> {
+    let dir = collection_dir(space, id)?;
     if !dir.join(COLLECTION_FILE).is_file() {
         return Err(ApiError::not_found(format!("no collection `{id}`")));
     }
@@ -273,21 +274,26 @@ fn error_json(e: &snapreq_core::Error) -> Value {
 async fn execute_request(
     State(state): Shared,
     identity: Identity,
+    headers: axum::http::HeaderMap,
     Json(body): Json<ExecuteBody>,
 ) -> ApiResult<Json<Value>> {
+    let ws = crate::workspaces::requested(&headers);
     Ok(Json(
-        execute_body(&state, identity.owner(), body, None).await?,
+        execute_body(&state, &identity, &ws, body, None).await?,
     ))
 }
 
 /// Executes an [`ExecuteBody`] (also used by the WebSocket endpoint, which passes a
 /// trace sink for live events).
+/// Collection requests come from workspace `ws`, which the caller must belong to.
 pub(crate) async fn execute_body(
     state: &AppState,
-    owner: Owner,
+    identity: &Identity,
+    ws: &str,
     body: ExecuteBody,
     trace: Option<snapreq_core::client::TraceSink>,
 ) -> ApiResult<Value> {
+    let owner = identity.owner();
     match (body.request, body.collection, body.key) {
         (Some(mut req), None, None) => {
             if body.env.is_some() || !body.vars.is_empty() || body.file.is_some() {
@@ -312,7 +318,8 @@ pub(crate) async fn execute_body(
             })
         }
         (None, Some(cid), Some(key)) => {
-            let mut collection = load_collection(state, &cid)?;
+            let space = Space::resolve(state, identity, ws).await?;
+            let mut collection = load_collection(&space, &cid)?;
             if let Some(file) = body.file {
                 file.validate().map_err(ApiError::invalid)?;
                 key_path(&key, ".toml")?;
@@ -359,6 +366,7 @@ pub(crate) async fn execute_body(
                 RunOutcome::Invalid(_) => unreachable!("handled above"),
             };
             let mut entry = HistoryEntry::from_exchange(req, outcome, Some((&cid, &key)));
+            entry.workspace = Some(space.id.clone());
             // Values captured as secret by this request are hidden in its own history too.
             let captured: Vec<String> = run
                 .captures
@@ -410,7 +418,7 @@ struct HistoryParams {
     class: Option<u16>,
     /// `true`: only failures without a response; `false`: only responses.
     failed: Option<bool>,
-    /// Only requests of this collection.
+    /// Only requests of this collection (of the workspace in `X-SnapReq-Workspace`).
     collection: Option<String>,
     before: Option<i64>,
     limit: Option<usize>,
@@ -421,6 +429,7 @@ struct HistoryParams {
 async fn list_history(
     State(state): Shared,
     identity: Identity,
+    headers: axum::http::HeaderMap,
     Query(p): Query<HistoryParams>,
 ) -> ApiResult<Json<Value>> {
     let entries = state
@@ -433,6 +442,10 @@ async fn list_history(
                 status: p.status,
                 status_class: p.class.filter(|c| (1..=5).contains(c)),
                 failed: p.failed,
+                workspace: p
+                    .collection
+                    .is_some()
+                    .then(|| crate::workspaces::requested(&headers)),
                 collection: p.collection,
                 before_id: p.before,
                 limit: p.limit.unwrap_or(50),
@@ -518,20 +531,26 @@ pub struct RunBody {
 /// `POST /api/v1/runs`: runs to completion, stores the result and returns its summary.
 async fn start_run(
     State(state): Shared,
+    space: Space,
     identity: Identity,
     Json(body): Json<RunBody>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(run_body(&state, identity.owner(), body, None).await?))
+    Ok(Json(
+        run_body(&state, &space, identity.owner(), body, None).await?,
+    ))
 }
 
 /// Runs a [`RunBody`]; `live` receives progress and trace events (WebSocket).
 pub(crate) async fn run_body(
     state: &AppState,
+    space: &Space,
     owner: Owner,
     body: RunBody,
     live: Option<snapreq_test::session::Live>,
 ) -> ApiResult<Value> {
-    let collection = load_collection(state, &body.collection)?;
+    let collection = load_collection(space, &body.collection)?;
+    // Flow states are kept per workspace and collection.
+    let state_key = format!("{}/{}", space.id, body.collection);
     let unit = resolve_unit(&collection, body.target.as_deref()).map_err(ApiError::not_found)?;
     let environment = body
         .env
@@ -591,7 +610,7 @@ pub(crate) async fn run_body(
             Some(run) => Some(
                 state
                     .flow_states
-                    .get(owner, run, &body.collection, &flow.key, from)
+                    .get(owner, run, &state_key, &flow.key, from)
                     .ok_or_else(|| {
                         ApiError::new(
                             StatusCode::CONFLICT,
@@ -676,6 +695,7 @@ pub(crate) async fn run_body(
     .await;
     let report = Report::new(&collection, &unit, &iterations, planned, secret_vars);
     let mut entry = RunEntry::from_report(&report);
+    entry.workspace = Some(space.id.clone());
     entry.target_key = format!("{}/{}", body.collection, report.key)
         .trim_end_matches('/')
         .to_owned();
@@ -683,6 +703,7 @@ pub(crate) async fn run_body(
     let mut summary = report.json(false);
     summary["id"] = json!(id);
     summary["collection"] = json!(body.collection);
+    summary["workspace"] = json!(space.id);
     // A single-iteration flow run can be resumed at any step it reached.
     if let (snapreq_test::Unit::Flow(flow), [it]) = (&unit, iterations.as_slice())
         && let snapreq_test::UnitRun::Flow(run) = &it.result
@@ -695,7 +716,7 @@ pub(crate) async fn run_body(
             .collect();
         state
             .flow_states
-            .insert(owner, id, &body.collection, &flow.key, run.states.clone());
+            .insert(owner, id, &state_key, &flow.key, run.states.clone());
         summary["resumable_steps"] = json!(steps);
         summary["range"] = json!([run.range.0, run.range.1]);
     }
@@ -785,9 +806,9 @@ async fn get_run_report(
 // --- Collections -------------------------------------------------------------
 
 #[utoipa::path(get, path = "/collections", tag = "collections", responses((status = 200, description = "Collections in the workspace", body = JsonDocument)))]
-async fn list_collections(State(state): Shared) -> ApiResult<Json<Value>> {
+async fn list_collections(space: Space) -> ApiResult<Json<Value>> {
     let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&state.config.workspace) {
+    if let Ok(entries) = std::fs::read_dir(&space.dir) {
         let mut names: Vec<String> = entries
             .filter_map(Result::ok)
             .filter(|e| e.path().join(COLLECTION_FILE).is_file())
@@ -796,7 +817,7 @@ async fn list_collections(State(state): Shared) -> ApiResult<Json<Value>> {
             .collect();
         names.sort();
         for id in names {
-            out.push(match Collection::load(state.config.workspace.join(&id)) {
+            out.push(match Collection::load(space.dir.join(&id)) {
                 Ok((c, _)) => json!({
                     "id": id,
                     "name": c.file.name,
@@ -820,10 +841,10 @@ struct NewCollection {
 
 #[utoipa::path(post, path = "/collections", tag = "collections", request_body = NewCollection, responses((status = 201, description = "Created", body = JsonDocument), (status = 409, description = "Exists", body = ErrorBody), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn create_collection(
-    State(state): Shared,
+    space: EditSpace,
     Json(body): Json<NewCollection>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    let dir = collection_dir(&state, &body.id)?;
+    let dir = collection_dir(&space, &body.id)?;
     if dir.exists() {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -868,11 +889,8 @@ fn tree(items: &[Item], prefix: &str) -> Vec<Value> {
 }
 
 #[utoipa::path(get, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), responses((status = 200, description = "File, tree, flows and environments", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
-async fn get_collection(
-    State(state): Shared,
-    UrlPath(id): UrlPath<String>,
-) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
+async fn get_collection(space: Space, UrlPath(id): UrlPath<String>) -> ApiResult<Json<Value>> {
+    let c = load_collection(&space, &id)?;
     let environments = Environment::list(&c).map_err(|e| ApiError::invalid(e.to_string()))?;
     Ok(Json(json!({
         "id": id,
@@ -885,11 +903,11 @@ async fn get_collection(
 
 #[utoipa::path(put, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), request_body(content = Object, description = "`snapreq.toml` as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_collection(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath(id): UrlPath<String>,
     Json(file): Json<CollectionFile>,
 ) -> ApiResult<Json<Value>> {
-    let dir = collection_dir(&state, &id)?;
+    let dir = collection_dir(&space, &id)?;
     if !dir.join(COLLECTION_FILE).is_file() {
         return Err(ApiError::not_found(format!("no collection `{id}`")));
     }
@@ -906,10 +924,10 @@ async fn put_collection(
 
 #[utoipa::path(delete, path = "/collections/{id}", tag = "collections", params(("id" = String, Path, description = "Collection id")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_collection(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath(id): UrlPath<String>,
 ) -> ApiResult<StatusCode> {
-    let dir = collection_dir(&state, &id)?;
+    let dir = collection_dir(&space, &id)?;
     if !dir.join(COLLECTION_FILE).is_file() {
         return Err(ApiError::not_found(format!("no collection `{id}`")));
     }
@@ -919,10 +937,10 @@ async fn delete_collection(
 
 #[utoipa::path(get, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key, e.g. `users/create`")), responses((status = 200, description = "The request file as JSON", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_request(
-    State(state): Shared,
+    space: Space,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
+    let c = load_collection(&space, &id)?;
     let item = c
         .find(&key)
         .ok_or_else(|| ApiError::not_found(format!("no request `{key}`")))?;
@@ -933,12 +951,12 @@ async fn get_request(
 
 #[utoipa::path(put, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key")), request_body(content = Object, description = "A request file as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_request(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
     Json(file): Json<RequestFile>,
 ) -> ApiResult<Json<Value>> {
-    load_collection(&state, &id)?;
-    let path = collection_dir(&state, &id)?.join(key_path(&key, ".toml")?);
+    load_collection(&space, &id)?;
+    let path = collection_dir(&space, &id)?.join(key_path(&key, ".toml")?);
     file.validate().map_err(ApiError::invalid)?;
     save_request(&path, &file).map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(json!({ "key": key.trim_matches('/'), "file": file })))
@@ -946,11 +964,11 @@ async fn put_request(
 
 #[utoipa::path(delete, path = "/collections/{id}/requests/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Request key")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_request(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    load_collection(&state, &id)?;
-    let root = collection_dir(&state, &id)?;
+    load_collection(&space, &id)?;
+    let root = collection_dir(&space, &id)?;
     let path = root.join(key_path(&key, ".toml")?);
     let status = remove_file(&path, &format!("request `{key}`"))?;
     let key = key.trim_matches('/');
@@ -961,10 +979,10 @@ async fn delete_request(
 
 #[utoipa::path(get, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), responses((status = 200, description = "The flow file as JSON", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_flow(
-    State(state): Shared,
+    space: Space,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
+    let c = load_collection(&space, &id)?;
     let flow = c
         .find_flow(&key)
         .ok_or_else(|| ApiError::not_found(format!("no flow `{key}`")))?;
@@ -973,12 +991,12 @@ async fn get_flow(
 
 #[utoipa::path(put, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), request_body(content = Object, description = "A flow file as JSON"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_flow(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
     Json(file): Json<FlowFile>,
 ) -> ApiResult<Json<Value>> {
-    load_collection(&state, &id)?;
-    let path = collection_dir(&state, &id)?.join(key_path(&key, snapreq_collection::FLOW_SUFFIX)?);
+    load_collection(&space, &id)?;
+    let path = collection_dir(&space, &id)?.join(key_path(&key, snapreq_collection::FLOW_SUFFIX)?);
     file.validate().map_err(ApiError::invalid)?;
     save_flow(&path, &file).map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(json!({ "key": key.trim_matches('/'), "file": file })))
@@ -986,32 +1004,32 @@ async fn put_flow(
 
 #[utoipa::path(delete, path = "/collections/{id}/flows/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Flow key")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_flow(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    load_collection(&state, &id)?;
-    let path = collection_dir(&state, &id)?.join(key_path(&key, snapreq_collection::FLOW_SUFFIX)?);
+    load_collection(&space, &id)?;
+    let path = collection_dir(&space, &id)?.join(key_path(&key, snapreq_collection::FLOW_SUFFIX)?);
     remove_file(&path, &format!("flow `{key}`"))
 }
 
-fn environment_path(state: &AppState, id: &str, name: &str) -> ApiResult<PathBuf> {
+fn environment_path(space: &Space, id: &str, name: &str) -> ApiResult<PathBuf> {
     if !valid_segment(name) {
         return Err(ApiError::bad_request(format!(
             "invalid environment name `{name}`"
         )));
     }
-    Ok(collection_dir(state, id)?
+    Ok(collection_dir(space, id)?
         .join(snapreq_collection::load::ENVIRONMENTS_DIR)
         .join(format!("{name}.toml")))
 }
 
 #[utoipa::path(get, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), responses((status = 200, description = "Variables (secret values never returned)", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn get_environment(
-    State(state): Shared,
+    space: Space,
     UrlPath((id, name)): UrlPath<(String, String)>,
 ) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
-    environment_path(&state, &id, &name)?;
+    let c = load_collection(&space, &id)?;
+    environment_path(&space, &id, &name)?;
     let env = Environment::load(&c, &name).map_err(|e| ApiError::not_found(e.to_string()))?;
     // Secret values are never serialized, only their markers.
     Ok(Json(json!({ "name": name, "vars": env.vars })))
@@ -1019,12 +1037,12 @@ async fn get_environment(
 
 #[utoipa::path(put, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), request_body(content = Object, description = "Variables: `{ \"name\": \"value\", \"token\": { \"secret\": true } }`"), responses((status = 200, description = "Saved", body = JsonDocument), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn put_environment(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, name)): UrlPath<(String, String)>,
     Json(vars): Json<Variables>,
 ) -> ApiResult<Json<Value>> {
-    load_collection(&state, &id)?;
-    let path = environment_path(&state, &id, &name)?;
+    load_collection(&space, &id)?;
+    let path = environment_path(&space, &id, &name)?;
     if let Some(bad) = vars
         .0
         .iter()
@@ -1041,11 +1059,11 @@ async fn put_environment(
 
 #[utoipa::path(delete, path = "/collections/{id}/environments/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("name" = String, Path, description = "Environment name")), responses((status = 204, description = "Deleted"), (status = 400, description = "Bad request", body = ErrorBody), (status = 404, description = "Not found", body = ErrorBody), (status = 422, description = "Does not validate", body = ErrorBody)))]
 async fn delete_environment(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, name)): UrlPath<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    load_collection(&state, &id)?;
-    let path = environment_path(&state, &id, &name)?;
+    load_collection(&space, &id)?;
+    let path = environment_path(&space, &id, &name)?;
     remove_file(&path, &format!("environment `{name}`"))
 }
 
@@ -1098,11 +1116,11 @@ struct VariablesParams {
 /// The variables a request sees, with the scope each comes from (for highlighting
 /// placeholders in the UI).
 async fn list_variables(
-    State(state): Shared,
+    space: Space,
     UrlPath(id): UrlPath<String>,
     Query(p): Query<VariablesParams>,
 ) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
+    let c = load_collection(&space, &id)?;
     let environment = p
         .env
         .as_deref()

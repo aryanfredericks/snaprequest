@@ -1,5 +1,5 @@
 // Application state: collections, the selected environment of each, and the open tabs.
-import { api, ApiError, unwrap } from "../api/client";
+import { api, ApiError, currentWorkspace, unwrap } from "../api/client";
 import type {
   CollectionDoc,
   CollectionListEntry,
@@ -154,7 +154,7 @@ class AppState {
 
   selectEnv(collection: string, env: string | null) {
     this.envs[collection] = env;
-    localStorage.setItem("snapreq.envs", JSON.stringify(this.envs));
+    localStorage.setItem(envsKey(), JSON.stringify(this.envs));
     for (const t of this.tabs) if (t.kind === "request" && t.collection === collection) void this.refreshVars(t);
   }
 
@@ -372,7 +372,7 @@ class AppState {
    * any other request is rebuilt in a new tab (without the credentials, which were never stored).
    */
   async rerun(record: HistoryRecord) {
-    if (record.collection && record.request_key) {
+    if (record.collection && record.request_key && (record.workspace ?? "default") === currentWorkspace()) {
       const tab = await this.openRequest(record.collection, record.request_key);
       if (tab) await this.send(tab);
       return;
@@ -870,9 +870,15 @@ function allKeys(items: CollectionDoc["items"]): string[] {
   return items.flatMap((i) => (i.type === "folder" ? [i.key, ...allKeys(i.items)] : [i.key]));
 }
 
+/** Environment choices are remembered per workspace (collection ids repeat across workspaces). */
+function envsKey(): string {
+  const ws = currentWorkspace();
+  return ws === "default" ? "snapreq.envs" : `snapreq.envs.${ws}`;
+}
+
 function loadEnvs(): Record<string, string | null> {
   try {
-    return JSON.parse(localStorage.getItem("snapreq.envs") ?? "{}") as Record<string, string | null>;
+    return JSON.parse(localStorage.getItem(envsKey()) ?? "{}") as Record<string, string | null>;
   } catch {
     return {};
   }

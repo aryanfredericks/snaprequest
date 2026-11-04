@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ApiError, createApi, onUnauthorized, serverVersion, unwrap } from "./client";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError, createApi, onUnauthorized, rememberWorkspace, serverVersion, unwrap } from "./client";
 
 function fakeFetch(status: number, body: unknown, seen: Request[] = []): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -55,5 +55,22 @@ describe("api client", () => {
     await api.POST("/api/v1/auth/login", { body: { username: "a", password: "b" } });
     expect(ended).toBe(1);
     onUnauthorized(() => {});
+  });
+
+  it("names the selected workspace on every request", async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    const seen: Request[] = [];
+    const api = createApi("http://snapreq.test", fakeFetch(200, { collections: [] }, seen));
+    await api.GET("/api/v1/collections");
+    expect(seen[0]?.headers.get("x-snapreq-workspace")).toBe("default");
+    rememberWorkspace("team");
+    await api.GET("/api/v1/collections");
+    expect(seen[1]?.headers.get("x-snapreq-workspace")).toBe("team");
+    vi.unstubAllGlobals();
   });
 });

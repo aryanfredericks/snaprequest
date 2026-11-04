@@ -1,7 +1,7 @@
 // Client for `GET /api/v1/ws` (docs/SERVER.md, "Live traces and run progress"): one JSON message
 // per job; the server answers with `trace` and `progress` events and then a `result` or `error`.
 import type { ExecuteResult, RunReport, TraceEntry } from "./types";
-import { ApiError, sessionEnded, sessionMayHaveEnded } from "./client";
+import { ApiError, currentWorkspace, sessionEnded, sessionMayHaveEnded } from "./client";
 
 export type ProgressEvent =
   | { event: "request_started"; iteration: number; key: string }
@@ -73,7 +73,7 @@ export class JobClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { ...handlers, resolve, reject });
-      socket.send(JSON.stringify({ ...body, type, id }));
+      socket.send(JSON.stringify({ ...body, type, id, workspace: currentWorkspace() }));
     });
   }
 

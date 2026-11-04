@@ -25,7 +25,7 @@ async fn health_and_version_then_graceful_shutdown() {
         data_dir.join("snapreq.db").is_file(),
         "the database is created"
     );
-    assert_eq!(server.store().schema_version().await.unwrap(), 3);
+    assert_eq!(server.store().schema_version().await.unwrap(), 4);
     let addr = server.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let task = tokio::spawn(server.run(async {

@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1 done)
-- **Current checkpoint:** P8.2, workspaces with roles (owner, editor, viewer)
+- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1, P8.2 done)
+- **Current checkpoint:** P8.3, OIDC login
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,11 +25,27 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P8.2 workspaces with roles (owner, editor, viewer): collections are still shared by every user
-   (only history, runs and flow states are per user). Needs a product decision on how workspaces map
-   to directories and who may create them (there is no admin role yet).
+1. P8.3 OIDC login (Keycloak, Authentik, Google). Open product decision: create accounts automatically
+   on a first OIDC login (and with which workspace, if any), or only link OIDC identities to accounts
+   made with `snapreq user add`. Tests need a small mock OIDC provider (discovery, JWKS, token endpoint).
 2. P8.5 leftovers noted in ADR-023: login rate limiting, security headers, audit log, a `Host` check
    against DNS rebinding for a no-login loopback server.
+
+## Workspace notes (P8.2)
+- `workspaces.rs`: `Role` (viewer < editor < owner), Store methods (workspaces, members, set_member keeps
+  an owner, sole_ownerships), extractors `Space`/`EditSpace` (header `X-SnapReq-Workspace`, default
+  `default`; 404 for non-members, 403 for low roles), `/api/v1/workspaces` routes. `collection_dir` and
+  `load_collection` take a `&Space`. `default` = the workspace dir itself, others = subdirectories
+  (ADR-024; the maintainer chose subdirectories and "any user creates workspaces"; existing
+  collections were kept in place instead of moved, see the ADR).
+- Migration 4: `workspaces`, `members`, `workspace` on history/runs. `create_user` makes the first
+  account owner of `default`; `delete_user` refuses sole owners of shared workspaces.
+- Execute/run resolve the workspace only for collection work (raw requests need none); WebSocket jobs
+  read a `workspace` field; flow states keyed by `ws/collection`.
+- UI: `state/workspaces.svelte.ts` (switch = localStorage + reload), header picker + ⚙
+  `WorkspaceDialog` (rename, members, leave, delete, new), `NoWorkspace` page, read-only badge for
+  viewers, env choices stored per workspace, history re-run only opens collection requests of the
+  current workspace. `client.ts` sends the workspace header; `ws.ts` adds `workspace` to jobs.
 
 ## Accounts notes (P8.1)
 - Server: `accounts.rs` (Store methods: users, Argon2id passwords, sessions and `snapreq_pat_` tokens
@@ -565,6 +581,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P8.2 — 2026-11-04 — Workspaces with owner/editor/viewer roles: directories under the workspace dir (`default` = the dir itself), members and roles in SQLite, `X-SnapReq-Workspace` header, workspace picker and dialog in the UI. ADR-024. Cross-user isolation and role rules tested in Rust and Playwright.
 - P8.1 — 2026-11-04 — Local accounts (Argon2id), session cookies, API tokens, `none`/`accounts` auth modes (remote binds default to accounts), per-user history/runs/flow states, CSRF header and WebSocket origin checks, `snapreq user` commands, login page and account dialog in the UI. ADR-023. Two-user isolation tested in Rust and Playwright.
 
 ## Session log
@@ -590,3 +607,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (20):** Maintainer testing: the method field (a text box with suggestions) is now a fixed dropdown (`MethodSelect`) in the request builder and flow steps.
 - **2026-11-03 (21):** macOS runners were often unavailable for pushes (jobs queued, then cancelled without running). Maintainer chose: macOS tests run nightly (`.github/workflows/nightly.yml`, 02:17 UTC, also by hand); per-push CI tests Ubuntu and Windows.
 - **2026-11-04 (22):** P8.1 done: accounts, sessions, API tokens, per-user history and runs, CSRF and WebSocket origin checks, `snapreq user`, UI login and account dialog; ADR-023 (remote binds default to accounts, `--allow-remote` keeps no-login for trusted networks and the Docker image). scripts/check.sh and the full Playwright suite pass.
+- **2026-11-04 (23):** P8.2 done: workspaces with roles (maintainer chose subdirectory layout and "any user creates workspaces"; existing collections stay in place as `default`), ADR-024. Stopped before P8.3 for the OIDC account-provisioning decision.

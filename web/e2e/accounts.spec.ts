@@ -49,12 +49,44 @@ test("users log in, see only their own history, manage tokens and log out", asyn
   await dialog.getByRole("button", { name: "Log out" }).click();
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
 
-  // Bo sees none of it.
+  // Bo sees none of it: he is in no workspace until he creates one.
   await login(page, "bo");
+  await expect(page.getByRole("heading", { name: "No workspace yet" })).toBeVisible();
+  await page.getByLabel("Id (directory)").fill("bo-space");
+  await page.getByLabel("Name").fill("Bo's space");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("combobox", { name: "Workspace" })).toHaveValue("bo-space");
   await expect(page.getByRole("button", { name: /bo$/ })).toBeVisible();
   await page.getByRole("tab", { name: "History" }).click();
   await expect(page.getByText("Requests you send appear here.")).toBeVisible();
   await expect(page.getByText("tag=ana-only")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Workspace" }).getByRole("option")).toHaveText(["Bo's space"]);
+});
+
+test("owners share a workspace; viewers cannot change it", async ({ page }) => {
+  await page.goto(`${ACCOUNTS}/`);
+  await login(page, "ana");
+  await page.getByRole("button", { name: "Workspace settings" }).click();
+  const dialog = page.getByRole("dialog", { name: /Workspace: Default/ });
+  await dialog.getByLabel("User name").fill("bo");
+  await dialog.getByRole("combobox", { name: "Role of the new member" }).selectOption("viewer");
+  await dialog.getByRole("button", { name: "Add member" }).click();
+  await expect(dialog.getByRole("combobox", { name: "Role of bo" })).toHaveValue("viewer");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: /ana$/ }).click();
+  await page.getByRole("dialog", { name: /Account: ana/ }).getByRole("button", { name: "Log out" }).click();
+
+  await login(page, "bo");
+  const picker = page.getByRole("combobox", { name: "Workspace" });
+  await expect(picker.getByRole("option")).toHaveText(["Default", "Bo's space"]);
+  await picker.selectOption("default");
+  await expect(page.getByText("read-only")).toBeVisible();
+  // Changing anything is refused.
+  await page.getByRole("button", { name: "New collection" }).click();
+  const ask = page.getByRole("dialog", { name: "New collection" });
+  await ask.getByRole("textbox").first().fill("bo-was-here");
+  await ask.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByText(/a viewer of workspace `default`/)).toBeVisible();
 });
 
 test("an ended session brings back the login", async ({ page, context }) => {

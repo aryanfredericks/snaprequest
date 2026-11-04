@@ -88,6 +88,27 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE runs ADD COLUMN user_id INTEGER REFERENCES users (id) ON DELETE CASCADE;
     CREATE INDEX history_user ON history (user_id, id);
     CREATE INDEX runs_user ON runs (user_id, id);",
+    // 4: workspaces with roles (P8.2). `default` is the workspace directory itself; its first
+    // account owns it and later ones keep editing it. History and runs record their workspace.
+    "CREATE TABLE workspaces (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE members (
+        workspace_id TEXT NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+        PRIMARY KEY (workspace_id, user_id)
+    );
+    CREATE INDEX members_user ON members (user_id);
+    INSERT INTO workspaces (id, name, created_at) VALUES ('default', 'Default', CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    INSERT INTO members (workspace_id, user_id, role)
+        SELECT 'default', id, CASE WHEN id = (SELECT min(id) FROM users) THEN 'owner' ELSE 'editor' END FROM users;
+    ALTER TABLE history ADD COLUMN workspace TEXT;
+    ALTER TABLE runs ADD COLUMN workspace TEXT;
+    UPDATE history SET workspace = 'default' WHERE collection IS NOT NULL;
+    UPDATE runs SET workspace = 'default';",
 ];
 
 /// Whose history and runs: a user id, or `None` for the single user of a server without
@@ -139,6 +160,8 @@ pub struct HistoryEntry {
     pub error: Option<String>,
     pub collection: Option<String>,
     pub request_key: Option<String>,
+    /// The workspace of `collection`.
+    pub workspace: Option<String>,
     pub request: Value,
     pub response: Option<Value>,
 }
@@ -156,6 +179,8 @@ pub struct HistorySummary {
     pub error: Option<String>,
     pub collection: Option<String>,
     pub request_key: Option<String>,
+    /// The workspace of `collection`.
+    pub workspace: Option<String>,
 }
 
 /// One stored history entry with its request and response.
@@ -180,6 +205,8 @@ pub struct HistoryQuery {
     pub failed: Option<bool>,
     /// Only requests of this collection.
     pub collection: Option<String>,
+    /// With `collection`: the collection's workspace.
+    pub workspace: Option<String>,
     /// Only entries with an id below this (for paging).
     pub before_id: Option<i64>,
     pub limit: usize,
@@ -188,6 +215,8 @@ pub struct HistoryQuery {
 /// A finished run, ready to be stored.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEntry {
+    /// The workspace of the collection.
+    pub workspace: Option<String>,
     pub kind: String,
     pub target_key: String,
     pub name: String,
@@ -210,6 +239,7 @@ pub enum ReportFormat {
 pub struct RunSummary {
     pub id: i64,
     pub created_at: i64,
+    pub workspace: Option<String>,
     pub kind: String,
     pub target_key: String,
     pub name: String,
@@ -301,6 +331,7 @@ impl HistoryEntry {
             error,
             collection: source.map(|(c, _)| c.to_owned()),
             request_key: source.map(|(_, k)| k.to_owned()),
+            workspace: None,
             request,
             response,
         }
@@ -311,6 +342,7 @@ impl RunEntry {
     /// The run's detailed JSON report (already redacted by `Report`).
     pub fn from_report(report: &Report<'_>) -> Self {
         Self {
+            workspace: None,
             kind: report.kind.to_owned(),
             target_key: report.key.clone(),
             name: report.name.clone(),
@@ -392,9 +424,9 @@ impl Store {
             let response = e.response.as_ref().map(Value::to_string);
             let size = (request.len() + response.as_ref().map_or(0, String::len) + e.url.len()) as i64;
             c.execute(
-                "INSERT INTO history (created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json, size_bytes, user_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![now_ms(), e.method, e.url, e.status, e.duration_ms, e.error, e.collection, e.request_key, request, response, size, owner],
+                "INSERT INTO history (created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json, size_bytes, user_id, workspace)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![now_ms(), e.method, e.url, e.status, e.duration_ms, e.error, e.collection, e.request_key, request, response, size, owner, e.workspace],
             )
             .map_err(db_err)?;
             Ok(c.last_insert_rowid())
@@ -406,7 +438,7 @@ impl Store {
     pub async fn history(&self, owner: Owner, q: HistoryQuery) -> Result<Vec<HistorySummary>> {
         self.with(move |c| {
             let mut sql = String::from(
-                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key FROM history WHERE user_id IS ?",
+                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key, workspace FROM history WHERE user_id IS ?",
             );
             let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(owner)];
             if let Some(u) = q.url_contains {
@@ -432,8 +464,9 @@ impl Store {
                 None => {}
             }
             if let Some(coll) = q.collection {
-                sql.push_str(" AND collection = ?");
+                sql.push_str(" AND collection = ? AND workspace IS ?");
                 args.push(Box::new(coll));
+                args.push(Box::new(q.workspace));
             }
             if let Some(b) = q.before_id {
                 sql.push_str(" AND id < ?");
@@ -468,11 +501,11 @@ impl Store {
     pub async fn history_entry(&self, owner: Owner, id: i64) -> Result<Option<HistoryRecord>> {
         self.with(move |c| {
             c.query_row(
-                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key, request_json, response_json FROM history WHERE id = ?1 AND user_id IS ?2",
+                "SELECT id, created_at, method, url, status, duration_ms, error, collection, request_key, workspace, request_json, response_json FROM history WHERE id = ?1 AND user_id IS ?2",
                 params![id, owner],
                 |r| {
-                    let request: String = r.get(9)?;
-                    let response: Option<String> = r.get(10)?;
+                    let request: String = r.get(10)?;
+                    let response: Option<String> = r.get(11)?;
                     Ok(HistoryRecord {
                         summary: summary_row(r)?,
                         request: serde_json::from_str(&request).unwrap_or(Value::Null),
@@ -493,8 +526,8 @@ impl Store {
                 + e.junit.as_ref().map_or(0, String::len)
                 + e.html.as_ref().map_or(0, String::len)) as i64;
             c.execute(
-                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, junit, html, user_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size, e.junit, e.html, owner],
+                "INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, junit, html, user_id, workspace) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![now_ms(), e.kind, e.target_key, e.name, e.passed, report, size, e.junit, e.html, owner, e.workspace],
             )
             .map_err(db_err)?;
             Ok(c.last_insert_rowid())
@@ -506,13 +539,14 @@ impl Store {
     pub async fn runs(&self, owner: Owner, limit: usize) -> Result<Vec<RunSummary>> {
         self.with(move |c| {
             let mut stmt = c
-                .prepare("SELECT id, created_at, kind, target_key, name, passed FROM runs WHERE user_id IS ?1 ORDER BY id DESC LIMIT ?2")
+                .prepare("SELECT id, created_at, kind, target_key, name, passed, workspace FROM runs WHERE user_id IS ?1 ORDER BY id DESC LIMIT ?2")
                 .map_err(db_err)?;
             let rows = stmt
                 .query_map(params![owner, limit.clamp(1, 1000) as i64], |r| {
                     Ok(RunSummary {
                         id: r.get(0)?,
                         created_at: r.get(1)?,
+                        workspace: r.get(6)?,
                         kind: r.get(2)?,
                         target_key: r.get(3)?,
                         name: r.get(4)?,
@@ -644,6 +678,7 @@ fn summary_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HistorySummary> {
         error: r.get(6)?,
         collection: r.get(7)?,
         request_key: r.get(8)?,
+        workspace: r.get(9)?,
     })
 }
 

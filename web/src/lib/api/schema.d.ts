@@ -372,6 +372,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_workspaces"];
+        put?: never;
+        /** `POST /api/v1/workspaces`: creates a workspace (a directory) owned by the caller. */
+        post: operations["create_workspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{ws}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_workspace"];
+        post?: never;
+        /** `DELETE /api/v1/workspaces/{ws}`: deletes an empty workspace (delete its collections first). */
+        delete: operations["delete_workspace"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{ws}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{ws}/members/{username}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** `PUT /api/v1/workspaces/{ws}/members/{username}`: adds a user or changes their role. */
+        put: operations["put_member"];
+        post?: never;
+        /** `DELETE /api/v1/workspaces/{ws}/members/{username}`: removes a member; anyone may leave. */
+        delete: operations["delete_member"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -471,6 +539,8 @@ export interface components {
             /** Format: int32 */
             status?: number | null;
             url: string;
+            /** @description The workspace of `collection`. */
+            workspace?: string | null;
         };
         /** @enum {string} */
         ItemKind: "request" | "folder" | "flow";
@@ -479,6 +549,17 @@ export interface components {
         LoginBody: {
             password: string;
             username: string;
+        };
+        /** @description A member of a workspace. */
+        Member: {
+            role: components["schemas"]["Role"];
+            username: string;
+        };
+        MemberBody: {
+            role: components["schemas"]["Role"];
+        };
+        MemberList: {
+            members: components["schemas"]["Member"][];
         };
         MoveBody: {
             /** @description Key of the item to move. */
@@ -499,6 +580,12 @@ export interface components {
             secret: string;
             token: components["schemas"]["ApiToken"];
         };
+        NewWorkspace: {
+            /** @description Directory name: letters, digits, `_`, `-`, `.`. */
+            id: string;
+            /** @description Display name (default: the id). */
+            name?: string | null;
+        };
         PasswordBody: {
             current: string;
             new: string;
@@ -508,6 +595,11 @@ export interface components {
             /** @description The sibling (by name) to put the item before; absent puts it last. */
             before?: string | null;
         };
+        /**
+         * @description What a member may do.
+         * @enum {string}
+         */
+        Role: "viewer" | "editor" | "owner";
         RunBody: {
             bail?: boolean;
             /** @description Record the raw bytes of every exchange (`wire` trace events in the stored report). */
@@ -558,6 +650,7 @@ export interface components {
             name: string;
             passed: boolean;
             target_key: string;
+            workspace?: string | null;
         };
         SecretBody: {
             value: string;
@@ -584,6 +677,21 @@ export interface components {
             /** Format: int64 */
             id: number;
             username: string;
+        };
+        /** @description A workspace as its member sees it. */
+        Workspace: {
+            /** Format: int64 */
+            created_at: number;
+            id: string;
+            name: string;
+            /** @description The caller's role. */
+            role: components["schemas"]["Role"];
+        };
+        WorkspaceList: {
+            workspaces: components["schemas"]["Workspace"][];
+        };
+        WorkspaceUpdate: {
+            name: string;
         };
     };
     responses: never;
@@ -1887,7 +1995,7 @@ export interface operations {
                 class?: number;
                 /** @description `true`: only failures without a response; `false`: only responses. */
                 failed?: boolean;
-                /** @description Only requests of this collection. */
+                /** @description Only requests of this collection (of the workspace in `X-SnapReq-Workspace`). */
                 collection?: string;
                 before?: number;
                 limit?: number;
@@ -2240,6 +2348,306 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+        };
+    };
+    list_workspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's workspaces with their role (`default` first) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceList"];
+                };
+            };
+        };
+    };
+    create_workspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewWorkspace"];
+            };
+        };
+        responses: {
+            /** @description Created; the caller is its owner */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            /** @description Invalid id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The id is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_workspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace id */
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Renamed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_workspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace id */
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Still has collections, or is the default workspace */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace id */
+                ws: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members, owners first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberList"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace id */
+                ws: string;
+                /** @description An existing user */
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberBody"];
+            };
+        };
+        responses: {
+            /** @description The member with their role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            /** @description Not an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description No such workspace or user */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The workspace would have no owner, or the server has no accounts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace id */
+                ws: string;
+                /** @description A member */
+                username: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed (members may also remove themselves) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description No such workspace or user */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The workspace would have no owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

@@ -44,8 +44,8 @@ describe("JobClient", () => {
     await tick();
     expect(sockets).toHaveLength(1);
     expect(sockets[0]!.sent).toEqual([
-      { request: { method: "GET", url: "http://a" }, type: "execute", id: 1 },
-      { collection: "shop", type: "run", id: 2 },
+      { request: { method: "GET", url: "http://a" }, type: "execute", id: 1, workspace: "default" },
+      { collection: "shop", type: "run", id: 2, workspace: "default" },
     ]);
     sockets[0]!.push({ type: "trace", id: 1, entry: { at_ms: 0, event: "dns_start", host: "a" } });
     sockets[0]!.push({ type: "progress", id: 2, event: "request_started", iteration: 1, key: "health" });

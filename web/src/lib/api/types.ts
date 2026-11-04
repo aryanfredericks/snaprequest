@@ -350,6 +350,8 @@ export interface HistorySummary {
   error: string | null;
   collection: string | null;
   request_key: string | null;
+  /** The workspace of `collection`. */
+  workspace?: string | null;
 }
 
 /** A stored request: redacted, with the auth reduced to its kind. */
@@ -370,6 +372,7 @@ export interface HistoryRecord extends HistorySummary {
 export interface RunSummary {
   id: number;
   created_at: number;
+  workspace?: string | null;
   kind: string;
   target_key: string;
   name: string;

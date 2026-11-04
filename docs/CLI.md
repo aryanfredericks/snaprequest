@@ -105,12 +105,14 @@ snapreq user add ana                                 # asks for the password twi
 echo "$PASSWORD" | snapreq user add ci-bot           # or the first line of stdin
 snapreq user list
 snapreq user passwd ana                              # also logs ana out everywhere
-snapreq user remove ana                              # with her tokens, history and runs
+snapreq user remove ana                              # with her tokens, history, runs and memberships
 ```
 
 They work on the server's database (`--data-dir`, `--config` and the environment variables as for
 `snapreq serve`), also while the server runs. User names are case-insensitive; passwords need at least
-8 characters.
+8 characters. The first account owns the `default` workspace; other users are added to workspaces in the
+UI or the API (docs/SERVER.md, "Workspaces"). A user who is the only owner of a shared workspace cannot
+be removed until someone else is made an owner.
 
 Endpoints so far: `GET /healthz` → `{"status":"ok"}`, `GET /api/v1/version` →
 `{"name":"snapreq","version":"…","api":1}`.

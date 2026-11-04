@@ -77,6 +77,14 @@ shown once, with a Copy button), change your password and log out. When a sessio
 is open (it expired, or the password was changed elsewhere), the login comes back and the open tabs are
 kept; logging in as another user starts with a fresh page. History and runs are per user.
 
+## Workspaces
+
+The workspace picker in the header switches between your workspaces (the page reloads, so tabs belong
+to one workspace). The ⚙ button next to it shows your role, lets owners rename the workspace, manage
+members (add a user by name as editor, viewer or owner; change roles; remove) and delete an empty
+workspace, lets members leave, and creates new workspaces. Viewers see a "read-only" badge; changes
+they try are refused by the server. A user without any workspace gets a page to create one.
+
 ## Themes, keyboard and accessibility
 
 The theme follows the system or is chosen at the top (light, dark). Press `?` for the keyboard
@@ -98,8 +106,7 @@ alternatives and resizing the request/response split (arrow keys on the divider)
 
 ## What the UI does not do (yet)
 
-- No user administration: accounts are created on the server with `snapreq user add`, and every user
-  sees the same collections until workspaces with roles (P8.2).
+- No user administration: accounts are created on the server with `snapreq user add`.
 - The OAuth 2.0 *authorization code* grant needs a browser on the machine that runs the server; use it
   from the CLI, or use another grant.
 - `--secret VALUE` (hiding arbitrary values) has no UI; declare such values as secret variables instead.

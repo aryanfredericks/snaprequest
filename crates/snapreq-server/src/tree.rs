@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use axum::Json;
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::Path as UrlPath;
 use axum::http::StatusCode;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -15,9 +15,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::AppState;
-use crate::api::{
-    ApiError, ApiResult, Shared, collection_dir, key_path, load_collection, valid_segment,
-};
+use crate::api::{ApiError, ApiResult, collection_dir, key_path, load_collection, valid_segment};
+use crate::workspaces::{EditSpace, Space};
 
 pub(crate) fn router() -> OpenApiRouter<std::sync::Arc<AppState>> {
     OpenApiRouter::new()
@@ -92,10 +91,10 @@ fn split_key(key: &str) -> (&str, &str) {
 
 #[utoipa::path(get, path = "/collections/{id}/folders/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Folder key, e.g. `users/admin`")), responses((status = 200, description = "`{ key, file }`: the folder's `folder.toml` as JSON (defaults when absent)", body = crate::api::JsonDocument), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 async fn get_folder(
-    State(state): Shared,
+    space: Space,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<Json<Value>> {
-    let c = load_collection(&state, &id)?;
+    let c = load_collection(&space, &id)?;
     let key = key.trim_matches('/');
     let file =
         folder_file(&c, key).ok_or_else(|| ApiError::not_found(format!("no folder `{key}`")))?;
@@ -104,13 +103,13 @@ async fn get_folder(
 
 #[utoipa::path(put, path = "/collections/{id}/folders/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Folder key")), request_body(content = Object, description = "`folder.toml` as JSON (`{}` for a plain folder)"), responses((status = 200, description = "Saved; the folder is created if needed", body = crate::api::JsonDocument), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 async fn put_folder(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
     Json(file): Json<FolderFile>,
 ) -> ApiResult<Json<Value>> {
-    load_collection(&state, &id)?;
+    load_collection(&space, &id)?;
     let key = key.trim_matches('/');
-    let dir = collection_dir(&state, &id)?.join(key_path(key, "")?);
+    let dir = collection_dir(&space, &id)?.join(key_path(key, "")?);
     if dir.is_file() || dir.with_extension("toml").is_file() && !dir.is_dir() {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -132,12 +131,12 @@ async fn put_folder(
 
 #[utoipa::path(delete, path = "/collections/{id}/folders/{*key}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("key" = String, Path, description = "Folder key")), responses((status = 204, description = "Deleted with everything in it"), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 async fn delete_folder(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, key)): UrlPath<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    load_collection(&state, &id)?;
+    load_collection(&space, &id)?;
     let key = key.trim_matches('/');
-    let root = collection_dir(&state, &id)?;
+    let root = collection_dir(&space, &id)?;
     let dir = root.join(key_path(key, "")?);
     if !dir.is_dir() {
         return Err(ApiError::not_found(format!("no folder `{key}`")));
@@ -185,12 +184,12 @@ pub struct MoveBody {
 #[utoipa::path(post, path = "/collections/{id}/move", tag = "collections", params(("id" = String, Path, description = "Collection id")), request_body = MoveBody, responses((status = 200, description = "`{ key }`: the item's new key", body = crate::api::JsonDocument), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 409, description = "The destination exists", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 /// Moves, renames or reorders a request, folder or flow.
 async fn move_item(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath(id): UrlPath<String>,
     Json(body): Json<MoveBody>,
 ) -> ApiResult<Json<Value>> {
-    load_collection(&state, &id)?;
-    let root = collection_dir(&state, &id)?;
+    load_collection(&space, &id)?;
+    let root = collection_dir(&space, &id)?;
     let from = body.from.trim_matches('/').to_owned();
     let to = body.to.trim_matches('/').to_owned();
     let (old_parent, old_name) = split_key(&from);
@@ -295,11 +294,11 @@ pub struct SecretBody {
 #[utoipa::path(put, path = "/collections/{id}/secrets/{scope}/{name}", tag = "collections", params(("id" = String, Path, description = "Collection id"), ("scope" = String, Path, description = "An environment name, or `shared` for every environment"), ("name" = String, Path, description = "Variable name")), request_body = SecretBody, responses((status = 204, description = "Stored in `.secrets/<scope>.toml` (never returned)"), (status = 400, description = "Bad request", body = crate::api::ErrorBody), (status = 404, description = "Not found", body = crate::api::ErrorBody), (status = 422, description = "Does not validate", body = crate::api::ErrorBody)))]
 /// Like `snapreq secret set`: stores a secret value in the collection's `.secrets/` directory.
 async fn set_secret(
-    State(state): Shared,
+    space: EditSpace,
     UrlPath((id, scope, name)): UrlPath<(String, String, String)>,
     Json(body): Json<SecretBody>,
 ) -> ApiResult<StatusCode> {
-    let c = load_collection(&state, &id)?;
+    let c = load_collection(&space, &id)?;
     if body.value.is_empty() {
         return Err(ApiError::bad_request("the value is empty"));
     }

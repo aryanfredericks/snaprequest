@@ -12,6 +12,7 @@ pub mod outbound;
 pub mod store;
 pub mod tree;
 pub mod ui;
+pub mod workspaces;
 pub mod ws;
 
 use std::future::Future;
@@ -83,7 +84,12 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
     let (router, mut doc) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(health))
         .routes(routes!(version))
-        .nest("/api/v1", api::router().merge(auth::router()))
+        .nest(
+            "/api/v1",
+            api::router()
+                .merge(auth::router())
+                .merge(workspaces::router()),
+        )
         .split_for_parts();
     // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.
     let paths = std::mem::take(&mut doc.paths.paths);
@@ -104,6 +110,7 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
     tags(
         (name = "server", description = "Health and version"),
         (name = "auth", description = "Login, sessions and API tokens"),
+        (name = "workspaces", description = "Workspaces, members and roles"),
         (name = "requests", description = "Executing requests"),
         (name = "history", description = "Stored requests"),
         (name = "runs", description = "Flow, folder and collection runs"),

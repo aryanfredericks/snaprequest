@@ -250,3 +250,22 @@ no sign-up and no admin role yet (P8.2).
 not visible to accounts later (and the reverse). Login rate limiting, security headers and an audit log
 remain for P8.5; DNS-rebinding protection for a no-login loopback server (a `Host` check) as well.
 
+## ADR-024: Workspaces are directories; the API selects one with a header
+**Status:** Accepted (2026-11-04); layout and permissions chosen by the maintainer.
+**Context:** PLAN P8.2 adds workspaces with owner, editor and viewer roles. Collections are directories in the
+workspace directory and should stay hand-editable and git-friendly. Every collection endpoint and about 30 UI
+calls address collections as `/collections/{id}/…`.
+**Decision:** A workspace is a directory: `default` is the workspace directory itself (existing collections stay
+where they are, so a `--workspace` pointing at a git repository is not reorganised), every other workspace `id`
+is `<workspace dir>/<id>/`. Workspace ids and collection ids of `default` share one namespace, checked on
+creation. Membership and roles live in SQLite (`workspaces`, `members`, migration 4). Any user may create a
+workspace and becomes its owner; owners add existing users; a workspace always keeps an owner. The first account
+owns `default` (accounts that existed before the migration: the first owns it, the others edit it). The API keeps
+its paths and picks the workspace with the `X-SnapReq-Workspace` header (default `default`); WebSocket jobs carry
+a `workspace` field. Handlers get the workspace through extractors: `Space` (any member) and `EditSpace` (editor
+or owner); the collection path helpers take a `Space`, so a handler cannot reach collection files without one.
+Non-members get 404, too-low roles 403. Without accounts the single user owns every workspace.
+**Consequences:** No route or UI call changed shape; scripts add one header. History and runs record their
+workspace. The UI reloads when switching workspaces. Ownerless workspaces (all members deleted) keep their files
+but no one can open them until P8.6 tooling or a database edit.
+

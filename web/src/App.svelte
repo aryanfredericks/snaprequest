@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api, serverVersion, type ServerVersion } from "./lib/api/client";
   import AccountDialog from "./lib/components/AccountDialog.svelte";
+  import WorkspaceDialog from "./lib/components/WorkspaceDialog.svelte";
+  import { workspaces } from "./lib/state/workspaces.svelte";
   import { auth } from "./lib/state/auth.svelte";
   import DiffView from "./lib/components/DiffView.svelte";
   import EnvView from "./lib/components/EnvView.svelte";
@@ -28,6 +30,7 @@
   $effect(() => localStorage.setItem("snapreq.side", side));
   let help: HTMLDialogElement;
   let account: AccountDialog | undefined = $state();
+  let wsDialog: WorkspaceDialog | undefined = $state();
   let mainEl: HTMLElement;
 
   $effect(() => {
@@ -112,6 +115,13 @@
   <button type="button" class="skip" onclick={() => mainEl.focus()}>Skip to the main area</button>
   <header>
     <h1><span class="logo" aria-hidden="true">⚡</span> SnapRequest</h1>
+    <span class="ws">
+      <select aria-label="Workspace" value={workspaces.id} onchange={(e) => workspaces.switch(e.currentTarget.value)}>
+        {#each workspaces.list as w (w.id)}<option value={w.id}>{w.name}</option>{/each}
+      </select>
+      <button type="button" class="icon" aria-label="Workspace settings" title="Members, roles and new workspaces" onclick={() => wsDialog?.open()}>⚙</button>
+      {#if workspaces.current?.role === "viewer"}<span class="badge" title="Viewers read and run collections but cannot change them">read-only</span>{/if}
+    </span>
     {#if collection && doc}
       <label class="env">
         Environment
@@ -185,6 +195,7 @@
   </main>
   <PromptDialog />
   {#if auth.user}<AccountDialog bind:this={account} />{/if}
+  <WorkspaceDialog bind:this={wsDialog} />
   <dialog bind:this={help} aria-labelledby="help-title" class="help">
     <h2 id="help-title">Keyboard shortcuts</h2>
     <table>
@@ -278,6 +289,22 @@
     border-bottom-width: 2px;
     border-radius: 4px;
     background: var(--bg-soft);
+  }
+  .ws {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .ws select {
+    font-size: 0.8rem;
+    padding: 0.15rem 0.3rem;
+  }
+  .badge {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--warn);
   }
   .user {
     font-size: 0.8rem;

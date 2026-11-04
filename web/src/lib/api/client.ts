@@ -21,6 +21,23 @@ export class ApiError extends Error {
 /** Header the server requires on cookie-authenticated requests that change something (CSRF). */
 export const CSRF_HEADER = "X-SnapReq-CSRF";
 
+/** Header that selects the workspace whose collections a request works on. */
+export const WORKSPACE_HEADER = "X-SnapReq-Workspace";
+const WORKSPACE_KEY = "snapreq.workspace";
+
+/** The workspace the UI works in (remembered per browser). */
+export function currentWorkspace(): string {
+  try {
+    return localStorage.getItem(WORKSPACE_KEY) || "default";
+  } catch {
+    return "default";
+  }
+}
+
+export function rememberWorkspace(id: string) {
+  localStorage.setItem(WORKSPACE_KEY, id);
+}
+
 /** Called when the server answers 401 (the session ended); set by the auth state. */
 let unauthorized: () => void = () => {};
 /** Called when something failed in a way an ended session could explain (a refused WebSocket). */
@@ -44,6 +61,10 @@ export function createApi(baseUrl = "", fetchImpl?: typeof fetch) {
     ...(fetchImpl ? { fetch: fetchImpl } : {}),
   });
   client.use({
+    onRequest({ request }) {
+      request.headers.set(WORKSPACE_HEADER, currentWorkspace());
+      return request;
+    },
     onResponse({ request, response }) {
       if (response.status === 401 && !new URL(request.url, "http://x").pathname.endsWith("/auth/login")) unauthorized();
     },

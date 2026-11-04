@@ -89,7 +89,7 @@ impl Identity {
     }
 
     /// The account, or a conflict on a server without accounts.
-    fn account(&self) -> ApiResult<&User> {
+    pub(crate) fn account(&self) -> ApiResult<&User> {
         self.user.as_ref().ok_or_else(accounts_off)
     }
 }

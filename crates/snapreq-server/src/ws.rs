@@ -8,6 +8,9 @@
 //! { "type": "run", "id": 2, "collection": "shop", "target": "orders/checkout" }
 //! ```
 //!
+//! Collections come from the workspace named by an optional `"workspace"` field (default
+//! `default`), which the caller must belong to.
+//!
 //! The server answers with `trace` events (`{ "type": "trace", "id", "entry" }`, a redacted
 //! trace entry), `progress` events of runs (`{ "type": "progress", "id", "event":
 //! "request_started" | "request_done", ... }`) and finally `{ "type": "result", "id",
@@ -89,6 +92,11 @@ async fn job(
         .as_object_mut()
         .and_then(|m| m.remove("id"))
         .unwrap_or(Value::Null);
+    let ws = doc
+        .as_object_mut()
+        .and_then(|m| m.remove("workspace"))
+        .and_then(|w| w.as_str().map(str::to_owned))
+        .unwrap_or_else(|| crate::workspaces::DEFAULT.to_owned());
     let kind = doc
         .as_object_mut()
         .and_then(|m| m.remove("type"))
@@ -121,7 +129,7 @@ async fn job(
             "execute" => {
                 drop(progress);
                 let body: ExecuteBody = serde_json::from_value(doc).map_err(bad)?;
-                execute_body(state, owner, body, Some(trace)).await
+                execute_body(state, identity, &ws, body, Some(trace)).await
             }
             "run" => {
                 let body: RunBody = serde_json::from_value(doc).map_err(bad)?;
@@ -129,7 +137,8 @@ async fn job(
                     trace: Some(trace),
                     progress: Some(progress),
                 };
-                run_body(state, owner, body, Some(live)).await
+                let space = crate::workspaces::Space::resolve(state, identity, &ws).await?;
+                run_body(state, &space, owner, body, Some(live)).await
             }
             other => Err(ApiError::new(
                 axum::http::StatusCode::BAD_REQUEST,

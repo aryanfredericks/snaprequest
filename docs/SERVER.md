@@ -9,9 +9,10 @@ Configuration (bind address, data directory, workspace, retention) is described 
   The directory name is the collection **id**. Files are the normal collection format, so they can be
   edited by hand, with the CLI, or kept in git.
 - **Storage:** history and run results in `<data dir>/snapreq.db`, redacted (see `docs/CLI.md`).
+- **Workspaces:** collections are grouped in workspaces with roles (see [Workspaces](#workspaces),
+  ADR-024). `default` is the workspace directory itself; other workspaces are its subdirectories.
 - **Security:** without accounts on loopback addresses, with local accounts otherwise (see
-  [Accounts](#accounts), ADR-023). History and runs belong to the user who made them; collections are
-  shared by every user until workspaces (P8.2).
+  [Accounts](#accounts), ADR-023). History and runs belong to the user who made them.
 
 ## Docker
 
@@ -44,7 +45,7 @@ docker exec -it snapreq snapreq user add ana
 
 Accounts are created on the server machine with `snapreq user add|list|passwd|remove` (docs/CLI.md).
 Passwords are hashed with Argon2id. Each user has their own history, runs and resumable flow states;
-collections in the workspace are shared until workspaces with roles exist (P8.2).
+collections belong to [workspaces](#workspaces). The first account owns the `default` workspace.
 
 ```toml
 [auth]
@@ -79,6 +80,38 @@ handshake must come from the server's own origin (`Origin` matches `Host` or `X-
 
 Without accounts the login, password and token endpoints answer 409 `conflict`. Missing or ended
 credentials get 401 `unauthorized`; a missing CSRF header or a foreign WebSocket origin 403 `forbidden`.
+
+## Workspaces
+
+A workspace is a directory of collections. `default` is the workspace directory itself (`--workspace`,
+where collections were before workspaces existed); a workspace `team` is `<workspace dir>/team/`, so
+files stay hand-editable and can be kept in git per workspace. Each member has a role:
+
+| Role | May |
+|---|---|
+| `viewer` | list and read collections, execute and run them |
+| `editor` | also create, change and delete collections, requests, folders, flows, environments and secrets |
+| `owner` | also rename and delete the workspace and add, change and remove members |
+
+Any user can create a workspace and becomes its owner; owners add existing users by name. A workspace
+always keeps an owner, and a user who is the only owner of a workspace with other members cannot be
+deleted. A workspace a user does not belong to answers 404, as if it did not exist; a role that is too
+low answers 403 `forbidden`. Without accounts the single user owns every workspace.
+
+The collection endpoints (`/collections/…`, `/requests/execute` with a collection, `/runs`) work in the
+workspace named by the **`X-SnapReq-Workspace`** header, `default` without one; WebSocket jobs carry a
+`"workspace"` field. History and runs record their workspace (`workspace` in summaries); the history
+`collection` filter applies to the selected workspace.
+
+| Endpoint | |
+|---|---|
+| `GET /api/v1/workspaces` | `{ "workspaces": [{ "id", "name", "created_at", "role" }] }`, `default` first |
+| `POST /api/v1/workspaces` | `{ "id", "name"? }` → 201 workspace; 409 if the id is taken (also by a collection of `default`) |
+| `PUT /api/v1/workspaces/{ws}` | `{ "name" }` → 204 (owner) |
+| `DELETE /api/v1/workspaces/{ws}` | 204 (owner); 409 while it has collections, and for `default` |
+| `GET /api/v1/workspaces/{ws}/members` | `{ "members": [{ "username", "role" }] }`, owners first |
+| `PUT /api/v1/workspaces/{ws}/members/{username}` | `{ "role" }` → the member (owner); 404 for an unknown user, 409 if no owner would be left |
+| `DELETE /api/v1/workspaces/{ws}/members/{username}` | 204 (owner, or the member leaving) |
 
 ## Outbound request policy
 
