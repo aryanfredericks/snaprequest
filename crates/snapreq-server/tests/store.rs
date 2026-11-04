@@ -68,7 +68,7 @@ async fn exchange(store: &Store, req: &Request, source: Option<(&str, &str)>) ->
 async fn history_is_stored_without_secrets() {
     let addr = start().await;
     let store = Store::in_memory().await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 4);
+    assert_eq!(store.schema_version().await.unwrap(), 5);
 
     let mut req = Request::new(
         http::Method::POST,
@@ -330,7 +330,7 @@ async fn databases_are_migrated_once_and_newer_ones_refused() {
             .unwrap();
     }
     let again = Store::open(&path).await.unwrap();
-    assert_eq!(again.schema_version().await.unwrap(), 4);
+    assert_eq!(again.schema_version().await.unwrap(), 5);
     assert_eq!(
         again.runs(None, 10).await.unwrap().len(),
         1,
@@ -446,7 +446,7 @@ async fn a_version_1_database_is_upgraded_and_keeps_its_runs() {
         .unwrap();
     }
     let store = Store::open(&path).await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 4);
+    assert_eq!(store.schema_version().await.unwrap(), 5);
     assert_eq!(
         store.run_report(None, 1).await.unwrap(),
         Some(json!({ "format": 1 }))
@@ -496,7 +496,7 @@ async fn accounts_of_a_version_3_database_keep_the_default_workspace() {
         // Back to schema 3 (before workspaces), with two accounts.
         let c = rusqlite::Connection::open(&path).unwrap();
         c.execute_batch(
-            "DROP TABLE members; DROP TABLE workspaces;
+            "DROP TABLE identities; DROP TABLE members; DROP TABLE workspaces;
              ALTER TABLE history DROP COLUMN workspace; ALTER TABLE runs DROP COLUMN workspace;
              INSERT INTO users (username, password_hash, created_at) VALUES ('ana', 'x', 1), ('bo', 'x', 2);
              INSERT INTO runs (created_at, kind, target_key, name, passed, report_json, size_bytes, user_id)
@@ -506,7 +506,7 @@ async fn accounts_of_a_version_3_database_keep_the_default_workspace() {
         .unwrap();
     }
     let store = Store::open(&path).await.unwrap();
-    assert_eq!(store.schema_version().await.unwrap(), 4);
+    assert_eq!(store.schema_version().await.unwrap(), 5);
     let role = |ws: &[snapreq_server::workspaces::Workspace]| {
         ws.iter()
             .map(|w| (w.id.clone(), w.role))

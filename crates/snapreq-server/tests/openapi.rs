@@ -21,6 +21,8 @@ fn every_route_is_described() {
         "GET /api/v1/version",
         "GET /api/v1/auth/status",
         "POST /api/v1/auth/login",
+        "GET /api/v1/auth/oidc/start",
+        "GET /api/v1/auth/oidc/callback",
         "POST /api/v1/auth/logout",
         "POST /api/v1/auth/password",
         "GET /api/v1/auth/tokens",
@@ -112,6 +114,7 @@ async fn the_document_is_served() {
         retention: snapreq_server::store::Retention::default(),
         outbound: Default::default(),
         auth: snapreq_server::config::AuthConfig::default(),
+        oidc: None,
     };
     let server = snapreq_server::Server::bind(config).await.unwrap();
     let addr = server.local_addr().unwrap();

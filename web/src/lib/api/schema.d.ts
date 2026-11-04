@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/auth/oidc/callback`: where the provider sends the browser back. */
+        get: operations["callback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/auth/oidc/start`: the login button's target. */
+        get: operations["start"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/password": {
         parameters: {
             query?: never;
@@ -482,6 +516,7 @@ export interface components {
         AuthStatus: {
             /** @description `none` (no login) or `accounts`. */
             mode: string;
+            oidc?: components["schemas"]["OidcInfo"] | null;
             user?: components["schemas"]["User"] | null;
         };
         /** @description `{ "error": { "kind", "message" } }` */
@@ -585,6 +620,9 @@ export interface components {
             id: string;
             /** @description Display name (default: the id). */
             name?: string | null;
+        };
+        OidcInfo: {
+            name: string;
         };
         PasswordBody: {
             current: string;
@@ -755,6 +793,54 @@ export interface operations {
         responses: {
             /** @description The session is ended and its cookie removed */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    callback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+                error_description?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logged in (session cookie set) and back to the UI, or back to the login page with `login_error` */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To the identity provider's login page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Single sign-on is not configured */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

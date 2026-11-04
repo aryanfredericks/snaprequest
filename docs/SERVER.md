@@ -68,11 +68,37 @@ sessions (tokens stay valid); removing a user deletes their sessions, tokens, hi
 WebSocket checks its session or token again before every job and is closed once it has ended; its
 handshake must come from the server's own origin (`Origin` matches `Host` or `X-Forwarded-Host`).
 
+### Single sign-on (OpenID Connect)
+
+With accounts on, users can also log in through an OpenID Connect provider (Keycloak, Authentik,
+Google, Entra ID …). Register SnapRequest at the provider as a confidential web client with the redirect
+URI below, then:
+
+```toml
+[oidc]
+issuer = "https://keycloak.example.com/realms/main"   # <issuer>/.well-known/openid-configuration
+client_id = "snapreq"
+client_secret = "…"            # or SNAPREQ_OIDC_CLIENT_SECRET (better: keeps it out of the file)
+redirect_url = "https://snapreq.example.com/api/v1/auth/oidc/callback"
+name = "Keycloak"              # the login button says "Log in with Keycloak"
+scopes = ["openid", "email", "profile"]   # the default
+allowed_domains = ["example.com"]         # optional: only verified addresses of these domains
+```
+
+The login page then shows a "Log in with …" button (`GET /api/v1/auth/oidc/start`). The server uses the
+authorization code flow with PKCE, a `state` bound to the browser by a cookie and a `nonce`; the ID token
+comes directly from the provider's token endpoint (its issuer, audience, expiry and nonce are checked).
+The **first login creates an account** named after `preferred_username` (or the e-mail's local part),
+with no password and no workspace; if the name is taken, a suffix is added (`ana-2`), so a provider login
+never takes over an existing account. Later logins of the same identity (`iss` + `sub`) use that account.
+Failures send the browser back to the login page with the reason.
+
 | Endpoint | |
 |---|---|
-| `GET /api/v1/auth/status` | `{ "mode": "none" \| "accounts", "user": { "id", "username", "created_at" } \| null }` |
+| `GET /api/v1/auth/status` | `{ "mode": "none" \| "accounts", "user": { "id", "username", "created_at" } \| null, "oidc": { "name" } \| null }` |
 | `POST /api/v1/auth/login` | `{ "username", "password" }` → status document and the cookie; 401 for a wrong name or password |
 | `POST /api/v1/auth/logout` | 204, clears the cookie |
+| `GET /api/v1/auth/oidc/start`, `…/callback` | single sign-on redirects (404 when not configured) |
 | `POST /api/v1/auth/password` | `{ "current", "new" }` → 204; 403 if `current` is wrong, 422 if `new` is shorter than 8 characters |
 | `GET /api/v1/auth/tokens` | `{ "tokens": [{ "id", "name", "hint", "created_at", "expires_at", "last_used_at" }] }` |
 | `POST /api/v1/auth/tokens` | `{ "name", "expires_in_days"? }` → 201 `{ "token", "secret" }`; the secret is shown only here |

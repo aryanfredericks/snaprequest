@@ -269,3 +269,19 @@ Non-members get 404, too-low roles 403. Without accounts the single user owns ev
 workspace. The UI reloads when switching workspaces. Ownerless workspaces (all members deleted) keep their files
 but no one can open them until P8.6 tooling or a database edit.
 
+## ADR-025: OpenID Connect login with automatic accounts and no JWT library
+**Status:** Accepted (2026-11-04); automatic accounts with an optional domain allowlist chosen by the maintainer.
+**Context:** PLAN P8.3 adds login through OIDC providers. Verifying ID token signatures needs JWKS fetching and
+RSA/EC JWT verification (another dependency tree), and accounts must come from somewhere.
+**Decision:** Authorization code flow with PKCE (`S256`), `state` kept in server memory (10 minutes) and bound to
+the browser by an HttpOnly `SameSite=Lax` cookie (Lax because the provider redirects back cross-site), and a
+`nonce`. The ID token is taken only from the token endpoint response, so, as OIDC Core 3.1.3.7 allows, TLS to the
+provider replaces the signature check; `iss`, `aud`, `exp` (60 s skew) and `nonce` are checked. The provider is
+reached with a client outside the outbound policy (the administrator configured it). An identity (`iss`, `sub`)
+is linked to one account in `identities` (migration 5); its first login creates the account (no password, no
+workspace, unless it is the very first account); a taken name gets a numeric suffix, so an identity never links
+to an existing account by name. `allowed_domains` admits only `email_verified` addresses of those domains.
+**Consequences:** No new dependencies. The issuer should be `https://`; a plain-HTTP issuer (allowed for local
+testing) would let a network attacker forge logins. Linking an existing local account to an identity, and
+signature checks for front-channel tokens, are not supported.
+

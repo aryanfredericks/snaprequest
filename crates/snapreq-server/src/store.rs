@@ -109,6 +109,16 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE runs ADD COLUMN workspace TEXT;
     UPDATE history SET workspace = 'default' WHERE collection IS NOT NULL;
     UPDATE runs SET workspace = 'default';",
+    // 5: identities of an OpenID Connect provider linked to accounts (P8.3)
+    "CREATE TABLE identities (
+        issuer TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        email TEXT,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (issuer, subject)
+    );
+    CREATE INDEX identities_user ON identities (user_id);",
 ];
 
 /// Whose history and runs: a user id, or `None` for the single user of a server without

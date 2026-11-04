@@ -30,6 +30,7 @@ async fn start(tag: &str, mode: AuthMode) -> Srv {
             mode,
             ..AuthConfig::default()
         },
+        oidc: None,
     };
     let server = Server::bind(config).await.unwrap();
     let addr = server.local_addr().unwrap();

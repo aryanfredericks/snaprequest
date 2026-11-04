@@ -3,8 +3,8 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1, P8.2 done)
-- **Current checkpoint:** P8.3, OIDC login
+- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1–P8.3 done)
+- **Current checkpoint:** P8.4, encrypted secret storage on the server
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,11 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P8.3 OIDC login (Keycloak, Authentik, Google). Open product decision: create accounts automatically
-   on a first OIDC login (and with which workspace, if any), or only link OIDC identities to accounts
-   made with `snapreq user add`. Tests need a small mock OIDC provider (discovery, JWKS, token endpoint).
+1. P8.4 encrypted secret storage, P8.5 hardening, P8.6 backup/restore, then the Phase 8 security
+   checklist (maintainer asked for all of Phase 8, then a report before Phase 9).
 2. P8.5 leftovers noted in ADR-023: login rate limiting, security headers, audit log, a `Host` check
    against DNS rebinding for a no-login loopback server.
+
+## OIDC notes (P8.3)
+- `oidc.rs`: `[oidc]` config (`OidcConfig`, secret also from `SNAPREQ_OIDC_CLIENT_SECRET`), discovery
+  cached, pending logins in memory (state → nonce + PKCE verifier, 10 min), `snapreq_oidc` cookie
+  (Lax, path `/api/v1/auth/oidc`), `Store::oidc_user` (migration 5 `identities`; new accounts get
+  password hash `!`, names get `-2` suffixes). ID token from the token endpoint, not signature-checked
+  (ADR-025). Errors redirect to `/?login_error=…`, shown by `LoginView`.
+- `tests/oidc.rs` has a mock provider (discovery, authorize redirect, token endpoint checking PKCE).
 
 ## Workspace notes (P8.2)
 - `workspaces.rs`: `Role` (viewer < editor < owner), Store methods (workspaces, members, set_member keeps
@@ -581,6 +588,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P8.3 — 2026-11-04 — OIDC login (code flow + PKCE, state cookie, nonce), automatic accounts with optional verified-domain allowlist, "Log in with …" button. ADR-025.
 - P8.2 — 2026-11-04 — Workspaces with owner/editor/viewer roles: directories under the workspace dir (`default` = the dir itself), members and roles in SQLite, `X-SnapReq-Workspace` header, workspace picker and dialog in the UI. ADR-024. Cross-user isolation and role rules tested in Rust and Playwright.
 - P8.1 — 2026-11-04 — Local accounts (Argon2id), session cookies, API tokens, `none`/`accounts` auth modes (remote binds default to accounts), per-user history/runs/flow states, CSRF header and WebSocket origin checks, `snapreq user` commands, login page and account dialog in the UI. ADR-023. Two-user isolation tested in Rust and Playwright.
 

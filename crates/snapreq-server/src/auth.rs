@@ -126,7 +126,12 @@ fn accounts_off() -> ApiError {
 fn is_public(path: &str) -> bool {
     matches!(
         path,
-        "/api/v1/version" | "/api/v1/openapi.json" | "/api/v1/auth/status" | "/api/v1/auth/login"
+        "/api/v1/version"
+            | "/api/v1/openapi.json"
+            | "/api/v1/auth/status"
+            | "/api/v1/auth/login"
+            | "/api/v1/auth/oidc/start"
+            | "/api/v1/auth/oidc/callback"
     )
 }
 
@@ -135,7 +140,7 @@ fn is_api(path: &str) -> bool {
 }
 
 /// The value of cookie `name`.
-fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -261,6 +266,19 @@ pub struct AuthStatus {
     pub mode: String,
     /// The logged-in user; `null` when not logged in or without accounts.
     pub user: Option<User>,
+    /// Single sign-on, if configured: the login button's label (`GET /auth/oidc/start` logs in).
+    pub oidc: Option<OidcInfo>,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct OidcInfo {
+    pub name: String,
+}
+
+fn oidc_info(state: &AppState) -> Option<OidcInfo> {
+    state.oidc.as_ref().map(|o| OidcInfo {
+        name: o.config.name.clone(),
+    })
 }
 
 #[utoipa::path(get, path = "/auth/status", tag = "auth", responses((status = 200, description = "Whether the server has accounts, and who is logged in", body = AuthStatus)))]
@@ -268,6 +286,7 @@ async fn status(State(state): Shared, identity: Option<Extension<Identity>>) -> 
     Json(AuthStatus {
         mode: state.config.auth.mode.as_str().to_owned(),
         user: identity.and_then(|Extension(i)| i.user),
+        oidc: oidc_info(&state),
     })
 }
 
@@ -286,7 +305,11 @@ impl std::fmt::Debug for LoginBody {
     }
 }
 
-fn session_cookie(state: &AppState, value: &str, max_age_secs: u64) -> ApiResult<HeaderValue> {
+pub(crate) fn session_cookie(
+    state: &AppState,
+    value: &str,
+    max_age_secs: u64,
+) -> ApiResult<HeaderValue> {
     let secure = if state.config.auth.secure_cookies {
         "; Secure"
     } else {
@@ -321,6 +344,7 @@ async fn login(State(state): Shared, Json(body): Json<LoginBody>) -> ApiResult<R
         Json(AuthStatus {
             mode: AuthMode::Accounts.as_str().to_owned(),
             user: Some(user),
+            oidc: oidc_info(&state),
         }),
     )
         .into_response())

@@ -12,6 +12,8 @@ class AuthState {
   user = $state<User | null>(null);
   /** The session ended while the app was open. */
   expired = $state(false);
+  /** Single sign-on, if the server offers it: the login button's label. */
+  oidc = $state<{ name: string } | null>(null);
   /** The server could not be asked. */
   error = $state<string | null>(null);
 
@@ -25,6 +27,7 @@ class AuthState {
       const s = unwrap(await api.GET("/api/v1/auth/status"));
       this.mode = s.mode === "accounts" ? "accounts" : "none";
       this.user = s.user ?? null;
+      this.oidc = s.oidc ?? null;
       this.error = null;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);

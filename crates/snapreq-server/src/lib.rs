@@ -8,6 +8,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod flow_states;
+pub mod oidc;
 pub mod outbound;
 pub mod store;
 pub mod tree;
@@ -67,6 +68,8 @@ pub struct AppState {
     pub client: snapreq_core::Client,
     /// States of recent flow runs, for resuming them at a step.
     pub flow_states: flow_states::FlowStates,
+    /// Single sign-on, when `[oidc]` is configured.
+    pub oidc: Option<oidc::Oidc>,
 }
 
 /// How often history is pruned while the server runs.
@@ -88,6 +91,7 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
             "/api/v1",
             api::router()
                 .merge(auth::router())
+                .merge(oidc::router())
                 .merge(workspaces::router()),
         )
         .split_for_parts();
@@ -246,6 +250,7 @@ impl Server {
             ),
             _ => {}
         }
+        let oidc = config.oidc.clone().map(oidc::Oidc::new).transpose()?;
         Ok(Self {
             listener,
             state: Arc::new(AppState {
@@ -253,6 +258,7 @@ impl Server {
                 store,
                 client,
                 flow_states: Default::default(),
+                oidc,
             }),
         })
     }

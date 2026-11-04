@@ -77,6 +77,71 @@
         }
       }
     },
+    "/api/v1/auth/oidc/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`GET /api/v1/auth/oidc/callback`: where the provider sends the browser back.",
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Logged in (session cookie set) and back to the UI, or back to the login page with `login_error`"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/start": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "`GET /api/v1/auth/oidc/start`: the login button's target.",
+        "operationId": "start",
+        "responses": {
+          "302": {
+            "description": "To the identity provider's login page"
+          },
+          "404": {
+            "description": "Single sign-on is not configured"
+          }
+        }
+      }
+    },
     "/api/v1/auth/password": {
       "post": {
         "tags": [
@@ -2578,6 +2643,17 @@
             "type": "string",
             "description": "`none` (no login) or `accounts`."
           },
+          "oidc": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OidcInfo",
+                "description": "Single sign-on, if configured: the login button's label (`GET /auth/oidc/start` logs in)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "user": {
             "oneOf": [
               {
@@ -2915,6 +2991,17 @@
           }
         },
         "additionalProperties": false
+      },
+      "OidcInfo": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "PasswordBody": {
         "type": "object",

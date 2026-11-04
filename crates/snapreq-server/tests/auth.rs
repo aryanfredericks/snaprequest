@@ -32,6 +32,7 @@ async fn start(tag: &str, mode: AuthMode) -> Srv {
             mode,
             ..AuthConfig::default()
         },
+        oidc: None,
     };
     let server = Server::bind(config).await.unwrap();
     let addr = server.local_addr().unwrap();
@@ -128,7 +129,7 @@ async fn without_accounts_everyone_is_the_single_user() {
     let anyone = Caller::script(&srv, None);
     assert_eq!(
         anyone.call("GET", "/auth/status", None).await,
-        (200, json!({ "mode": "none", "user": null }))
+        (200, json!({ "mode": "none", "user": null, "oidc": null }))
     );
     let id = anyone.execute(&srv).await;
     assert_eq!(
@@ -153,7 +154,10 @@ async fn two_users_cannot_see_each_others_history_and_runs() {
     assert_eq!(stranger.call("GET", "/collections", None).await.0, 401);
     assert_eq!(
         stranger.call("GET", "/auth/status", None).await,
-        (200, json!({ "mode": "accounts", "user": null }))
+        (
+            200,
+            json!({ "mode": "accounts", "user": null, "oidc": null })
+        )
     );
     assert_eq!(stranger.call("GET", "/version", None).await.0, 200);
     let (status, doc) = stranger.login("ana", "wrong-password").await;

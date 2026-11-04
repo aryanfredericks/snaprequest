@@ -6,6 +6,16 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
 
+  // A failed single sign-on comes back as `/?login_error=…`.
+  $effect(() => {
+    const params = new URLSearchParams(location.search);
+    const message = params.get("login_error");
+    if (message) {
+      error = message;
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  });
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     busy = true;
@@ -34,6 +44,10 @@
     <input id="login-password" type="password" bind:value={password} autocomplete="current-password" required />
     {#if error}<p class="err" role="alert">{error}</p>{/if}
     <button type="submit" class="primary" disabled={busy}>{busy ? "Logging in…" : "Log in"}</button>
+    {#if auth.oidc}
+      <div class="or" aria-hidden="true">or</div>
+      <a class="sso" href="/api/v1/auth/oidc/start">Log in with {auth.oidc.name}</a>
+    {/if}
     <p class="hint">Accounts are created on the server with <code>snapreq user add</code>.</p>
   </form>
 </main>
@@ -80,6 +94,25 @@
     border-radius: 6px;
     background: var(--accent-bg);
     font-size: 0.85rem;
+  }
+  .or {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 0.4rem;
+  }
+  .sso {
+    display: block;
+    text-align: center;
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    text-decoration: none;
+  }
+  .sso:hover {
+    background: var(--bg-hover);
   }
   .hint {
     margin: 0.8rem 0 0;

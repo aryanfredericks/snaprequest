@@ -33,6 +33,54 @@ pub struct Config {
     pub outbound: OutboundPolicy,
     /// Who may use the server.
     pub auth: AuthConfig,
+    /// Login through an OpenID Connect provider (`[oidc]`), with accounts on.
+    pub oidc: Option<OidcConfig>,
+}
+
+/// `[oidc]`: single sign-on through an OpenID Connect provider (Keycloak, Authentik, Google …).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OidcConfig {
+    /// Issuer URL; `<issuer>/.well-known/openid-configuration` must describe it.
+    pub issuer: String,
+    pub client_id: String,
+    /// Also from `SNAPREQ_OIDC_CLIENT_SECRET` (which wins).
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// This server's callback as the provider knows it:
+    /// `https://snapreq.example.com/api/v1/auth/oidc/callback`.
+    pub redirect_url: String,
+    /// Label of the login button ("Log in with …").
+    #[serde(default = "default_oidc_name")]
+    pub name: String,
+    #[serde(default = "default_scopes")]
+    pub scopes: Vec<String>,
+    /// If set, only verified e-mail addresses of these domains may log in.
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+}
+
+fn default_oidc_name() -> String {
+    "single sign-on".into()
+}
+
+fn default_scopes() -> Vec<String> {
+    ["openid", "email", "profile"].map(String::from).to_vec()
+}
+
+impl std::fmt::Debug for OidcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcConfig")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("redirect_url", &self.redirect_url)
+            .field("allowed_domains", &self.allowed_domains)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Whether the server has accounts.
@@ -121,6 +169,7 @@ struct FileConfig {
     outbound: OutboundConfig,
     #[serde(default)]
     auth: AuthFile,
+    oidc: Option<OidcConfig>,
 }
 
 /// Values given on the command line; `None` means "not given".
@@ -236,7 +285,41 @@ impl Config {
         // Cloud metadata endpoints are blocked by default whenever others can reach the server.
         let outbound = OutboundPolicy::from_config(&file.outbound, allow_remote || remote)
             .map_err(Error::Config)?;
+        let oidc = match file.oidc {
+            Some(mut o) => {
+                if let Some(secret) = env("SNAPREQ_OIDC_CLIENT_SECRET") {
+                    o.client_secret = Some(secret);
+                }
+                for (key, value) in [("issuer", &o.issuer), ("redirect_url", &o.redirect_url)] {
+                    let ok = url::Url::parse(value).is_ok_and(|u| {
+                        matches!(u.scheme(), "http" | "https") && u.host().is_some()
+                    });
+                    if !ok {
+                        return Err(Error::Config(format!(
+                            "oidc.{key} must be an http(s) URL, not `{value}`"
+                        )));
+                    }
+                }
+                if !o.scopes.iter().any(|s| s == "openid") {
+                    o.scopes.insert(0, "openid".into());
+                }
+                o.allowed_domains = o
+                    .allowed_domains
+                    .iter()
+                    .map(|d| d.trim().trim_start_matches('@').to_ascii_lowercase())
+                    .collect();
+                if mode != AuthMode::Accounts {
+                    return Err(Error::Config(
+                        "[oidc] needs accounts: set auth.mode = \"accounts\" (or --auth accounts)"
+                            .into(),
+                    ));
+                }
+                Some(o)
+            }
+            None => None,
+        };
         let config = Self {
+            oidc,
             auth,
             outbound,
             bind,
@@ -419,6 +502,50 @@ mod tests {
                 .auth
                 .mode,
             AuthMode::None
+        );
+    }
+
+    #[test]
+    fn oidc_settings() {
+        let dir = temp("oidc");
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[auth]\nmode = \"accounts\"\n[oidc]\nissuer = \"https://idp.example.com/realms/x\"\nclient_id = \"snapreq\"\nredirect_url = \"https://snapreq.example.com/api/v1/auth/oidc/callback\"\nscopes = [\"email\"]\nallowed_domains = [\"@Example.com\"]\n",
+        )
+        .unwrap();
+        let c = Config::load(
+            &Overrides::default(),
+            env(&[("SNAPREQ_OIDC_CLIENT_SECRET", "s3cret")]),
+            Some(dir.clone()),
+        )
+        .unwrap();
+        let o = c.oidc.unwrap();
+        assert_eq!(o.client_secret.as_deref(), Some("s3cret"));
+        assert_eq!(o.scopes, ["openid", "email"]);
+        assert_eq!(o.allowed_domains, ["example.com"]);
+        assert_eq!(o.name, "single sign-on");
+        assert!(!format!("{o:?}").contains("s3cret"));
+        // Needs accounts.
+        let none = Overrides {
+            auth: Some("none".into()),
+            ..Overrides::default()
+        };
+        assert!(
+            Config::load(&none, env(&[]), Some(dir.clone()))
+                .unwrap_err()
+                .to_string()
+                .contains("[oidc] needs accounts")
+        );
+        std::fs::write(
+            dir.join(CONFIG_FILE),
+            "[auth]\nmode = \"accounts\"\n[oidc]\nissuer = \"idp\"\nclient_id = \"x\"\nredirect_url = \"https://s/cb\"\n",
+        )
+        .unwrap();
+        assert!(
+            Config::load(&Overrides::default(), env(&[]), Some(dir))
+                .unwrap_err()
+                .to_string()
+                .contains("oidc.issuer must be an http(s) URL")
         );
     }
 
