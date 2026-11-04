@@ -175,6 +175,24 @@ The CLI opens sealed values with `SNAPREQ_SECRET_KEY` or, on the server's machin
 default data directory (or `SNAPREQ_DATA_DIR`); it warns when it cannot. `snapreq secret set` seals only
 when `SNAPREQ_SECRET_KEY` is set.
 
+## Backup and restore
+
+```sh
+snapreq backup snapreq-backup.tar.gz                 # safe while the server runs
+docker exec snapreq snapreq backup - > snapreq-backup.tar.gz
+snapreq restore snapreq-backup.tar.gz --data-dir /new/data   # into empty directories; stop the server first
+```
+
+A backup is a `.tar.gz` with a manifest, a consistent snapshot of the database (accounts, workspaces,
+history, runs, audit log; taken with SQLite's `VACUUM INTO`), `config.toml` and the whole workspace
+(collections and their sealed `.secrets`). The **secret key is not included** unless `--with-key`: anyone
+with a backup that includes the key can open the secret values in it. Keep the key (or
+`SNAPREQ_SECRET_KEY`) somewhere else, and put it back before the restored server starts, or the sealed
+values stay unset. `restore` refuses directories that already hold data unless `--force` (which replaces
+the database, config, key and the whole workspace), checks the archive before touching anything, and
+refuses links and paths outside the archive. A backup of an older version is migrated at the next start;
+a newer one is refused. `--data-dir`, `--workspace` and `--config` work as for `snapreq serve`.
+
 ## Outbound request policy
 
 The server sends requests for whoever calls its API, so it can be used to reach anything the machine

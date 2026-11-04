@@ -185,3 +185,56 @@ async fn accounts_are_managed_from_the_command_line() {
     child.kill().unwrap();
     let _ = child.wait();
 }
+
+#[test]
+fn backup_and_restore_from_the_command_line() {
+    let root = std::env::temp_dir().join(format!("snapreq-cli-backup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let (old, new) = (root.join("old"), root.join("new"));
+    assert_eq!(user(&old, &["add", "ana"], "ana-password\n").0, 0);
+    std::fs::create_dir_all(old.join("workspace/shop")).unwrap();
+    std::fs::write(
+        old.join("workspace/shop/snapreq.toml"),
+        "format = 1\nname = \"Shop\"\n",
+    )
+    .unwrap();
+    let file = root.join("b.tar.gz");
+    let out = snapreq()
+        .args(["backup"])
+        .arg(&file)
+        .arg("--data-dir")
+        .arg(&old)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("secret key is not included"));
+    let out = snapreq()
+        .args(["restore"])
+        .arg(&file)
+        .arg("--data-dir")
+        .arg(&new)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(user(&new, &["list"], "").1, "ana\n");
+    assert!(new.join("workspace/shop/snapreq.toml").is_file());
+    let again = snapreq()
+        .args(["restore"])
+        .arg(&file)
+        .arg("--data-dir")
+        .arg(&new)
+        .output()
+        .unwrap();
+    assert_eq!(again.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("--force"));
+}

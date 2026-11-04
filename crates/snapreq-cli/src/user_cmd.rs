@@ -6,7 +6,7 @@ use snapreq_server::store::{DB_FILE, Store};
 
 use snapreq_server::security::Audit;
 
-use crate::cli::{AuditArgs, UserArgs, UserCommand};
+use crate::cli::{AuditArgs, BackupArgs, RestoreArgs, ServerDirs, UserArgs, UserCommand};
 use crate::exit;
 
 /// Runs a `snapreq user` command; returns the exit code.
@@ -63,6 +63,123 @@ pub(crate) async fn audit(args: &AuditArgs) -> u8 {
             exit::INVALID_REQUEST
         }
     }
+}
+
+fn report(result: anyhow::Result<()>) -> u8 {
+    match result {
+        Ok(()) => exit::OK,
+        Err(e) => {
+            eprintln!("error: {e}");
+            exit::INVALID_REQUEST
+        }
+    }
+}
+
+fn server_config(dirs: &ServerDirs) -> anyhow::Result<snapreq_server::Config> {
+    let env = |k: &str| std::env::var(k).ok();
+    let overrides = snapreq_server::Overrides {
+        data_dir: dirs.data_dir.clone(),
+        workspace: dirs.workspace.clone(),
+        config_file: dirs.config.clone(),
+        ..Default::default()
+    };
+    Ok(snapreq_server::Config::load(
+        &overrides,
+        env,
+        snapreq_server::config::default_data_dir(env),
+    )?)
+}
+
+/// `snapreq backup`.
+pub(crate) async fn backup(args: &BackupArgs) -> u8 {
+    report(
+        async {
+            let config = server_config(&args.dirs)?;
+            let db = config.data_dir.join(DB_FILE);
+            if !db.is_file() {
+                anyhow::bail!("no server data in `{}`", config.data_dir.display());
+            }
+            let store = Store::open(&db).await?;
+            let manifest = if args.file.as_os_str() == "-" {
+                let out = std::io::BufWriter::new(std::io::stdout().lock());
+                snapreq_server::backup::create(&config, &store, out, args.with_key).await?
+            } else {
+                // Written aside and renamed, so a failed backup never looks complete.
+                let tmp = args.file.with_extension("partial");
+                let file = std::fs::File::create(&tmp)
+                    .map_err(|e| anyhow::anyhow!("cannot write `{}`: {e}", tmp.display()))?;
+                let made = snapreq_server::backup::create(
+                    &config,
+                    &store,
+                    std::io::BufWriter::new(file),
+                    args.with_key,
+                )
+                .await;
+                match made {
+                    Ok(m) => {
+                        std::fs::rename(&tmp, &args.file)?;
+                        m
+                    }
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&tmp);
+                        return Err(e.into());
+                    }
+                }
+            };
+            store
+                .audit(cli_event("server.backup", &args.file.to_string_lossy()))
+                .await;
+            eprintln!(
+                "backed up the database (schema {}) and {} workspace files{}",
+                manifest.schema,
+                manifest.workspace_files,
+                if manifest.includes_key {
+                    ", with the secret key: keep this file safe"
+                } else {
+                    "; the secret key is not included: keep it (or SNAPREQ_SECRET_KEY) elsewhere"
+                }
+            );
+            Ok(())
+        }
+        .await,
+    )
+}
+
+/// `snapreq restore`.
+pub(crate) fn restore(args: &RestoreArgs) -> u8 {
+    report((|| {
+        let config = server_config(&args.dirs)?;
+        let manifest = if args.file.as_os_str() == "-" {
+            snapreq_server::backup::restore(&config, std::io::stdin().lock(), args.force)?
+        } else {
+            let file = std::fs::File::open(&args.file)
+                .map_err(|e| anyhow::anyhow!("cannot read `{}`: {e}", args.file.display()))?;
+            snapreq_server::backup::restore(&config, std::io::BufReader::new(file), args.force)?
+        };
+        eprintln!(
+            "restored a backup of SnapRequest {} ({} workspace files) into {}",
+            manifest.snapreq,
+            manifest.workspace_files,
+            config.data_dir.display()
+        );
+        if !manifest.includes_key
+            && !config
+                .data_dir
+                .join(snapreq_collection::sealed::KEY_FILE)
+                .is_file()
+            && std::env::var(snapreq_collection::sealed::KEY_ENV).is_err()
+        {
+            eprintln!(
+                "note: the backup has no secret key; put the old key into {} or set {} before starting the server, or sealed secret values stay unset",
+                config
+                    .data_dir
+                    .join(snapreq_collection::sealed::KEY_FILE)
+                    .display(),
+                snapreq_collection::sealed::KEY_ENV
+            );
+        }
+        Ok(())
+    })())
 }
 
 /// The server's database and configuration.

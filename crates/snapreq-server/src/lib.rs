@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod api;
 pub mod auth;
+pub mod backup;
 pub mod config;
 pub mod flow_states;
 pub mod oidc;

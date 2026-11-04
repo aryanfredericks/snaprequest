@@ -101,6 +101,8 @@ async fn main() -> ExitCode {
         ),
         Command::User(args) => user_cmd::run(&args).await,
         Command::Audit(args) => user_cmd::audit(&args).await,
+        Command::Backup(args) => user_cmd::backup(&args).await,
+        Command::Restore(args) => user_cmd::restore(&args),
         Command::Secret(SecretCommand::Set {
             name,
             env,

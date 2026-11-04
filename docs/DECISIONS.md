@@ -319,3 +319,16 @@ sees all, as there is no admin role.
 guess against many names from many addresses is slowed only by Argon2. Per-request rate limits for authenticated
 users were not added (self-hosted, users are known).
 
+## ADR-028: Backups are tar.gz archives with a VACUUM INTO snapshot; the key stays out by default
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P8.6: backup and restore of the full data directory. The database is written while the server
+runs (WAL mode), and the secret key (ADR-026) protects the sealed values that a backup also contains.
+**Decision:** `snapreq backup` writes `manifest.json`, `data/snapreq.db` (a `VACUUM INTO` snapshot, consistent while
+serving), `data/config.toml` and `workspace/…` into a gzip tar (`tar` crate, MIT/Apache; `flate2` was already
+used). The key is added only with `--with-key`, so by default a stolen backup reveals no secret values.
+`snapreq restore` unpacks into a staging directory inside the data directory first (`unpack_in` refuses absolute
+paths and `..`; links and special entries are refused), checks the manifest and database, then replaces the
+database, config, key and workspace; non-empty targets need `--force`. Both are CLI commands on the server
+machine: there is no admin role for an API endpoint, and Docker users run them with `docker exec`.
+**Consequences:** One file to copy off-site; restores are all-or-nothing per archive. The key needs its own backup.
+

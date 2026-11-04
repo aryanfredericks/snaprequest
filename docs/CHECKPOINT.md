@@ -3,8 +3,9 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 8 Multi-user and hardening (Phases 0–7 complete; P8.1–P8.5 done)
-- **Current checkpoint:** P8.6, backup and restore
+- **Phase:** 9 Interoperability and scripting, next (Phases 0–8 complete)
+- **Current checkpoint:** P9.1, import (cURL, Postman v2.1, OpenAPI 3.x, Insomnia, HAR, Hurl). The maintainer
+  asked for a report after Phase 8 before Phase 9 starts.
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,8 +26,15 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P8.4 encrypted secret storage, P8.5 hardening, P8.6 backup/restore, then the Phase 8 security
-   checklist (maintainer asked for all of Phase 8, then a report before Phase 9).
+1. Wait for the maintainer's go-ahead, then P9.1 import.
+2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
+   an admin role (server-wide audit, recovering ownerless workspaces).
+
+## Backup notes (P8.6)
+- `backup.rs`: `create` (VACUUM INTO snapshot, manifest, config, workspace, key with `--with-key`),
+  `restore` (staging inside the data dir, `unpack_in`, refuses links, `--force` to replace). CLI
+  `snapreq backup FILE|-` / `snapreq restore FILE|-` (`user_cmd.rs`, `ServerDirs`). ADR-028.
+- Phase 8 acceptance: docs/SECURITY-REVIEW.md (checklist with evidence, accepted risks).
 
 ## Hardening notes (P8.5)
 - `security.rs`: `Limiter`/`Limits` (failures only: login per name 10 and per IP 50, unknown tokens per
@@ -603,6 +611,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P8.6 — 2026-11-04 — Backup and restore (`snapreq backup|restore`, consistent snapshot while serving, key excluded by default, safe unpacking). ADR-028. Security review checklist completed (docs/SECURITY-REVIEW.md). **Phase 8 complete.**
 - P8.5 — 2026-11-04 — Audit log (API, CLI, UI), failure rate limits, security headers, Host allowlist against DNS rebinding. ADR-027.
 - P8.4 — 2026-11-04 — Secret values sealed at rest (AES-256-GCM, key from env or data dir), existing plain values sealed at start, CLI opens them; viewers limited to saved requests without overrides. ADR-026.
 - P8.3 — 2026-11-04 — OIDC login (code flow + PKCE, state cookie, nonce), automatic accounts with optional verified-domain allowlist, "Log in with …" button. ADR-025.
@@ -633,3 +642,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-03 (21):** macOS runners were often unavailable for pushes (jobs queued, then cancelled without running). Maintainer chose: macOS tests run nightly (`.github/workflows/nightly.yml`, 02:17 UTC, also by hand); per-push CI tests Ubuntu and Windows.
 - **2026-11-04 (22):** P8.1 done: accounts, sessions, API tokens, per-user history and runs, CSRF and WebSocket origin checks, `snapreq user`, UI login and account dialog; ADR-023 (remote binds default to accounts, `--allow-remote` keeps no-login for trusted networks and the Docker image). scripts/check.sh and the full Playwright suite pass.
 - **2026-11-04 (23):** P8.2 done: workspaces with roles (maintainer chose subdirectory layout and "any user creates workspaces"; existing collections stay in place as `default`), ADR-024. Stopped before P8.3 for the OIDC account-provisioning decision.
+- **2026-11-04 (24):** Phase 8 complete (P8.3–P8.6 after the maintainer chose automatic OIDC accounts with a domain allowlist). Found and fixed a viewer secret-exfiltration path in P8.4. ADR-025–028, docs/SECURITY-REVIEW.md. Stopped for the maintainer's report before Phase 9.

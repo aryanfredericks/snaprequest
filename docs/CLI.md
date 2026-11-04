@@ -109,6 +109,8 @@ snapreq user remove ana                              # with her tokens, history,
 ```
 
 `snapreq audit [-n 50]` prints the server's audit log (docs/SERVER.md, "Hardening").
+`snapreq backup FILE|- [--with-key]` and `snapreq restore FILE|- [--force]` back up and restore the
+server's data (docs/SERVER.md, "Backup and restore").
 
 They work on the server's database (`--data-dir`, `--config` and the environment variables as for
 `snapreq serve`), also while the server runs. User names are case-insensitive; passwords need at least

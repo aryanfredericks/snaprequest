@@ -81,6 +81,64 @@ pub(crate) enum Command {
 
     /// Show the server's audit log (logins, tokens, workspaces, members, secrets), newest first.
     Audit(AuditArgs),
+
+    /// Back up the server's data: database, config and workspace in one .tar.gz.
+    ///
+    /// Safe while the server runs. The secret key is left out unless --with-key: keep it
+    /// elsewhere, or sealed secret values cannot be opened after a restore.
+    ///
+    /// Examples:
+    ///   snapreq backup snapreq-backup.tar.gz
+    ///   docker exec snapreq snapreq backup - > snapreq-backup.tar.gz
+    #[command(verbatim_doc_comment)]
+    Backup(BackupArgs),
+
+    /// Restore a backup made with `snapreq backup` (stop the server first).
+    Restore(RestoreArgs),
+}
+
+/// Where the server's state is (as for `snapreq serve`).
+#[derive(Debug, Args)]
+pub(crate) struct ServerDirs {
+    /// The server's data directory (env `SNAPREQ_DATA_DIR`; default: as `snapreq serve`).
+    #[arg(long, value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    /// The server's workspace (env `SNAPREQ_WORKSPACE`; default: as `snapreq serve`).
+    #[arg(long, value_name = "DIR")]
+    pub workspace: Option<PathBuf>,
+
+    /// The server's config file (env `SNAPREQ_CONFIG`).
+    #[arg(long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct BackupArgs {
+    /// Archive to write (`-` for stdout).
+    #[arg(value_name = "FILE")]
+    pub file: PathBuf,
+
+    /// Include the secret key (anyone with the backup can then open sealed secret values).
+    #[arg(long)]
+    pub with_key: bool,
+
+    #[command(flatten)]
+    pub dirs: ServerDirs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RestoreArgs {
+    /// Archive to read (`-` for stdin).
+    #[arg(value_name = "FILE")]
+    pub file: PathBuf,
+
+    /// Replace existing data (the database, config, key and the whole workspace).
+    #[arg(long)]
+    pub force: bool,
+
+    #[command(flatten)]
+    pub dirs: ServerDirs,
 }
 
 #[derive(Debug, Args)]
