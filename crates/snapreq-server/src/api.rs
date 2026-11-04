@@ -194,7 +194,7 @@ pub(crate) fn key_path(key: &str, suffix: &str) -> ApiResult<PathBuf> {
 
 /// Viewers send saved requests only: unsaved edits, variables and data rows could point the
 /// workspace's secrets at another host.
-fn viewer_overrides(space: &Space) -> ApiError {
+pub(crate) fn viewer_overrides(space: &Space) -> ApiError {
     ApiError::new(
         StatusCode::FORBIDDEN,
         "forbidden",

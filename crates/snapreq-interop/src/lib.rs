@@ -10,7 +10,9 @@
 
 mod curl;
 mod error;
+pub mod export;
 mod har;
+pub mod har_export;
 mod hurl;
 mod insomnia;
 mod model;

@@ -1146,3 +1146,147 @@ async fn import_a_curl_command_from_stdin_keeps_the_token_secret() {
     .await;
     assert!(err(&o).contains("unknown format `yaml`"), "{}", err(&o));
 }
+
+#[tokio::test]
+async fn send_export_prints_code_with_secrets_from_the_environment() {
+    let dir = collection("export");
+    let d = dir.to_str().unwrap();
+    let o = run(
+        &[
+            "send",
+            "-c",
+            d,
+            "users/create-user",
+            "-e",
+            "dev",
+            "--export",
+            "curl",
+        ],
+        None,
+        None,
+        &[("SNAPREQ_SECRET_TOKEN", "tok-from-env")],
+    )
+    .await;
+    assert!(o.status.success(), "{}", err(&o));
+    let text = out(&o);
+    assert!(
+        text.starts_with("curl \\\n  'http://localhost:8080/users'"),
+        "{text}"
+    );
+    assert!(
+        text.contains("-H \"Authorization: Bearer ${SNAPREQ_SECRET_TOKEN}\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("--data-raw '{\n  \"name\": \"snap\""),
+        "{text}"
+    );
+    assert!(!text.contains("tok-from-env"));
+    assert!(!text.contains(" -L"), "follow_redirects = false: {text}");
+
+    // A --var value for a declared secret is not written either.
+    let o = run(
+        &[
+            "send",
+            "-c",
+            d,
+            "users/create-user",
+            "-e",
+            "dev",
+            "--var",
+            "token=cli-secret",
+            "--export",
+            "python",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let text = out(&o);
+    assert!(
+        text.contains("os.environ[\"SNAPREQ_SECRET_TOKEN\"]"),
+        "{text}"
+    );
+    assert!(!text.contains("cli-secret"), "{text}");
+
+    // A plain URL; nothing is sent.
+    let o = run(
+        &[
+            "send",
+            "PUT",
+            "https://a.test/x",
+            "-H",
+            "X-A: 1",
+            "--export",
+            "javascript",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert!(
+        out(&o).contains("await fetch(\"https://a.test/x\", {\n  method: \"PUT\""),
+        "{}",
+        out(&o)
+    );
+    let o = run(
+        &["send", "https://a.test", "--export", "cobol"],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert!(!o.status.success());
+    assert!(err(&o).contains("unknown export format"), "{}", err(&o));
+}
+
+#[tokio::test]
+async fn run_writes_a_har_report() {
+    let addr = server().await;
+    let dir = collection("har");
+    let har = dir.join("out/run.har");
+    let o = run(
+        &[
+            "run",
+            "-c",
+            dir.to_str().unwrap(),
+            "users",
+            "-e",
+            "dev",
+            "--var",
+            &format!("base_url=http://{addr}"),
+            "--var",
+            "token=har-secret-tok",
+            "--report",
+            &format!("har:{}", har.display()),
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert!(err(&o).contains("report written to"), "{}", err(&o));
+    let text = std::fs::read_to_string(&har).unwrap();
+    assert!(!text.contains("har-secret-tok"), "{text}");
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let entries = doc["log"]["entries"].as_array().unwrap();
+    assert!(entries.len() >= 2, "{text}");
+    let create = entries
+        .iter()
+        .find(|e| e["request"]["method"] == "POST")
+        .unwrap();
+    assert_eq!(create["response"]["status"], 200);
+    assert!(
+        create["response"]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("POST /users")
+    );
+    assert_eq!(
+        create["request"]["postData"]["mimeType"],
+        "application/json"
+    );
+    assert_eq!(doc["log"]["creator"]["name"], "SnapRequest");
+}

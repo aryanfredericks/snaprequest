@@ -214,17 +214,27 @@ async fn run_send(args: &SendArgs) -> u8 {
     };
 
     let built = collection_cmd::resolve_target(args).and_then(|target| match target {
-        collection_cmd::Target::Url => {
-            send::build_request(args).map(|r| (r, Default::default(), Default::default()))
-        }
+        collection_cmd::Target::Url => send::build_request(args)
+            .map(|r| (r, Default::default(), Default::default(), Vec::new())),
         collection_cmd::Target::Collection { root, key } => {
             collection_cmd::build(&root, &key, args)
         }
     });
-    let (mut request, checks, capture_spec) = match built {
+    let (mut request, checks, capture_spec, named_secrets) = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
     };
+    if let Some(format) = &args.export {
+        let target = match format.parse::<snapreq_interop::export::Target>() {
+            Ok(t) => t,
+            Err(e) => return invalid(e),
+        };
+        print!(
+            "{}",
+            snapreq_interop::export::snippet(&request, target, &named_secrets)
+        );
+        return exit::OK;
+    }
     // Invalid JSONPaths, patterns or schema files are reported before anything is sent.
     let assertions = match snapreq_test::Assertions::compile(&checks) {
         Ok(a) => a,

@@ -354,6 +354,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/history/{id}/har": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["history_har"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/requests/execute": {
         parameters: {
             query?: never;
@@ -365,6 +381,22 @@ export interface paths {
         put?: never;
         /** `POST /api/v1/requests/execute` */
         post: operations["execute_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/requests/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["export_request"];
         delete?: never;
         options?: never;
         head?: never;
@@ -602,6 +634,21 @@ export interface components {
             /** @description A complete request (the core JSON model). */
             request?: Record<string, unknown> | null;
             /** @description Variables for this execution (highest precedence). */
+            vars?: {
+                [key: string]: string;
+            };
+        };
+        ExportBody: {
+            /** @description Or a collection request: collection id and request key (as for `/requests/execute`). */
+            collection?: string | null;
+            env?: string | null;
+            /** @description Unsaved contents of the request file. */
+            file?: Record<string, unknown> | null;
+            /** @description `curl`, `python`, `javascript`, `go` or `rust`. */
+            format: string;
+            key?: string | null;
+            /** @description A complete request (the core JSON model). */
+            request?: Record<string, unknown> | null;
             vars?: {
                 [key: string]: string;
             };
@@ -2343,6 +2390,38 @@ export interface operations {
             };
         };
     };
+    history_har: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description History entry id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The exchange as an HTTP Archive (HAR 1.2), as a download */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     execute_request: {
         parameters: {
             query?: never;
@@ -2384,6 +2463,57 @@ export interface operations {
                 };
             };
             /** @description Does not validate */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    export_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportBody"];
+            };
+        };
+        responses: {
+            /** @description `{ format, content }`: the request as code; secret values are read from `SNAPREQ_SECRET_<NAME>` environment variables */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Does not build */
             422: {
                 headers: {
                     [name: string]: unknown;

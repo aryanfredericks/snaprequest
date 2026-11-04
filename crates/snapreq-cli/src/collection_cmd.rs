@@ -104,11 +104,7 @@ pub(crate) fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
 /// Builds the collection request `key`, then applies command-line overrides.
 /// Collection warnings are printed to stderr.
 /// Builds the request, its `[assert]` checks (empty with `--no-assert`) and its captures.
-pub(crate) fn build(
-    root: &Path,
-    key: &str,
-    args: &SendArgs,
-) -> Result<(Request, AssertSpec, Captures), ArgError> {
+pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Built, ArgError> {
     let (collection, warnings) = Collection::load(root).map_err(|e| ArgError(e.to_string()))?;
     for w in &warnings {
         eprintln!("warning: {w}");
@@ -151,8 +147,18 @@ pub(crate) fn build(
         .find(key)
         .map(|item| item.file.capture.clone())
         .unwrap_or_default();
-    Ok((req, checks, captures))
+    // Names of secret values, so an export can read them from `SNAPREQ_SECRET_<NAME>`.
+    let named = scopes
+        .visible()
+        .into_iter()
+        .filter(|(v, _)| v.secret || scopes.is_declared_secret(&v.name))
+        .filter_map(|(v, _)| Some((v.name.clone(), v.value.clone()?)))
+        .collect();
+    Ok((req, checks, captures, named))
 }
+
+/// A built request with its checks, captures and named secret values.
+pub(crate) type Built = (Request, AssertSpec, Captures, Vec<(String, String)>);
 
 /// `snapreq ls`.
 pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError> {

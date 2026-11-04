@@ -198,7 +198,7 @@ pub(crate) fn tidy_headers(headers: &mut KeyValues, body: Option<&BodySpec>) {
 }
 
 /// Header names whose values are credentials.
-fn is_credential_header(name: &str) -> bool {
+pub(crate) fn is_credential_header(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     matches!(
         n.as_str(),

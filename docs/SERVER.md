@@ -271,12 +271,21 @@ Two optional fields:
 - `"capture_wire": true`: record the raw bytes sent and received (a `wire` trace event), whatever the
   request's settings say. Credentials in the wire log are redacted like everywhere else.
 
+### Requests as code
+
+`POST /api/v1/requests/export` takes the same body as `/requests/execute` (without `capture_wire`) plus
+`"format": "curl" | "python" | "javascript" | "go" | "rust"`, builds the request the same way without sending
+it, and returns `{ "format", "content" }`. Variables are filled in; secret values are not: the code reads
+them from `SNAPREQ_SECRET_<NAME>` environment variables (`${SNAPREQ_SECRET_TOKEN}` in a cURL command).
+Viewers can export saved requests, not unsaved edits or variables, as for execute.
+
 ## History
 
 | Method and path | Result |
 |---|---|
 | `GET /api/v1/history?url=&method=&status=&class=&failed=&collection=&before=&limit=` | `{ "entries": [summary…] }`, newest first. `url` matches a substring (case-insensitive); `class` is a status class (`4` = 400–499); `failed=true` lists only requests without a response (`false`: only responses); `before` is an id for paging; `limit` 1–1000 (default 50). |
 | `GET /api/v1/history/{id}` | The summary plus the stored `request` and `response` (redacted). |
+| `GET /api/v1/history/{id}/har` | The exchange as an HTTP Archive (HAR 1.2), as a download. History is stored redacted, and credential headers are `<redacted>` in any case. |
 | `DELETE /api/v1/history/{id}` | 204 |
 | `DELETE /api/v1/history` | `{ "deleted": n }`: clears the history |
 

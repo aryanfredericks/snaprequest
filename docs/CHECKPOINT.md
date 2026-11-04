@@ -4,8 +4,8 @@
 
 ## Current position
 - **Phase:** 9 Interoperability and scripting (Phases 0–8 complete)
-- **Current checkpoint:** P9.2, export (cURL, HAR, code snippets: Python requests, JS fetch, Go, Rust reqwest).
-  P9.1 import is done.
+- **Current checkpoint:** P9.3, pre-request and test scripts in JS (rquickjs) with a `snapreq.*` API and a
+  sandbox. P9.1 import and P9.2 export are done.
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -26,11 +26,23 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P9.2 export: cURL, HAR and code snippets, in `snapreq-interop` (an `export` module next to the importers),
-   from the CLI and the web UI (a "Copy as…" menu on requests and history entries). Then P9.3 scripting (rquickjs)
-   and P9.4 Postman script translation (the Newman sample's `pm.test` scripts are the obvious first test).
+1. P9.3 scripting (rquickjs): pre-request and test scripts with a `snapreq.*` API (variables, request,
+   response, expect), time and memory limits, no file or network access; tests must prove the sandbox.
+2. P9.4 Postman script translation during import (the Newman sample's `pm.test` scripts are the first test).
 2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
    an admin role (server-wide audit, recovering ownerless workspaces).
+
+## Export notes (P9.2)
+- `snapreq-interop::export` (`Target`, `snippet(req, target, named_secrets)`): a `Spec` (URL with query, headers
+  incl. auth headers, basic/digest/aws, body) rendered per target; secret values become `Part::Env` references to
+  `SNAPREQ_SECRET_<NAME>` (named from scopes, also `--var` values of declared secrets) or `SNAPREQ_SECRET_n`.
+  `har_export` (`from_exchanges` for CLI runs, `from_history` for stored entries; credential headers redacted).
+  ADR-030.
+- CLI `send --export FORMAT` (`collection_cmd::build` now returns named secrets), `run --report har:FILE`.
+  Server `export.rs`: `POST /api/v1/requests/export`, `GET /api/v1/history/{id}/har`. UI: `ExportDialog`
+  ("Code" button in the request builder, format remembered in localStorage), "Download HAR" in history entries.
+- Generated Python/JS/Rust/shell were syntax-checked by hand (ast, node --check, rustfmt, bash -n); Go is not
+  installed locally.
 
 ## Import notes (P9.1)
 - New crate `snapreq-interop` (ADR-029): `detect`, `import(text, Options { format, name })`,
@@ -628,6 +640,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P9.2 — 2026-11-04 — Export: `send --export curl|python|javascript|go|rust`, `run --report har:FILE`, API export and history HAR, "Code" dialog and HAR download in the UI; secrets become environment variable references. ADR-030.
 - P9.1 — 2026-11-04 — Import from cURL, Postman v2.1 (+ environments), OpenAPI 3.x, Insomnia v4/v5, HAR and Hurl (as flows); CLI, API and UI; credentials become secret variables. ADR-029.
 - P8.6 — 2026-11-04 — Backup and restore (`snapreq backup|restore`, consistent snapshot while serving, key excluded by default, safe unpacking). ADR-028. Security review checklist completed (docs/SECURITY-REVIEW.md). **Phase 8 complete.**
 - P8.5 — 2026-11-04 — Audit log (API, CLI, UI), failure rate limits, security headers, Host allowlist against DNS rebinding. ADR-027.
@@ -662,3 +675,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-04 (23):** P8.2 done: workspaces with roles (maintainer chose subdirectory layout and "any user creates workspaces"; existing collections stay in place as `default`), ADR-024. Stopped before P8.3 for the OIDC account-provisioning decision.
 - **2026-11-04 (24):** Phase 8 complete (P8.3–P8.6 after the maintainer chose automatic OIDC accounts with a domain allowlist). Found and fixed a viewer secret-exfiltration path in P8.4. ADR-025–028, docs/SECURITY-REVIEW.md. Stopped for the maintainer's report before Phase 9.
 - **2026-11-04 (25):** P9.1 done (maintainer: "start with phase 9"): `snapreq-interop` crate, `snapreq import`, `POST /api/v1/collections/import`, Import dialog. The public Newman sample collection imports and runs. 423 Rust tests, 45 unit tests and 35 Playwright tests pass.
+- **2026-11-04 (26):** P9.2 done: export to cURL, Python, JavaScript, Go and Rust (secrets read from `SNAPREQ_SECRET_*`), HAR from runs and history. 431 Rust tests, 46 unit tests and 37 Playwright tests pass.

@@ -362,3 +362,24 @@ live there too. Choices:
 **Consequences:** Imported collections are safe to commit as they are, but runs need the `.secrets/` values on the
 machine that runs them (or `SNAPREQ_SECRET_*` variables). Postman scripts are not run: P9.3/P9.4 add scripting and
 translate simple `pm.test` scripts.
+
+## ADR-030: Exports read secrets from environment variables; HAR comes from CLI runs and history
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P9.2: export to cURL, HAR and code snippets (Python requests, JS fetch, Go, Rust reqwest). An
+exported command is copied into chats, tickets and scripts, so it must not carry secret values, yet it should
+run as it is.
+**Decision:** `snapreq-interop::export` turns a built request (variables filled in, auth applied by meaning) into
+cURL, Python, JavaScript, Go or Rust. Every secret value becomes a reference to `SNAPREQ_SECRET_<NAME>`, the
+variable the CLI already reads secrets from (`${SNAPREQ_SECRET_TOKEN}`, `os.environ[...]`, `process.env...`,
+`os.Getenv`, `std::env::var`); values without a known name get numbered variables, and any value that
+would still appear is replaced by `<redacted>`. Basic auth is written as credentials (`-u`, `auth=`,
+`SetBasicAuth`, …), never as a pre-encoded header. OAuth 2.0 reads `SNAPREQ_ACCESS_TOKEN`; digest and AWS
+signing are kept where the tool has them (cURL, Python) and noted elsewhere. Settings are written only when
+they differ from SnapRequest's defaults. The server builds the request exactly like `/requests/execute`
+(`POST /api/v1/requests/export`), with the same viewer rule for overrides. HAR (`har_export`) is written
+from exchanges this process made (`snapreq run --report har:FILE`) and from stored history
+(`GET /api/v1/history/{id}/har`); credential headers are always `<redacted>`. Server-side run reports store
+no request details, so they have no HAR form.
+**Consequences:** Snippets run after exporting the secrets, the same way CI already provides them. HAR files are
+safe to attach to tickets, but cannot replay authenticated requests as they are.
+

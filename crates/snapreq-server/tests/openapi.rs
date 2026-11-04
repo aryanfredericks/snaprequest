@@ -41,6 +41,8 @@ fn every_route_is_described() {
         "GET /api/v1/history/{id}",
         "DELETE /api/v1/history/{id}",
         "DELETE /api/v1/history",
+        "GET /api/v1/history/{id}/har",
+        "POST /api/v1/requests/export",
         "GET /api/v1/runs",
         "POST /api/v1/runs",
         "GET /api/v1/runs/{id}",

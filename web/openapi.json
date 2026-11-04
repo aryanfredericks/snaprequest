@@ -2008,6 +2008,48 @@
         }
       }
     },
+    "/api/v1/history/{id}/har": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "operationId": "history_har",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "History entry id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The exchange as an HTTP Archive (HAR 1.2), as a download",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/requests/execute": {
       "post": {
         "tags": [
@@ -2058,6 +2100,66 @@
           },
           "422": {
             "description": "Does not validate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/requests/export": {
+      "post": {
+        "tags": [
+          "requests"
+        ],
+        "operationId": "export_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "`{ format, content }`: the request as code; secret values are read from `SNAPREQ_SECRET_<NAME>` environment variables",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Does not build",
             "content": {
               "application/json": {
                 "schema": {
@@ -2903,6 +3005,61 @@
           "vars": {
             "type": "object",
             "description": "Variables for this execution (highest precedence).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExportBody": {
+        "type": "object",
+        "required": [
+          "format"
+        ],
+        "properties": {
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Or a collection request: collection id and request key (as for `/requests/execute`)."
+          },
+          "env": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Unsaved contents of the request file."
+          },
+          "format": {
+            "type": "string",
+            "description": "`curl`, `python`, `javascript`, `go` or `rust`."
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "A complete request (the core JSON model)."
+          },
+          "vars": {
+            "type": "object",
             "additionalProperties": {
               "type": "string"
             },

@@ -8,6 +8,7 @@ pub mod api;
 pub mod auth;
 pub mod backup;
 pub mod config;
+pub mod export;
 pub mod flow_states;
 pub mod import;
 pub mod oidc;
@@ -135,7 +136,8 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
                 .merge(oidc::router())
                 .merge(security::router())
                 .merge(workspaces::router())
-                .merge(import::router()),
+                .merge(import::router())
+                .merge(export::router()),
         )
         .split_for_parts();
     // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.

@@ -84,6 +84,11 @@ for (const scheme of ["light", "dark"] as const) {
     await page.getByRole("button", { name: "Import", exact: true }).click();
     await audit(page, "import dialog");
     await page.getByRole("dialog", { name: "Import" }).getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "New request" }).first().click();
+    await page.getByRole("button", { name: "Code", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Request as code" }).getByRole("textbox", { name: "Code" })).toContainText("curl");
+    await audit(page, "export dialog");
+    await page.getByRole("dialog", { name: "Request as code" }).getByRole("button", { name: "Close" }).click();
     await page.keyboard.press("?");
     await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
     await audit(page, "shortcuts dialog");

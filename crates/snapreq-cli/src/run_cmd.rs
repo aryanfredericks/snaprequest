@@ -220,6 +220,9 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             req.settings.capture_wire = true;
         }
     };
+    let started_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0));
     let iterations = execute(&plan, &unit, adjust).await;
     let secret_vars: Vec<String> = plan
         .overrides
@@ -239,6 +242,7 @@ pub(crate) async fn run(args: &RunArgs) -> u8 {
             ReportFormat::Json => {
                 serde_json::to_string_pretty(&report.json(true)).unwrap_or_default() + "\n"
             }
+            ReportFormat::Har => har(&iterations, started_ms),
         };
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty())
             && let Err(e) = std::fs::create_dir_all(dir)
@@ -489,21 +493,49 @@ impl Write for Indented<'_> {
     }
 }
 
-/// `junit:out.xml`, `html:report.html` or `json:run.json`.
+/// Every exchange of the run as HAR. Start times are the run's start plus the durations of
+/// the exchanges before (requests run one after another).
+fn har(iterations: &[snapreq_test::Iteration], started_ms: i64) -> String {
+    use snapreq_interop::har_export::{Exchange, from_exchanges};
+    let lines: Vec<_> = iterations
+        .iter()
+        .flat_map(snapreq_test::report::lines)
+        .collect();
+    let mut t = started_ms;
+    let mut exchanges = Vec::new();
+    for line in &lines {
+        let Some(request) = &line.run.request else {
+            continue;
+        };
+        let response = line.run.response();
+        exchanges.push(Exchange {
+            request,
+            response,
+            started_ms: t,
+        });
+        t += response.map_or(0, |r| {
+            i64::try_from(r.timings.total.as_millis()).unwrap_or(0)
+        });
+    }
+    serde_json::to_string_pretty(&from_exchanges(&exchanges)).unwrap_or_default() + "\n"
+}
+
+/// `junit:out.xml`, `html:report.html`, `json:run.json` or `har:run.har`.
 fn parse_report(spec: &str) -> Result<(ReportFormat, PathBuf), String> {
     let (kind, path) = spec
         .split_once(':')
         .filter(|(_, p)| !p.is_empty())
         .ok_or_else(|| {
-            format!("invalid --report `{spec}`, expected FORMAT:PATH (junit, html or json)")
+            format!("invalid --report `{spec}`, expected FORMAT:PATH (junit, html, json or har)")
         })?;
     let format = match kind {
         "junit" => ReportFormat::Junit,
         "html" => ReportFormat::Html,
         "json" => ReportFormat::Json,
+        "har" => ReportFormat::Har,
         other => {
             return Err(format!(
-                "unknown report format `{other}` (junit, html or json)"
+                "unknown report format `{other}` (junit, html, json or har)"
             ));
         }
     };

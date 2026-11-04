@@ -277,7 +277,8 @@ pub(crate) struct RunArgs {
     #[arg(long = "secret", value_name = "VALUE")]
     pub secrets: Vec<String>,
 
-    /// Write a report: `junit:FILE`, `html:FILE` or `json:FILE` (with full traces). Repeatable.
+    /// Write a report: `junit:FILE`, `html:FILE`, `json:FILE` (with full traces) or `har:FILE`
+    /// (every exchange, secrets and credentials redacted). Repeatable.
     #[arg(long = "report", value_name = "FORMAT:FILE")]
     pub reports: Vec<String>,
 }
@@ -288,6 +289,7 @@ pub(crate) enum ReportFormat {
     Junit,
     Html,
     Json,
+    Har,
 }
 
 #[derive(Debug, Args)]
@@ -718,6 +720,12 @@ pub(crate) struct SendArgs {
         help_heading = "Output"
     )]
     pub output: Option<PathBuf>,
+
+    /// Print the request as code instead of sending it: curl, python, javascript, go or rust.
+    /// Secret values are read from environment variables (SNAPREQ_SECRET_<NAME>) in the
+    /// code, never written into it.
+    #[arg(long, value_name = "FORMAT", help_heading = "Output")]
+    pub export: Option<String>,
 
     /// When to use colors.
     #[arg(

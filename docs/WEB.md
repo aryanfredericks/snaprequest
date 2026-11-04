@@ -18,6 +18,8 @@ server's workspace directory, so collections edited in the browser can be commit
   TLS verification and certificates, proxy, cookies; outside a collection also host pinning).
 - **Send** (`Ctrl+Enter`) sends what is in the editor, saved or not, with the selected environment.
   **Save** (`Ctrl+S`) writes the request file.
+- **Code** shows the request as a cURL command or a Python, JavaScript, Go or Rust snippet, with
+  variables filled in and secret values read from environment variables (`SNAPREQ_SECRET_<NAME>`).
 
 ## Responses and the debug view
 
@@ -58,6 +60,7 @@ and filters by method, status class, failures and collection. An entry shows the
 response (with its debug view). **Re-run** sends a collection request again as its file is now; other
 requests are rebuilt in a new tab without their credentials, which are never stored. Select two entries
 and choose **Compare** to see the differences in body (JSON pretty-printed), headers and timing.
+**Download HAR** saves an entry as an HTTP Archive for browser dev tools and HAR viewers.
 
 ## Runs and flows
 

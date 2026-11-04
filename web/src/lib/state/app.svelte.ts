@@ -20,6 +20,8 @@ import { flowToFile } from "../model/flow";
 import { parseData } from "../model/runs";
 import { scopeFromFile, scopeToFile, varsFromTable, varsToTable, type ScopeFile } from "../model/scope";
 import { prompt } from "./prompt.svelte";
+import { workspaces } from "./workspaces.svelte";
+import type { ExportFormat } from "../model/exporting";
 import { formatRoute } from "./route";
 import {
   DiffTab,
@@ -283,6 +285,23 @@ class AppState {
     } finally {
       tab.running = false;
     }
+  }
+
+  /** The request as code (`POST /requests/export`); secret values become environment variables. */
+  async exportRequest(tab: RequestTab, format: ExportFormat): Promise<string> {
+    const body: Record<string, unknown> = { format };
+    if (tab.collection && tab.key) {
+      body.collection = tab.collection;
+      body.key = tab.key;
+      // Viewers export the saved request; unsaved edits need the editor role.
+      if (workspaces.canEdit) body.file = draftToFile(tab.draft);
+      const env = this.envs[tab.collection];
+      if (env) body.env = env;
+    } else {
+      body.request = draftToCore(tab.draft);
+    }
+    const r = unwrap(await api.POST("/api/v1/requests/export", { body: body as never })) as unknown as { content: string };
+    return r.content;
   }
 
   async save(tab: Tab): Promise<boolean> {

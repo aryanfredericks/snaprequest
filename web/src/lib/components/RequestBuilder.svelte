@@ -4,6 +4,7 @@
   import AuthEditor from "./AuthEditor.svelte";
   import BodyEditor from "./BodyEditor.svelte";
   import CodeEditor from "./CodeEditor.svelte";
+  import ExportDialog from "./ExportDialog.svelte";
   import JsonField from "./JsonField.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import MethodSelect from "./MethodSelect.svelte";
@@ -19,6 +20,7 @@
   type Section = "params" | "headers" | "body" | "auth" | "checks" | "settings";
   let section = $state<Section>("params");
   let saving = $state(false);
+  let exporter: ExportDialog | undefined = $state();
   const d = $derived(tab.draft);
   const inCollection = $derived(tab.collection !== null);
   const count = (rows: { name: string; enabled: boolean }[]) => rows.filter((r) => r.enabled && r.name.trim()).length;
@@ -70,7 +72,9 @@
       {tab.running ? "Sending…" : "Send"}
     </button>
     <button type="button" onclick={save} title="Save (Ctrl+S)">{tab.dirty ? "Save*" : "Save"}</button>
+    <button type="button" onclick={() => exporter?.open(tab)} title="Copy as cURL, Python, JavaScript, Go or Rust">Code</button>
   </form>
+  <ExportDialog bind:this={exporter} />
 
   <Tabs tabs={sections} selected={section} label="Request parts" idPrefix="req-{tab.id}" onselect={(s) => (section = s)} />
   <div class="panel" role="tabpanel" id="req-{tab.id}-panel" aria-labelledby="req-{tab.id}-tab-{section}">

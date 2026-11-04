@@ -35,6 +35,7 @@
         {#if r.collection && r.request_key}
           <button type="button" onclick={() => app.openRequest(r.collection!, r.request_key!)}>Open request</button>
         {/if}
+        <a class="har" href="/api/v1/history/{r.id}/har" download="snapreq-{r.id}.har" title="The exchange as an HTTP Archive, for browser dev tools and HAR viewers">Download HAR</a>
         <button type="button" class="link danger" onclick={() => app.deleteHistory(r.id)}>Delete</button>
       </span>
     </div>
@@ -90,6 +91,10 @@
     margin-left: auto;
     display: flex;
     gap: 0.4rem;
+  }
+  .har {
+    align-self: center;
+    font-size: 0.85rem;
   }
   .danger {
     color: var(--danger);

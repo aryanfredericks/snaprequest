@@ -191,6 +191,7 @@ Options: `-e ENV`, `--var name=value` (wins over everything), `--folder`, `-n N`
 | `junit` | JUnit XML for CI: one `<testsuite>` per iteration, one `<testcase>` per request or step. Failed checks and captures are `<failure>`s (expected vs actual), requests that could not be built or sent are `<error>`s, requests not run are `<skipped/>`. |
 | `html` | One self-contained page (no scripts or external files; light and dark themes): per request the checks, captures, timing bars, response headers and body (up to 64 KiB) and the trace. Failures are expanded. |
 | `json` | The `--format json` document plus each response's version, headers, body, timings and full trace. |
+| `har` | Every exchange as an HTTP Archive (HAR 1.2), for browser dev tools and HAR viewers. Credential headers (`Authorization`, `Cookie`, `Set-Cookie`, API keys) are always `<redacted>`. |
 
 Reports hide every known secret (credentials, secret variables, secret captures, `--secret` values) in
 traces, URLs, checks **and response bodies**, since they are meant to be shared. Values of data columns
@@ -364,6 +365,23 @@ snapreq tokens clear    # delete every cached token
 | `--cacert PATH` | Extra CA certificates (PEM) to trust. |
 | `--cert PATH --key PATH` | Client certificate and key (PEM) for mutual TLS. |
 | `--tls-min 1.2\|1.3`, `--tls-max 1.2\|1.3` | Allowed TLS versions. |
+
+## Requests as code (`--export`)
+
+`snapreq send … --export FORMAT` prints the request as code instead of sending it: `curl`, `python`
+(requests), `javascript` (fetch, Node 18+), `go` (net/http) or `rust` (reqwest). It works for URLs and for
+collection requests, with environments and `--var`:
+
+```sh
+snapreq send -c my-api users/create-user -e prod --export curl
+snapreq send POST https://api.example.com/users --json '{"name":"snap"}' --export python
+```
+
+Variables are filled in, but secret values are never written: the code reads them from environment
+variables named like the CLI's own (`${SNAPREQ_SECRET_TOKEN}` for the secret variable `token`;
+credentials written into a file directly become `SNAPREQ_SECRET_1`, …). OAuth 2.0 requests read the access
+token from `SNAPREQ_ACCESS_TOKEN`; AWS Signature V4 is kept in cURL (`--aws-sigv4`) and noted in the other
+languages.
 
 ## Output options
 
