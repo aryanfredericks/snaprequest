@@ -17,7 +17,7 @@
   }
   let { tab }: Props = $props();
 
-  type Section = "params" | "headers" | "body" | "auth" | "checks" | "settings";
+  type Section = "params" | "headers" | "body" | "auth" | "checks" | "scripts" | "settings";
   let section = $state<Section>("params");
   let saving = $state(false);
   let exporter: ExportDialog | undefined = $state();
@@ -27,14 +27,19 @@
   const checks = $derived(
     Object.keys(d.rest.assert ?? {}).length + Object.keys(d.rest.capture ?? {}).length,
   );
+  const scripts = $derived([d.rest.script?.pre_request || d.rest.script?.pre_request_file, d.rest.script?.test || d.rest.script?.test_file].filter(Boolean).length || "");
   const sections = $derived([
     { id: "params" as const, label: "Params", badge: count(d.query) },
     { id: "headers" as const, label: "Headers", badge: count(d.headers) },
     { id: "body" as const, label: "Body", badge: d.body.type === "none" ? "" : d.body.type },
     { id: "auth" as const, label: "Auth", badge: d.auth.type === "inherit" || d.auth.type === "none" ? "" : d.auth.type },
     ...(inCollection ? [{ id: "checks" as const, label: "Checks & vars", badge: checks }] : []),
+    ...(inCollection ? [{ id: "scripts" as const, label: "Scripts", badge: scripts }] : []),
     { id: "settings" as const, label: "Settings", badge: Object.keys(d.settings).length },
   ]);
+  function setScript(key: "pre_request" | "test", code: string) {
+    d.rest.script = { ...(d.rest.script ?? {}), [key]: code };
+  }
   const inheritedAuth = $derived.by(() => {
     const doc = tab.collection ? app.docs[tab.collection] : null;
     return doc?.file.auth?.type ?? null;
@@ -96,6 +101,18 @@
           <JsonField value={d.rest.capture} label="Captures" placeholder={'{ "token": { "json": "$.token", "secret": true } }'} onchange={(v) => (d.rest.capture = v as Record<string, unknown> | undefined)} />
           <h4>Request variables <span class="muted">(<code>[vars]</code>)</span></h4>
           <JsonField value={d.rest.vars} label="Request variables" placeholder={'{ "role": "admin" }'} onchange={(v) => (d.rest.vars = v as typeof d.rest.vars)} />
+        </div>
+      {:else if section === "scripts"}
+        <div class="checks">
+          {#each [{ key: "pre_request" as const, file: d.rest.script?.pre_request_file, title: "Pre-request script", hint: "Runs before the request is built: snapreq.variables, snapreq.request." }, { key: "test" as const, file: d.rest.script?.test_file, title: "Test script", hint: "Runs after the response: snapreq.response, snapreq.test(name, fn), snapreq.expect(value)." }] as s (s.key)}
+            <h4>{s.title} <span class="muted">{s.hint}</span></h4>
+            {#if s.file}
+              <p class="muted small">Read from <code>{s.file}</code>; edit that file.</p>
+            {:else}
+              <CodeEditor value={d.rest.script?.[s.key] ?? ""} lang="javascript" label={s.title} placeholder={s.key === "test" ? 'snapreq.test("status is 200", () => snapreq.expect(snapreq.response.status).toBe(200));' : 'snapreq.variables.set("ts", Date.now());'} onchange={(v) => setScript(s.key, v)} />
+            {/if}
+          {/each}
+          <p class="muted small">Scripts run in a sandbox without file or network access, with time and memory limits. Collection and folder scripts run first (see docs/FORMAT.md).</p>
         </div>
       {:else if section === "settings"}
         <SettingsEditor settings={d.settings} {inCollection} bind:resolve={d.resolve} />

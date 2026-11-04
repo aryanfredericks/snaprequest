@@ -232,6 +232,11 @@ With `-v`, the request file's `[capture]` values are listed (`captured user_id =
 assertions: 1 passed, 1 failed
 ```
 
+Scripts (`[script]` in collection, folder and request files, see `docs/FORMAT.md`) run with `send` and
+`run`: pre-request scripts before the request is built, test scripts after the response. Their
+`snapreq.test(...)` results are listed with the checks (`✓ test token is set`) and count for the exit code;
+`console.log` lines go to stderr as `log: …` (in `snapreq run`, with `-v` or when the request failed).
+
 ## Output
 
 JSON responses (`application/json`, `*+json`, or JSON-looking text) are pretty-printed with

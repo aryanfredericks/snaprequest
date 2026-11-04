@@ -383,3 +383,30 @@ no request details, so they have no HAR form.
 **Consequences:** Snippets run after exporting the secrets, the same way CI already provides them. HAR files are
 safe to attach to tickets, but cannot replay authenticated requests as they are.
 
+## ADR-031: Scripts in QuickJS (rquickjs) with a pure-JavaScript `snapreq` API
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P9.3: pre-request and test scripts in JavaScript via `rquickjs`, with a `snapreq.*` API
+(variables, request, response, expect), time and memory limits and no file or network access; tests must prove
+the sandbox. Scripts also have to work in `snapreq send`, `snapreq run`, flows and the server, and P9.4 will
+translate Postman scripts into them.
+**Decision:**
+- A new crate `snapreq-script` wraps `rquickjs` 0.14 (MIT, QuickJS-ng, MSRV 1.87) with default features off: no
+  module loader, no `std`/`os` modules, no host functions at all. The API is a JavaScript prelude over a JSON
+  input document (variables, the request with placeholders, the response); the script's effects come back as a
+  JSON output document (variables set, the changed request, tests, logs, an uncaught error). Nothing in the
+  engine can call into Rust, so the sandbox is the language itself.
+- Every script gets a fresh runtime: an interrupt handler enforces 2 s (uncatchable from JavaScript), plus a
+  32 MiB memory limit and a 512 KiB stack limit. Engine globals the API relies on are captured before user code
+  runs.
+- Format: `[script]` with `pre_request`/`pre_request_file` and `test`/`test_file` in `snapreq.toml`,
+  `folder.toml`, request files and flow steps; they run collection → folders → request → step. Pre-request
+  scripts run before the request is built, so variables they set and `{{placeholders}}` they write are filled in
+  like everything else. Test results are ordinary check outcomes (`test <name>`), so reports, JUnit, exit codes,
+  retries and the UI need nothing new; variables set by scripts behave like captured values.
+- `expect` speaks both Jest and Chai style, so translated Postman tests (P9.4) map almost one to one.
+- Scripts run on a blocking thread (`spawn_blocking`) in sessions; `snapreq send` runs them in place.
+**Consequences:** Scripts are deterministic and isolated, at the cost of no `fetch`, timers or `require`
+(asynchronous tests are rejected). QuickJS is C code: an engine bug could be reachable from a script, which is
+accepted because scripts come from editors (docs/SECURITY-REVIEW.md). Scratch requests in the UI (outside a
+collection) have no scripts.
+

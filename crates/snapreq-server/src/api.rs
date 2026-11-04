@@ -281,6 +281,7 @@ fn exchange_json(history_id: Option<i64>, run: &snapreq_test::RequestRun) -> Val
         "error": error,
         "assertions": assertions,
         "captures": captures_json(&run.captures, &secrets),
+        "logs": run.logs.iter().map(|l| snapreq_test::report::hide(l, &secrets)).collect::<Vec<_>>(),
     })
 }
 

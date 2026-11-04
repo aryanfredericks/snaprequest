@@ -12,6 +12,7 @@
   problem={tab.error}
   assertions={result?.assertions ?? []}
   captures={result?.captures ?? []}
+  logs={result?.logs ?? []}
   running={tab.running}
   live={tab.live}
   name={tab.draft.name || tab.key?.split("/").pop() || "response"}

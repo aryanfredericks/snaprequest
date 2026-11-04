@@ -1,6 +1,6 @@
 // Editable models for the settings of a collection (`snapreq.toml`), a folder (`folder.toml`)
 // and an environment (`environments/<name>.toml`).
-import type { AuthSpec, CollectionFile, SettingsSpec, VarsTable } from "../api/types";
+import type { AuthSpec, CollectionFile, ScriptSpec, SettingsSpec, VarsTable } from "../api/types";
 import {
   authFromSpec,
   authToSpec,
@@ -52,8 +52,8 @@ export interface ScopeDraft {
   headers: Row[];
   auth: AuthDraft;
   settings: SettingsSpec;
-  /** Kept as they are: `format`, `order`. */
-  rest: { format?: number; order?: string[] };
+  /** Kept as they are: `format`, `order`, `script`. */
+  rest: { format?: number; order?: string[]; script?: ScriptSpec };
 }
 
 export function scopeFromFile(f: ScopeFile, isCollection: boolean): ScopeDraft {
@@ -67,7 +67,7 @@ export function scopeFromFile(f: ScopeFile, isCollection: boolean): ScopeDraft {
     headers: rowsFromTable(f.headers),
     auth,
     settings: { ...(f.settings ?? {}) },
-    rest: clean({ format: f.format, order: f.order }),
+    rest: clean({ format: f.format, order: f.order, script: f.script }),
   };
 }
 
@@ -84,6 +84,7 @@ export function scopeToFile(d: ScopeDraft, isCollection: boolean): ScopeFile {
     headers: rowsToTable(d.headers),
     auth,
     settings: Object.keys(settings).length ? settings : undefined,
+    script: d.rest.script,
   });
 }
 

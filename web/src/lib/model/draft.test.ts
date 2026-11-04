@@ -119,3 +119,13 @@ describe("connection and TLS settings", () => {
     expect(() => parseResolve("nope")).toThrow(/HOST:PORT:ADDR/);
   });
 });
+
+describe("scripts", () => {
+  it("are kept through the editor and empty ones are dropped", () => {
+    const file = { url: "{{base}}/x", script: { pre_request: "snapreq.variables.set('a', 1)", test_file: "t.js" } };
+    const d = draftFromFile(file);
+    expect(draftToFile(d).script).toEqual(file.script);
+    d.rest.script = { pre_request: "  ", test: "" };
+    expect(draftToFile(d).script).toBeUndefined();
+  });
+});

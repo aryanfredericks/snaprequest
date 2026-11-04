@@ -601,6 +601,7 @@ fn step_json(line: &Line<'_>, details: bool) -> Value {
         "assertions": assertions,
         "until": until,
         "captures": captures_json(&run.captures, &secrets),
+        "logs": run.logs.iter().map(|l| hide(l, &secrets)).collect::<Vec<_>>(),
     })
 }
 

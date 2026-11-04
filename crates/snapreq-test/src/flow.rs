@@ -135,6 +135,7 @@ pub async fn run_flow_steps(
             assert: (!step.assert.is_empty()).then_some((&*step.assert, path.as_path())),
             capture: (!step.capture.is_empty()).then_some(&step.capture),
             until,
+            script: (!step.script.is_empty()).then_some((&step.script, path.as_path())),
         };
 
         let max = step.retry.as_ref().map_or(1, |r| r.max.max(1));

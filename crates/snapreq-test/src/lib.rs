@@ -6,6 +6,7 @@ pub mod data;
 pub mod flow;
 pub mod report;
 pub mod run;
+pub mod script;
 pub mod session;
 
 pub use assert::{Assertions, Outcome};

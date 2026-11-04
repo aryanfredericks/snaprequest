@@ -7,7 +7,7 @@ use snapreq_collection::load::COLLECTION_FILE;
 use snapreq_collection::save::{save_collection, save_request};
 use snapreq_collection::{
     AssertSpec, Captures, Collection, CollectionFile, Environment, Item, RequestFile, Scopes,
-    Secrets, Variables, build_assertions, build_request, secrets,
+    Secrets, Variables, build_assertions, secrets,
 };
 use snapreq_core::Request;
 
@@ -127,7 +127,79 @@ pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Built, Ar
         .map_err(|e| ArgError(e.to_string()))?
         .fill(&mut scopes);
 
-    let mut req = build_request(&collection, key, &scopes).map_err(|e| ArgError(e.to_string()))?;
+    // Scripts (ADR-031): pre-request scripts run now, test scripts after the response.
+    let item = collection
+        .find(key)
+        .ok_or_else(|| ArgError(format!("no request `{key}` in the collection")))?;
+    let item_path = collection.root.join(&item.path);
+    let scripts =
+        snapreq_test::script::Scripts::for_request(&collection, key, &item.file, &item_path, None);
+    let pre = scripts
+        .codes(snapreq_script::Phase::PreRequest)
+        .map_err(ArgError)?;
+    let tests = scripts
+        .codes(snapreq_script::Phase::Test)
+        .map_err(ArgError)?;
+    let mut file = item.file.clone();
+    let mut runtime = runtime;
+    if !pre.is_empty() {
+        let before = snapreq_test::script::script_request(&file);
+        let chain = snapreq_test::script::run(
+            &pre,
+            snapreq_test::script::input(
+                snapreq_script::Phase::PreRequest,
+                &scopes,
+                before.clone(),
+                None,
+            ),
+        );
+        let mut hidden = snapreq_test::script::secret_values(&scopes);
+        hidden.extend(
+            chain
+                .vars
+                .iter()
+                .filter(|v| v.secret)
+                .map(|v| v.value.clone()),
+        );
+        print_logs(&chain.logs, &hidden);
+        if let Some((label, e)) = &chain.error {
+            return Err(ArgError(snapreq_test::report::hide(
+                &format!("{label} pre-request script: {e}"),
+                &hidden,
+            )));
+        }
+        for v in &chain.vars {
+            if v.secret {
+                runtime.set_secret(&v.name, &v.value);
+            } else {
+                runtime.set(&v.name, &v.value);
+            }
+        }
+        if let Some(after) = &chain.request {
+            snapreq_test::script::apply_request(&mut file, &before, after);
+            file.validate()
+                .map_err(|e| ArgError(format!("after the pre-request script: {e}")))?;
+        }
+        scopes = Scopes::for_request(
+            &collection,
+            key,
+            environment.as_ref(),
+            &Variables::default(),
+            &runtime,
+        );
+        load_secrets(&collection, args.env.as_deref())
+            .map_err(|e| ArgError(e.to_string()))?
+            .fill(&mut scopes);
+    }
+    let mut req = snapreq_collection::build_file(&collection, key, &file, &item_path, &scopes)
+        .map_err(|e| ArgError(e.to_string()))?;
+    for v in runtime.0.iter().filter(|v| v.secret) {
+        if let Some(value) = &v.value
+            && !req.settings.secrets.contains(value)
+        {
+            req.settings.secrets.push(value.clone());
+        }
+    }
     // A value given with --var for a variable declared secret is hidden too.
     for v in &runtime.0 {
         if let Some(value) = &v.value
@@ -154,11 +226,60 @@ pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Built, Ar
         .filter(|(v, _)| v.secret || scopes.is_declared_secret(&v.name))
         .filter_map(|(v, _)| Some((v.name.clone(), v.value.clone()?)))
         .collect();
-    Ok((req, checks, captures, named))
+    let tests = (!tests.is_empty()).then(|| TestScripts {
+        input: snapreq_test::script::input(
+            snapreq_script::Phase::Test,
+            &scopes,
+            snapreq_test::script::script_request(&file),
+            None,
+        ),
+        hidden: snapreq_test::script::secret_values(&scopes),
+        codes: tests,
+    });
+    Ok((req, checks, captures, named, tests))
 }
 
-/// A built request with its checks, captures and named secret values.
-pub(crate) type Built = (Request, AssertSpec, Captures, Vec<(String, String)>);
+/// A built request with its checks, captures, named secret values and test scripts.
+pub(crate) type Built = (
+    Request,
+    AssertSpec,
+    Captures,
+    Vec<(String, String)>,
+    Option<TestScripts>,
+);
+
+/// Test scripts to run on the response of `snapreq send`.
+#[derive(Debug)]
+pub(crate) struct TestScripts {
+    codes: Vec<(String, String)>,
+    input: snapreq_script::Input,
+    hidden: Vec<String>,
+}
+
+impl TestScripts {
+    /// Runs the scripts on `response`; returns their tests as check outcomes.
+    pub(crate) fn run(
+        mut self,
+        response: &snapreq_core::Response,
+        secrets: &[String],
+    ) -> Vec<snapreq_test::Outcome> {
+        self.input.response = Some(snapreq_test::script::script_response(response));
+        let chain = snapreq_test::script::run(&self.codes, self.input);
+        let mut hidden = self.hidden;
+        hidden.extend(secrets.iter().cloned());
+        print_logs(&chain.logs, &hidden);
+        let mut outcomes = snapreq_test::script::outcomes(&chain);
+        snapreq_test::report::scrub_outcomes(&mut outcomes, &hidden);
+        outcomes
+    }
+}
+
+/// `console.log` output of scripts, on stderr.
+fn print_logs(logs: &[String], hidden: &[String]) {
+    for l in logs {
+        eprintln!("log: {}", snapreq_test::report::hide(l, hidden));
+    }
+}
 
 /// `snapreq ls`.
 pub(crate) fn ls(dir: Option<&Path>, out: &mut dyn Write) -> Result<(), ArgError> {

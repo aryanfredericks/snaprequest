@@ -28,7 +28,7 @@
     {#if step.attempts > 1}<span class="muted">{step.attempts} attempts</span>{/if}
   </div>
   <div class="checks">
-    <ChecksView assertions={step.assertions} until={step.until} captures={step.captures} />
+    <ChecksView assertions={step.assertions} until={step.until} captures={step.captures} logs={step.logs ?? []} />
   </div>
   <div class="result">
     <ResultView {response} {failure} idPrefix="{idPrefix}-{step.number}" label="Step {step.number} response" name="step-{step.number}" empty="No response." />

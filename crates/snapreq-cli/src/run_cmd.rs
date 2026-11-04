@@ -431,6 +431,16 @@ fn render_iteration(
 fn details(out: &mut dyn Write, run: &RequestRun, verbose: u8) -> io::Result<()> {
     let secrets = secrets_of(run);
     let passed = run.passed();
+    // Script output: with -v, or when the request failed.
+    if verbose > 0 || !passed {
+        for line in &run.logs {
+            writeln!(
+                out,
+                "      log: {}",
+                snapreq_test::report::hide(line, &secrets)
+            )?;
+        }
+    }
     match &run.outcome {
         RunOutcome::Invalid(why) => writeln!(out, "      {FAIL}{why}{FAIL:#}")?,
         RunOutcome::Failed(e) => {

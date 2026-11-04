@@ -75,6 +75,7 @@ copy of the data directory or a backup.
 | F1 | `cargo deny` (advisories, licenses, bans, sources) passes | ✅ | `scripts/check.sh`, CI |
 | F2 | No `unsafe` code | ✅ | `unsafe_code = "forbid"` workspace lint |
 | F3 | New crypto dependencies are mainstream and maintained | ✅ | `argon2` (RustCrypto), `ring` (already used for TLS), `tar` |
+| F4 | Scripts (P9.3) cannot reach files, the network, processes or other runs, and are bounded in time, memory and stack | ✅ | ADR-031; `snapreq-script` `sandbox::scripts_have_no_way_out_of_the_sandbox`, `endless_loops_are_stopped`, `memory_and_stack_are_limited` |
 
 ## Accepted risks
 
@@ -86,6 +87,9 @@ copy of the data directory or a backup.
 - **Owners can tell whether a user name exists** when adding members.
 - **Behind a reverse proxy** all clients share the proxy's address for rate limits and the audit log
   (`X-Forwarded-For` is not trusted).
+- **Scripts run in QuickJS, a C engine** (P9.3): a memory-safety bug in it could be reachable from a
+  script. Scripts are written by editors, who are trusted with the workspace's secrets anyway; viewers
+  cannot change them.
 - **No admin role**: server-wide administration (accounts, full audit log, backups) happens on the server
   machine with the CLI.
 - **Ownerless workspaces** (every member deleted) keep their files but cannot be opened from the UI.

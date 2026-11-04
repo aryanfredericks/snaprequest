@@ -206,6 +206,8 @@ export interface ExecuteResult {
   error: ExecutionError | null;
   assertions?: AssertionOutcome[];
   captures?: CaptureOutcome[];
+  /** `console.log` output of the request's scripts. */
+  logs?: string[];
 }
 
 // --- Collection files (docs/FORMAT.md) ---------------------------------------------------
@@ -273,6 +275,15 @@ export interface RequestFile {
   settings?: SettingsSpec;
   capture?: Record<string, unknown>;
   assert?: Record<string, unknown>;
+  script?: ScriptSpec;
+}
+
+/** `[script]`: JavaScript run before the request is built and after the response (ADR-031). */
+export interface ScriptSpec {
+  pre_request?: string;
+  pre_request_file?: string;
+  test?: string;
+  test_file?: string;
 }
 
 export interface CollectionFile {
@@ -284,6 +295,7 @@ export interface CollectionFile {
   headers?: KvTable;
   auth?: AuthSpec;
   settings?: SettingsSpec;
+  script?: ScriptSpec;
 }
 
 export type TreeItem =
@@ -399,6 +411,7 @@ export interface RunStep {
   assertions: AssertionOutcome[];
   until: AssertionOutcome[];
   captures: CaptureOutcome[];
+  logs?: string[];
 }
 
 export interface RunIteration {

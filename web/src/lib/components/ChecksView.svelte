@@ -5,8 +5,10 @@
     assertions?: AssertionOutcome[];
     until?: AssertionOutcome[];
     captures?: CaptureOutcome[];
+    /** Script `console.log` output. */
+    logs?: string[];
   }
-  let { assertions = [], until = [], captures = [] }: Props = $props();
+  let { assertions = [], until = [], captures = [], logs = [] }: Props = $props();
 </script>
 
 <div class="checks">
@@ -40,12 +42,29 @@
       </tbody>
     </table>
   {/if}
-  {#if !assertions.length && !until.length && !captures.length}
+  {#if logs.length}
+    <section aria-label="Script output">
+      <h4>Script output</h4>
+      <pre class="logs">{logs.join("\n")}</pre>
+    </section>
+  {/if}
+  {#if !assertions.length && !until.length && !captures.length && !logs.length}
     <p class="muted">This request has no checks or captures.</p>
   {/if}
 </div>
 
 <style>
+  h4 {
+    margin: 0 0 0.3rem;
+    font-size: 0.82rem;
+  }
+  .logs {
+    margin: 0;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    max-height: 16rem;
+    overflow: auto;
+  }
   .checks {
     display: flex;
     flex-direction: column;

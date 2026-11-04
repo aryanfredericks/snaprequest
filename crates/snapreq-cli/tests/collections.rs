@@ -1290,3 +1290,81 @@ async fn run_writes_a_har_report() {
     );
     assert_eq!(doc["log"]["creator"]["name"], "SnapRequest");
 }
+
+#[tokio::test]
+async fn send_and_run_execute_scripts() {
+    let addr = server().await;
+    let dir = collection("scripts");
+    std::fs::write(
+        dir.join("users/scripted.toml"),
+        r#"url = "{{base_url}}/scripted"
+
+[script]
+pre_request = '''
+snapreq.variables.set("n", 21 * 2);
+snapreq.request.headers.set("X-Answer", "{{n}}");
+console.log("token is", snapreq.variables.get("token"));
+'''
+test = '''
+snapreq.test("echoes the answer", () => snapreq.expect(snapreq.response.text()).to.include("x-answer: 42"));
+snapreq.test("is a teapot", () => snapreq.expect(snapreq.response.status).toBe(418));
+'''
+"#,
+    )
+    .unwrap();
+    let base = format!("base_url=http://{addr}");
+    let d = dir.to_str().unwrap();
+    let o = run(
+        &[
+            "send",
+            "-c",
+            d,
+            "users/scripted",
+            "-e",
+            "dev",
+            "--var",
+            &base,
+            "--var",
+            "token=scr1pt-secret",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let (stdout, stderr) = (out(&o), err(&o));
+    assert!(stdout.contains("x-answer: 42"), "{stdout}");
+    assert!(stderr.contains("log: token is <redacted>"), "{stderr}");
+    assert!(!stderr.contains("scr1pt-secret"), "{stderr}");
+    assert!(stderr.contains("test is a teapot"), "{stderr}");
+    assert_eq!(
+        o.status.code(),
+        Some(7),
+        "a failed test fails the command: {stderr}"
+    );
+
+    let o = run(
+        &[
+            "run",
+            "-c",
+            d,
+            "users",
+            "-e",
+            "dev",
+            "--var",
+            &base,
+            "--var",
+            "token=scr1pt-secret",
+            "--color",
+            "never",
+        ],
+        None,
+        None,
+        &[],
+    )
+    .await;
+    let text = out(&o);
+    assert!(text.contains("✗ test is a teapot"), "{text}");
+    assert!(text.contains("log: token is <redacted>"), "{text}");
+    assert!(!text.contains("scr1pt-secret"), "{text}");
+}

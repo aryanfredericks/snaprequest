@@ -105,6 +105,9 @@ impl Collection {
                 supported: FORMAT_VERSION,
             });
         }
+        file.script
+            .validate()
+            .map_err(|m| Error::invalid(&collection_path, m))?;
         if file.format == 0 {
             return Err(Error::invalid(
                 &collection_path,
@@ -275,6 +278,10 @@ fn load_dir(
             } else {
                 FolderFile::default()
             };
+            folder_file
+                .script
+                .validate()
+                .map_err(|m| Error::invalid(&folder_file_path, m))?;
             let children = load_dir(root, &rel_path, &folder_file.order, false, warnings, flows)?;
             items.push(Item::Folder(Folder {
                 key: name,

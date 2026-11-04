@@ -18,6 +18,7 @@ snapreq-collection = { path = "crates/snapreq-collection", version = "0.1.0" }
 snapreq-test = { path = "crates/snapreq-test", version = "0.1.0" }
 snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
 snapreq-interop = { path = "crates/snapreq-interop", version = "0.1.0" }
+snapreq-script = { path = "crates/snapreq-script", version = "0.1.0" }
 
 # Shared external dependencies (add new ones here, then use `dep.workspace = true`)
 anstream = "1"
@@ -46,6 +47,8 @@ percent-encoding = "2"
 rcgen = "0.14"
 regex = "1"
 rpassword = "7"
+# Scripts (ADR-031): QuickJS core only; no std/os modules, no loader.
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 rusqlite = { version = "0.41", features = ["bundled"] }
 ring = "0.17"
 ruzstd = "0.9"

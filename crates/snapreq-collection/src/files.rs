@@ -33,6 +33,9 @@ pub struct CollectionFile {
     pub auth: Option<AuthSpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
+    /// Scripts run for every request of the collection (before folder and request scripts).
+    #[serde(default, skip_serializing_if = "ScriptSpec::is_empty")]
+    pub script: ScriptSpec,
 }
 
 impl CollectionFile {
@@ -46,6 +49,7 @@ impl CollectionFile {
             headers: KeyValues::default(),
             auth: None,
             settings: Settings::default(),
+            script: ScriptSpec::default(),
         }
     }
 }
@@ -68,6 +72,9 @@ pub struct FolderFile {
     pub auth: Option<AuthSpec>,
     #[serde(default, skip_serializing_if = "Settings::is_empty")]
     pub settings: Settings,
+    /// Scripts run for every request in the folder.
+    #[serde(default, skip_serializing_if = "ScriptSpec::is_empty")]
+    pub script: ScriptSpec,
 }
 
 /// One request file.
@@ -104,6 +111,9 @@ pub struct RequestFile {
     /// Checks run on the response (boxed: most requests have none, and it is large).
     #[serde(default, skip_serializing_if = "no_checks")]
     pub assert: Box<AssertSpec>,
+    /// JavaScript run before the request is built and after the response.
+    #[serde(default, skip_serializing_if = "ScriptSpec::is_empty")]
+    pub script: ScriptSpec,
 }
 
 impl RequestFile {
@@ -122,6 +132,7 @@ impl RequestFile {
             settings: Settings::default(),
             capture: Captures::default(),
             assert: Box::default(),
+            script: ScriptSpec::default(),
         }
     }
 
@@ -165,7 +176,61 @@ impl RequestFile {
             _ => {}
         }
         self.capture.validate()?;
+        self.script.validate()?;
         self.settings.validate()
+    }
+}
+
+/// A `[script]` table: JavaScript run before the request is built (`pre_request`) and after the
+/// response (`test`), inline or from a file relative to the file that names it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_request_file: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_file: Option<PathBuf>,
+}
+
+impl ScriptSpec {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Checks that each phase has inline code or a file, not both.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.pre_request.is_some() && self.pre_request_file.is_some() {
+            return Err("script: set either `pre_request` or `pre_request_file`, not both".into());
+        }
+        if self.test.is_some() && self.test_file.is_some() {
+            return Err("script: set either `test` or `test_file`, not both".into());
+        }
+        Ok(())
+    }
+
+    /// The code of one phase (`test == false`: pre-request), reading a file relative to `dir`.
+    pub fn code(&self, test: bool, dir: &std::path::Path) -> crate::Result<Option<String>> {
+        let (inline, file) = if test {
+            (&self.test, &self.test_file)
+        } else {
+            (&self.pre_request, &self.pre_request_file)
+        };
+        if let Some(code) = inline {
+            return Ok(Some(code.clone()).filter(|c| !c.trim().is_empty()));
+        }
+        match file {
+            Some(f) => {
+                let path = dir.join(f);
+                std::fs::read_to_string(&path)
+                    .map(Some)
+                    .map_err(|e| crate::Error::io(&path, e))
+            }
+            None => Ok(None),
+        }
     }
 }
 

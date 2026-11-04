@@ -26,6 +26,7 @@
     problem?: string | null;
     assertions?: AssertionOutcome[];
     captures?: CaptureOutcome[];
+    logs?: string[];
     running?: boolean;
     live?: TraceEntry[];
     /** Base file name for downloads. */
@@ -40,6 +41,7 @@
     problem = null,
     assertions = [],
     captures = [],
+    logs = [],
     running = false,
     live = [],
     name = "response",
@@ -64,8 +66,8 @@
           { id: "cookies" as const, label: "Cookies", badge: cookies.length },
         ]
       : []),
-    ...(done && (assertions.length || captures.length)
-      ? [{ id: "checks" as const, label: "Checks", badge: failed ? `${failed} failed` : `${assertions.length} ✓` }]
+    ...(done && (assertions.length || captures.length || logs.length)
+      ? [{ id: "checks" as const, label: "Checks", badge: failed ? `${failed} failed` : assertions.length ? `${assertions.length} ✓` : "" }]
       : []),
     ...(trace.length || running ? [{ id: "debug" as const, label: running ? "Debug (live)" : "Debug" }] : []),
   ]);
@@ -120,7 +122,7 @@
       {:else if section === "cookies"}
         <CookiesTable {cookies} />
       {:else if section === "checks"}
-        <ChecksView {assertions} {captures} />
+        <ChecksView {assertions} {captures} {logs} />
       {/if}
     </div>
   {/if}

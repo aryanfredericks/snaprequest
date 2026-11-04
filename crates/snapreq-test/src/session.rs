@@ -3,13 +3,15 @@
 use std::path::Path;
 
 use snapreq_collection::{
-    AssertSpec, Captures, Collection, Environment, RequestFile, Scopes, Secrets, Variables,
-    build_file, build_request, interpolate_assertions,
+    AssertSpec, Captures, Collection, Environment, RequestFile, Scopes, ScriptSpec, Secrets,
+    Variables, build_file, build_request, interpolate_assertions,
 };
 use snapreq_core::{Client, Request, Response};
+use snapreq_script::Phase;
 
 use crate::assert::{Assertions, Outcome};
 use crate::capture::{Captured, Capturer};
+use crate::script::{self, Scripts};
 
 /// The result of one request in a session.
 #[derive(Debug)]
@@ -22,6 +24,8 @@ pub struct RequestRun {
     /// Results of a flow step's `retry.until` checks (empty otherwise).
     pub until: Vec<Outcome>,
     pub captures: Vec<Captured>,
+    /// `console.log` output of the request's scripts (secret values hidden).
+    pub logs: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -57,7 +61,13 @@ impl RequestRun {
             assertions: Vec::new(),
             until: Vec::new(),
             captures: Vec::new(),
+            logs: Vec::new(),
         }
+    }
+
+    fn with_logs(mut self, logs: Vec<String>) -> Self {
+        self.logs = logs;
+        self
     }
 }
 
@@ -124,6 +134,8 @@ pub struct SendSpec<'t> {
     pub capture: Option<&'t Captures>,
     /// `retry.until` checks; evaluated into [`RequestRun::until`].
     pub until: Option<(&'t AssertSpec, &'t Path)>,
+    /// A flow step's `[script]` and the file it is in.
+    pub script: Option<(&'t ScriptSpec, &'t Path)>,
 }
 
 impl<'t> SendSpec<'t> {
@@ -135,6 +147,7 @@ impl<'t> SendSpec<'t> {
             assert: None,
             capture: None,
             until: None,
+            script: None,
         }
     }
 }
@@ -344,14 +357,59 @@ impl<'a> Session<'a> {
             },
             Target::Inline { key, file, path } => (key, file, path.to_path_buf()),
         };
-        let scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
-        let built = match spec.target {
-            Target::Request(key) => build_request(self.collection, key, &scopes),
-            Target::Inline { .. } => build_file(self.collection, key, file, &path, &scopes),
+        let mut scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+        let scripts = Scripts::for_request(self.collection, key, file, &path, spec.script);
+        let (pre_codes, test_codes) =
+            match (scripts.codes(Phase::PreRequest), scripts.codes(Phase::Test)) {
+                (Ok(p), Ok(t)) => (p, t),
+                (Err(e), _) | (_, Err(e)) => return RequestRun::invalid(key, None, e),
+            };
+        let mut logs = Vec::new();
+        let mut changed: Option<RequestFile> = None;
+        if !pre_codes.is_empty() {
+            let before = script::script_request(file);
+            let chain = script::run_async(
+                pre_codes,
+                script::input(Phase::PreRequest, &scopes, before.clone(), None),
+            )
+            .await;
+            let mut hidden = script::secret_values(&scopes);
+            self.apply_script_vars(&chain.vars);
+            hidden.extend(self.hidden.iter().cloned());
+            logs.extend(chain.logs.iter().map(|l| crate::report::hide(l, &hidden)));
+            if let Some((label, e)) = &chain.error {
+                return RequestRun::invalid(
+                    key,
+                    None,
+                    crate::report::hide(&format!("{label} pre-request script: {e}"), &hidden),
+                )
+                .with_logs(logs);
+            }
+            if let Some(after) = &chain.request
+                && *after != before
+            {
+                let mut f = file.clone();
+                script::apply_request(&mut f, &before, after);
+                if let Err(e) = f.validate() {
+                    return RequestRun::invalid(
+                        key,
+                        None,
+                        format!("after the pre-request script: {e}"),
+                    )
+                    .with_logs(logs);
+                }
+                changed = Some(f);
+            }
+            scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+        }
+        let built = match (spec.target, &changed) {
+            (Target::Request(key), None) => build_request(self.collection, key, &scopes),
+            (_, Some(f)) => build_file(self.collection, key, f, &path, &scopes),
+            (Target::Inline { .. }, None) => build_file(self.collection, key, file, &path, &scopes),
         };
         let mut request = match built {
             Ok(r) => r,
-            Err(e) => return RequestRun::invalid(key, None, e.to_string()),
+            Err(e) => return RequestRun::invalid(key, None, e.to_string()).with_logs(logs),
         };
         for v in &self.hidden {
             if !request.settings.secrets.contains(v) {
@@ -397,10 +455,12 @@ impl<'a> Session<'a> {
                     assertions: Vec::new(),
                     until: Vec::new(),
                     captures: Vec::new(),
+                    logs,
                 };
             }
         };
-        let assertions = compiled.iter().flat_map(|c| c.evaluate(&resp)).collect();
+        let mut assertions: Vec<Outcome> =
+            compiled.iter().flat_map(|c| c.evaluate(&resp)).collect();
         let until = until.map(|u| u.evaluate(&resp)).unwrap_or_default();
         let captures: Vec<Captured> = capturers.iter().flat_map(|c| c.extract(&resp)).collect();
         for c in &captures {
@@ -413,6 +473,29 @@ impl<'a> Session<'a> {
                 }
             }
         }
+        if !test_codes.is_empty() {
+            // Test scripts see the values captured from this response.
+            let scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+            let shown = changed.as_ref().unwrap_or(file);
+            let chain = script::run_async(
+                test_codes,
+                script::input(
+                    Phase::Test,
+                    &scopes,
+                    script::script_request(shown),
+                    Some(script::script_response(&resp)),
+                ),
+            )
+            .await;
+            self.apply_script_vars(&chain.vars);
+            let mut hidden = script::secret_values(&scopes);
+            hidden.extend(request.secrets());
+            hidden.extend(self.hidden.iter().cloned());
+            logs.extend(chain.logs.iter().map(|l| crate::report::hide(l, &hidden)));
+            let mut outcomes = script::outcomes(&chain);
+            crate::report::scrub_outcomes(&mut outcomes, &hidden);
+            assertions.extend(outcomes);
+        }
         RequestRun {
             key: key.to_owned(),
             request: Some(request),
@@ -420,6 +503,19 @@ impl<'a> Session<'a> {
             assertions,
             until,
             captures,
+            logs,
+        }
+    }
+
+    /// Variables set by scripts become runtime variables, like captured values.
+    fn apply_script_vars(&mut self, vars: &[snapreq_script::VarSet]) {
+        for v in vars {
+            if v.secret {
+                self.runtime.set_secret(&v.name, &v.value);
+                self.hide(v.value.clone());
+            } else {
+                self.runtime.set(&v.name, &v.value);
+            }
         }
     }
 }

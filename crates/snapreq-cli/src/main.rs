@@ -215,12 +215,12 @@ async fn run_send(args: &SendArgs) -> u8 {
 
     let built = collection_cmd::resolve_target(args).and_then(|target| match target {
         collection_cmd::Target::Url => send::build_request(args)
-            .map(|r| (r, Default::default(), Default::default(), Vec::new())),
+            .map(|r| (r, Default::default(), Default::default(), Vec::new(), None)),
         collection_cmd::Target::Collection { root, key } => {
             collection_cmd::build(&root, &key, args)
         }
     });
-    let (mut request, checks, capture_spec, named_secrets) = match built {
+    let (mut request, checks, capture_spec, named_secrets, test_scripts) = match built {
         Ok(r) => r,
         Err(e) => return invalid(e.to_string()),
     };
@@ -316,6 +316,9 @@ async fn run_send(args: &SendArgs) -> u8 {
             );
             let mut outcomes = assertions.evaluate(&response);
             assert_view::scrub(&mut outcomes, &secrets);
+            if let Some(scripts) = test_scripts {
+                outcomes.extend(scripts.run(&response, &secrets));
+            }
             if json {
                 let mut doc = json_out::success(&request, &response, args.output.as_deref());
                 if !outcomes.is_empty() {

@@ -150,7 +150,7 @@ export interface Draft {
   /** Requests outside a collection: `host:port:addr[,addr]` lines (curl's `--resolve`). */
   resolve: string;
   /** File keys the builder does not edit. */
-  rest: Pick<RequestFile, "vars" | "capture" | "assert">;
+  rest: Pick<RequestFile, "vars" | "capture" | "assert" | "script">;
 }
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -336,7 +336,7 @@ export function draftFromFile(file: RequestFile): Draft {
     auth: authFromSpec(file.auth),
     settings: { ...(file.settings ?? {}) },
     resolve: "",
-    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert }),
+    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert, script: file.script }),
   };
 }
 
@@ -355,6 +355,7 @@ export function draftToFile(d: Draft): RequestFile {
     settings: Object.keys(settings).length ? settings : undefined,
     capture: d.rest.capture,
     assert: d.rest.assert,
+    script: scriptOf(d.rest.script),
   });
 }
 
@@ -457,6 +458,13 @@ export function draftToCore(d: Draft): CoreRequest {
 
 /** A copy without `undefined` values (they would otherwise reach JSON as missing keys anyway, but
  * comparisons of saved and edited files should not see them). */
+/** A `[script]` table without empty entries (`undefined` when nothing is left). */
+export function scriptOf(s: RequestFile["script"]): RequestFile["script"] {
+  if (!s) return undefined;
+  const out = Object.fromEntries(Object.entries(s).filter(([, v]) => typeof v === "string" && v.trim() !== ""));
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function clean<T extends object>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }

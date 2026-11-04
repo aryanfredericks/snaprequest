@@ -259,10 +259,47 @@ raw = { body = true }
 - A source that is missing fails the capture (the run reports it); the variable stays undefined, so a
   later request that uses it fails with "variable is not defined".
 
+### Scripts
+
+`[script]` holds JavaScript run before the request is built (`pre_request`) and after its response
+(`test`), inline or from a file next to the request file:
+
+```toml
+[script]
+pre_request = '''
+snapreq.variables.set("ts", Date.now());
+snapreq.request.headers.set("X-Signature", "{{sig}}");
+'''
+test_file = "checks/create-user.js"     # or `test = '''…'''`; not both
+```
+
+`snapreq.toml`, `folder.toml` and flow steps (`[step.script]`) may have one too. For a request they run in
+this order: the collection's, each enclosing folder's (outermost first), the request's, then the flow
+step's. A failing pre-request script stops the request; what earlier scripts did still counts.
+
+The `snapreq` object:
+
+| API | Meaning |
+|---|---|
+| `snapreq.variables.get(name)`, `.has(name)`, `.toObject()` | Variables the request sees (secret values included). |
+| `snapreq.variables.set(name, value)` | A runtime variable for the rest of the run, like a captured value. Values are turned into strings (objects as JSON). |
+| `snapreq.variables.setSecret(name, value)` | The same, hidden in every later trace and report. |
+| `snapreq.request.method`, `.url`, `.body` | Read in both phases; assignable in pre-request scripts. These are the file's values with `{{placeholders}}` still in them: what a script writes is filled in too. Bodies are text or JSON (objects are serialized). |
+| `snapreq.request.headers.get/has/set/add/remove/all/toObject` | The request's own headers (inherited ones are added when the request is built). |
+| `snapreq.response.status`, `.time` (ms), `.body`, `.text()`, `.json()`, `.headers.get(name)` | Test scripts only. |
+| `snapreq.test(name, fn)` | A check named `test <name>`: it passes unless `fn` throws. Shown and reported like `[assert]` checks; a failed one fails the request. |
+| `snapreq.expect(value)` | Assertions in Jest style (`toBe`, `toEqual`, `toContain`, `toBeGreaterThan`, `toMatch`, `toHaveProperty`, `toHaveLength`, `toBeTypeOf`, `toBeTruthy`, …, with `.not`) or Chai style (`to.equal`, `to.eql`, `to.include`, `to.be.above`, `to.have.property`, `to.have.lengthOf`, `to.be.a("string")`, `to.be.ok`, `to.exist`, …, with `.not` and `.deep`). |
+| `console.log(...)` (and `info`, `warn`, `error`) | Output shown with the result (`-v` for passing requests in `snapreq run`); secret values are hidden. |
+| `snapreq.phase` | `"pre_request"` or `"test"`. |
+
+Scripts run in a sandbox (ADR-031): only the JavaScript language itself (ES2023, no modules, no
+`require`, `fetch`, files, timers or processes), a fresh engine for every script, at most 2 seconds,
+32 MiB of memory and a bounded stack. Tests are synchronous.
+
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,
-`[headers]`, `[auth]`, `[settings]`.
+`[headers]`, `[auth]`, `[settings]`, `[script]`.
 
 ## Variables
 

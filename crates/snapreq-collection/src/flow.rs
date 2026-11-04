@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::assert::AssertSpec;
 use crate::capture::Captures;
-use crate::files::{AuthSpec, BodySpec, RequestFile, Settings};
+use crate::files::{AuthSpec, BodySpec, RequestFile, ScriptSpec, Settings};
 use crate::kv::KeyValues;
 use crate::vars::Variables;
 
@@ -95,6 +95,9 @@ pub struct StepSpec {
     pub capture: Captures,
     #[serde(default, skip_serializing_if = "no_checks")]
     pub assert: Box<AssertSpec>,
+    /// Scripts of this step (after the request file's own, for a `request` step).
+    #[serde(default, skip_serializing_if = "ScriptSpec::is_empty")]
+    pub script: ScriptSpec,
 }
 
 #[allow(clippy::borrowed_box)] // serde passes a reference to the field
@@ -177,6 +180,7 @@ impl StepSpec {
         if let Some(f) = self.inline_request() {
             f.validate()?;
         }
+        self.script.validate()?;
         if let Some(r) = &self.retry
             && r.max == 0
         {

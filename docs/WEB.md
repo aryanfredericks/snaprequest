@@ -18,6 +18,8 @@ server's workspace directory, so collections edited in the browser can be commit
   TLS verification and certificates, proxy, cookies; outside a collection also host pinning).
 - **Send** (`Ctrl+Enter`) sends what is in the editor, saved or not, with the selected environment.
   **Save** (`Ctrl+S`) writes the request file.
+- **Scripts** (collection requests) edits the request's pre-request and test JavaScript (`[script]`, see
+  docs/FORMAT.md); test results appear with the checks, and `console.log` output under *Script output*.
 - **Code** shows the request as a cURL command or a Python, JavaScript, Go or Rust snippet, with
   variables filled in and secret values read from environment variables (`SNAPREQ_SECRET_<NAME>`).
 

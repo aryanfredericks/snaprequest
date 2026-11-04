@@ -23,7 +23,7 @@ pub use capture::{CaptureSource, CaptureSpec, Captures};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,
-    RequestFile, Settings,
+    RequestFile, ScriptSpec, Settings,
 };
 pub use flow::{FLOW_SUFFIX, FlowFile, RetrySpec, StepSpec};
 pub use kv::KeyValues;
