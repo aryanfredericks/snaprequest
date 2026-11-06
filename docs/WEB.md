@@ -47,7 +47,8 @@ folder settings (variables, headers, auth, settings that requests inherit) and s
 
 **Import** (`⇩` next to *New collection*) turns a file or pasted text into a new collection: a cURL
 command, a Postman collection (with environment files), an OpenAPI document, an Insomnia export, a HAR
-recording or a Hurl file (which becomes a flow). Credentials found in it are stored as secret values, and
+recording or a Hurl file (which becomes a flow); Postman scripts are translated to SnapRequest scripts.
+Credentials found in it are stored as secret values, and
 anything that could not be imported exactly is listed before the dialog closes.
 
 The environment picker at the top selects the environment for the current collection. An

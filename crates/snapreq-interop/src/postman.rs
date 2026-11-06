@@ -3,8 +3,8 @@
 use serde_json::Value;
 use snapreq_collection::vars::valid_name;
 use snapreq_collection::{
-    AuthSpec, BodySpec, FolderFile, KeyValues, OAuth2Spec, PartSpec, RequestFile, Variable,
-    Variables,
+    AuthSpec, BodySpec, FolderFile, KeyValues, OAuth2Spec, PartSpec, RequestFile, ScriptSpec,
+    Variable, Variables,
 };
 use snapreq_core::model::{ApiKeyLocation, ClientAuth, KeyValue, OAuth2Grant};
 
@@ -26,13 +26,8 @@ pub(crate) fn import(text: &str) -> Result<Imported> {
     imp.collection.description = description(&doc["info"]["description"]);
     imp.collection.vars = variables(&mut imp, &doc["variable"], "collection");
     imp.collection.auth = auth(&mut imp, &doc["auth"]);
-    let mut scripts = count_scripts(&doc["event"]);
-    imp.items = items(&mut imp, &doc["item"], &mut scripts);
-    if scripts > 0 {
-        imp.warn(format!(
-            "{scripts} Postman script(s) (pre-request or tests) were not imported"
-        ));
-    }
+    imp.collection.script = scripts(&mut imp, &doc["event"], "the collection");
+    imp.items = items(&mut imp, &doc["item"]);
     Ok(imp)
 }
 
@@ -63,19 +58,45 @@ pub(crate) fn environment(text: &str) -> Result<(String, Variables)> {
     ))
 }
 
-fn count_scripts(events: &Value) -> usize {
-    events.as_array().map_or(0, |e| {
-        e.iter()
-            .filter(|ev| {
-                let exec = &ev["script"]["exec"];
-                exec.as_array().is_some_and(|lines| {
-                    lines
-                        .iter()
-                        .any(|l| l.as_str().is_some_and(|s| !s.trim().is_empty()))
-                }) || exec.as_str().is_some_and(|s| !s.trim().is_empty())
-            })
-            .count()
-    })
+/// Postman's `prerequest` and `test` events as a `[script]` table, translated (ADR-032).
+fn scripts(imp: &mut Imported, events: &Value, place: &str) -> ScriptSpec {
+    let mut spec = ScriptSpec::default();
+    for ev in events.as_array().into_iter().flatten() {
+        let exec = &ev["script"]["exec"];
+        let src = match exec {
+            Value::Array(lines) => lines
+                .iter()
+                .map(|l| l.as_str().unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Value::String(s) => s.clone(),
+            _ => continue,
+        };
+        if src.trim().is_empty() {
+            continue;
+        }
+        let (slot, phase) = match ev["listen"].as_str() {
+            Some("prerequest") => (&mut spec.pre_request, "pre-request"),
+            Some("test") => (&mut spec.test, "test"),
+            _ => continue,
+        };
+        let t = crate::postman_script::translate(&src);
+        if t.disabled {
+            imp.warn(format!(
+                "{place}: the {phase} script could not be translated; it was kept as a comment"
+            ));
+        } else if t.skipped > 0 {
+            imp.warn(format!(
+                "{place}: {} line(s) of the {phase} script could not be translated and were commented out",
+                t.skipped
+            ));
+        }
+        match slot {
+            Some(existing) => existing.push_str(&t.code),
+            None => *slot = Some(t.code),
+        }
+    }
+    spec
 }
 
 fn description(v: &Value) -> Option<String> {
@@ -125,19 +146,19 @@ fn variables(imp: &mut Imported, list: &Value, place: &str) -> Variables {
     vars
 }
 
-fn items(imp: &mut Imported, list: &Value, scripts: &mut usize) -> Vec<Node> {
+fn items(imp: &mut Imported, list: &Value) -> Vec<Node> {
     let mut out = Vec::new();
     for item in list.as_array().into_iter().flatten() {
-        *scripts += count_scripts(&item["event"]);
         let name = item["name"].as_str().unwrap_or("item").to_owned();
         if item["item"].is_array() {
             let folder = FolderFile {
                 description: description(&item["description"]),
                 auth: auth(imp, &item["auth"]),
                 vars: variables(imp, &item["variable"], "folder"),
+                script: scripts(imp, &item["event"], &format!("folder `{name}`")),
                 ..FolderFile::default()
             };
-            let children = items(imp, &item["item"], scripts);
+            let children = items(imp, &item["item"]);
             out.push(Node::Folder {
                 name,
                 file: folder,
@@ -271,6 +292,7 @@ fn request(imp: &mut Imported, name: &str, item: &Value) -> RequestFile {
     r.headers = headers(&req["header"]);
     r.body = body(imp, &req["body"], &r.headers);
     r.auth = auth(imp, &req["auth"]);
+    r.script = scripts(imp, &item["event"], &format!("`{name}`"));
     protect_headers(imp, &mut r.headers, &mut r.auth);
     tidy_headers(&mut r.headers, r.body.as_ref());
     if let Some(m) = &r.method

@@ -179,7 +179,31 @@ fn postman_collection_with_environment() {
     }
     assert!(shared_secrets(&dir).contains("pk_live_1234567890"));
 
-    for needle in ["page size", "Postman script", "{{$randomColor}}", "me.png"] {
+    // Scripts are translated; one that cannot be is kept as a comment.
+    let list_script = list.file.script.test.as_deref().unwrap();
+    assert_eq!(
+        list_script.trim(),
+        "snapreq.test('ok', () => snapreq.expect(snapreq.response.status).to.equal(200));"
+    );
+    let login = c.find("public/login").unwrap();
+    assert!(
+        login
+            .file
+            .script
+            .pre_request
+            .as_deref()
+            .unwrap()
+            .lines()
+            .all(|l| l.starts_with("//")),
+        "{:?}",
+        login.file.script
+    );
+    for needle in [
+        "page size",
+        "`Login`: the pre-request script could not be translated",
+        "{{$randomColor}}",
+        "me.png",
+    ] {
         assert!(
             summary.warnings.iter().any(|w| w.contains(needle)),
             "{needle}: {:?}",

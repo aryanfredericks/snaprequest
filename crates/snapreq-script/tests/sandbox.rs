@@ -91,6 +91,8 @@ fn test_scripts_check_the_response_in_jest_and_chai_style() {
             snapreq.expect(r.time).to.be.below(1000);
             snapreq.expect(true).to.be.true;
             snapreq.expect(null).to.not.exist;
+            snapreq.expect(r.json()).to.have.property("owner").that.has.property("email").and.equal("a@b.test");
+            snapreq.expect(r.json()).to.not.have.property("missing");
         });
         snapreq.test("jest", () => {
             snapreq.expect(r.json()).toEqual(expect_doc());
@@ -262,4 +264,11 @@ fn memory_and_stack_are_limited() {
     ok("globalThis.leak = 'x'", Phase::Test);
     let out = ok("console.log(typeof globalThis.leak)", Phase::Test);
     assert_eq!(out.logs, ["undefined"]);
+}
+
+#[test]
+fn syntax_is_checked_without_running() {
+    assert!(snapreq_script::check_syntax("while (true) {}").is_ok());
+    let err = snapreq_script::check_syntax("snapreq.test(").unwrap_err();
+    assert!(!err.is_empty());
 }

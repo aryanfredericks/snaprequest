@@ -1052,9 +1052,53 @@ async fn run_writes_junit_html_and_json_reports_without_secrets() {
     );
 }
 
+/// A stand-in for postman-echo.com: `/get` answers `{"args": {query}}`, `/post` `{"data": body}`.
+async fn postman_echo() -> SocketAddr {
+    async fn handle(
+        req: hyper::Request<hyper::body::Incoming>,
+    ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
+        let query: serde_json::Map<String, serde_json::Value> = req
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .split('&')
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                let (k, v) = p.split_once('=').unwrap_or((p, ""));
+                (k.to_owned(), serde_json::Value::String(v.to_owned()))
+            })
+            .collect();
+        let path = req.uri().path().to_owned();
+        let body = req.into_body().collect().await.unwrap().to_bytes();
+        let doc = match path.as_str() {
+            "/get" => serde_json::json!({ "args": query }),
+            _ => serde_json::json!({ "data": String::from_utf8_lossy(&body) }),
+        };
+        Ok(hyper::Response::builder()
+            .header("content-type", "application/json; charset=utf-8")
+            .body(Full::new(Bytes::from(doc.to_string())))
+            .unwrap())
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (tcp, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(tcp), service_fn(handle))
+                    .await;
+            });
+        }
+    });
+    addr
+}
+
+/// Phase 9 acceptance: a real public Postman collection (Newman's sample) imports, its test
+/// scripts are translated, and it runs with every test passing.
 #[tokio::test]
 async fn import_a_public_postman_collection_and_run_it() {
-    let addr = server().await;
+    let addr = postman_echo().await;
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../snapreq-interop/tests/fixtures");
     // Newman's sample collection, pointed at the local echo server instead of postman-echo.com.
     let sample = std::fs::read_to_string(fixtures.join("postman-newman-sample.json"))
@@ -1072,20 +1116,31 @@ async fn import_a_public_postman_collection_and_run_it() {
     assert_eq!(doc["requests"], 3);
     assert_eq!(doc["dir"], "sample-postman-collection");
     assert!(
-        err(&o).contains("warning: 1 Postman script(s)"),
-        "{}",
+        !err(&o).contains("warning"),
+        "translated without loss: {}",
         err(&o)
     );
-
     let dir = work.join("sample-postman-collection");
+    let script = std::fs::read_to_string(dir.join("a-simple-get-request.toml")).unwrap();
+    assert!(
+        script.contains("snapreq.test('expect response be 200'"),
+        "{script}"
+    );
+
     let o = run(
-        &["run", dir.to_str().unwrap(), "--color", "never"],
+        &["run", dir.to_str().unwrap(), "--color", "never", "-v"],
         None,
         None,
         &[],
     )
     .await;
-    assert!(o.status.success(), "{}{}", out(&o), err(&o));
+    let text = out(&o);
+    assert!(o.status.success(), "{text}{}", err(&o));
+    assert!(text.contains("✓ test expect response be 200"), "{text}");
+    assert!(
+        text.contains("✓ test expect response json contain args"),
+        "{text}"
+    );
     let o = run(
         &[
             "send",
@@ -1099,11 +1154,6 @@ async fn import_a_public_postman_collection_and_run_it() {
     )
     .await;
     let echoed = out(&o);
-    assert!(echoed.contains("POST /post"), "{echoed}");
-    assert!(
-        echoed.contains("content-type: application/json"),
-        "{echoed}"
-    );
     assert!(echoed.contains("Duis posuere"), "{echoed}");
 
     // Importing again into the same directory is refused.

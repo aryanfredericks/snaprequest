@@ -410,3 +410,22 @@ translate Postman scripts into them.
 accepted because scripts come from editors (docs/SECURITY-REVIEW.md). Scratch requests in the UI (outside a
 collection) have no scripts.
 
+## ADR-032: Postman scripts are translated by rewriting, and checked to compile
+**Status:** Accepted (2026-11-04)
+**Context:** PLAN P9.4: translate simple Postman `pm.test`/`pm.expect` scripts during import where possible. The
+Phase 9 acceptance asks that a real public Postman collection imports and runs.
+**Decision:** `snapreq-interop::postman_script` rewrites a script's source with an ordered list of patterns
+instead of parsing JavaScript: `pm.test`/`pm.expect` become `snapreq.test`/`snapreq.expect` (whose Chai chains,
+including `.property(...)` changing the subject, match Postman's), `pm.response.to.have.status/header/body` and
+`to.be.ok/success/notFound/...` become `expect` calls, `pm.response.json()/text()/code/responseTime/headers`,
+variable scopes (`environment`, `collectionVariables`, `variables`, `globals`, `iterationData`) map to
+`snapreq.variables` (one runtime scope), `pm.request.headers.add/upsert/remove` to the request API, and the
+legacy `tests["…"] = …`, `responseBody`, `postman.set/getEnvironmentVariable` forms are covered. A line that
+still uses `pm.`, `postman.`, `require` or `tests[` is commented out when it is a statement on its own; if such a
+line spans more (a callback), or the result does not compile (checked with QuickJS without running it), the
+whole script is kept as a comment. Every loss is a warning. Collection, folder and request events map to their
+`[script]` tables.
+**Consequences:** Typical generated and hand-written Postman tests run unchanged in meaning; anything relying on
+Postman's sandbox libraries (`pm.sendRequest`, cookies, `require('lodash')`, visualizer) needs editing, and the
+import says where. Rewriting can, rarely, touch text inside strings that looks like a `pm.` call.
+

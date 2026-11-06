@@ -3,9 +3,9 @@
 > Read this first when resuming a session. Update it at the end of every session.
 
 ## Current position
-- **Phase:** 9 Interoperability and scripting (Phases 0–8 complete)
-- **Current checkpoint:** P9.4, translating simple Postman `pm.test`/`pm.expect` scripts during import.
-  P9.1 import, P9.2 export and P9.3 scripting are done.
+- **Phase:** 10 Advanced protocols and features (Phases 0–9 complete)
+- **Current checkpoint:** P10.1 WebSocket client, not started. Phase 9 finished with P9.4 (Postman script
+  translation) on 2026-11-06.
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -26,12 +26,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P9.4 Postman script translation during import into `[script]` (`pm.test` → `snapreq.test`,
-   `pm.expect` → `snapreq.expect` (Chai style is supported), `pm.response.*`, `pm.environment/variables/
-   collectionVariables.get/set` → `snapreq.variables`); untranslatable lines are kept commented with a warning.
-   The Newman sample's scripts are the first test; Phase 9 acceptance: it imports and runs (passing).
+1. P10.1 WebSocket client (send/receive, message log), after the maintainer has seen the Phase 9 report.
 2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
    an admin role (server-wide audit, recovering ownerless workspaces).
+
+## Postman script notes (P9.4)
+- `snapreq-interop::postman_script::translate` (ADR-032): ordered regex rewrites of `pm.*`/legacy API to
+  `snapreq.*`; leftover `pm.`/`postman.`/`require`/`tests[` lines are commented out when balanced, otherwise
+  the whole script is kept as a comment; the result is compiled with `snapreq_script::check_syntax`.
+  Collection, folder and request events map to `[script]`; every loss is an import warning.
+- `prelude.js`: `expect(fn).to.throw()`/`toThrow()`, Chai `.property(name)` now changes the subject.
+- The CLI acceptance test uses a postman-echo stand-in; the Newman sample imports with no warnings and its
+  translated tests pass.
 
 ## Script notes (P9.3)
 - New crate `snapreq-script` (ADR-031): `run(code, Input, Limits)`, `run_chain`; the API is `src/prelude.js`
@@ -652,6 +658,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P9.4 — 2026-11-06 — Postman pre-request/test scripts translated to `[script]` during import (`pm.*` and legacy API rewritten, untranslatable lines commented with warnings, result compile-checked). ADR-032. The Newman sample imports and its tests pass. **Phase 9 complete.**
 - P9.3 — 2026-11-04 — Pre-request and test scripts in JavaScript (QuickJS sandbox, `snapreq.*` API with Jest/Chai `expect`), in send, run, flows, the server and the UI. ADR-031.
 - P9.2 — 2026-11-04 — Export: `send --export curl|python|javascript|go|rust`, `run --report har:FILE`, API export and history HAR, "Code" dialog and HAR download in the UI; secrets become environment variable references. ADR-030.
 - P9.1 — 2026-11-04 — Import from cURL, Postman v2.1 (+ environments), OpenAPI 3.x, Insomnia v4/v5, HAR and Hurl (as flows); CLI, API and UI; credentials become secret variables. ADR-029.
@@ -690,3 +697,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-04 (25):** P9.1 done (maintainer: "start with phase 9"): `snapreq-interop` crate, `snapreq import`, `POST /api/v1/collections/import`, Import dialog. The public Newman sample collection imports and runs. 423 Rust tests, 45 unit tests and 35 Playwright tests pass.
 - **2026-11-04 (26):** P9.2 done: export to cURL, Python, JavaScript, Go and Rust (secrets read from `SNAPREQ_SECRET_*`), HAR from runs and history. 431 Rust tests, 46 unit tests and 37 Playwright tests pass.
 - **2026-11-04 (27):** P9.3 done: `snapreq-script` (rquickjs) with sandbox tests (loops, memory, stack, no modules or host APIs), `[script]` in the format, scripts in sessions, CLI send/run, server and UI. 439 Rust tests, 47 unit tests and 38 Playwright tests pass.
+- **2026-11-06 (28):** P9.4 done, which completes Phase 9: Postman pre-request/test scripts are translated during import (ADR-032); the Newman sample imports without warnings and its tests pass. 443 Rust tests pass. Stopped for the maintainer's report before Phase 10.

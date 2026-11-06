@@ -2445,6 +2445,7 @@ dependencies = [
  "serde_json",
  "snapreq-collection",
  "snapreq-core",
+ "snapreq-script",
  "thiserror",
  "time",
  "toml",

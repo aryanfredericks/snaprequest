@@ -255,6 +255,19 @@
     toBeOneOf(list) {
       return this.check(list.some((x) => deepEqual(x, this.actual)), `to be one of ${brief(list)}`);
     }
+    /** Passes when the value, a function, throws. */
+    throw() {
+      let threw = false;
+      try {
+        this.actual();
+      } catch (e) {
+        threw = true;
+      }
+      return this.check(threw, "to throw");
+    }
+    toThrow() {
+      return this.throw();
+    }
     toBeTypeOf(type) {
       const t = type === "integer" ? (Number.isInteger(this.actual) ? "integer" : typeOf(this.actual)) : typeOf(this.actual);
       return this.check(t === type, `to be of type ${type}`);
@@ -343,8 +356,11 @@
     match(re) {
       return this.toMatch(re);
     }
+    /** Chai: later assertions in the chain apply to the property's value. */
     property(name, ...value) {
-      return this.toHaveProperty([String(name)], ...value);
+      this.toHaveProperty([String(name)], ...value);
+      if (this.negate) return this;
+      return new Expectation(this.actual[name], false);
     }
     lengthOf(n) {
       return this.toHaveLength(n);

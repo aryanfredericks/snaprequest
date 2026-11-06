@@ -209,3 +209,30 @@ pub fn run_chain(scripts: &[(String, String)], mut input: Input, limits: &Limits
     chain.request = Some(input.request);
     chain
 }
+
+/// Whether `code` is a valid script, without running it (it is only compiled).
+pub fn check_syntax(code: &str) -> Result<(), String> {
+    let rt = Runtime::new().map_err(|e| e.to_string())?;
+    rt.set_memory_limit(Limits::default().memory);
+    let deadline = Instant::now() + Duration::from_millis(500);
+    rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    let ctx = Context::full(&rt).map_err(|e| e.to_string())?;
+    ctx.with(|ctx| {
+        ctx.globals()
+            .set("__snapreq_code", code)
+            .map_err(|e| e.to_string())?;
+        match ctx.eval::<(), _>(
+            "new Function(\"snapreq\", \"console\", '\"use strict\";\\n' + globalThis.__snapreq_code);",
+        ) {
+            Ok(()) => Ok(()),
+            Err(rquickjs::Error::Exception) => {
+                let caught = ctx.catch();
+                Err(caught
+                    .as_exception()
+                    .and_then(rquickjs::Exception::message)
+                    .unwrap_or_else(|| "invalid script".into()))
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    })
+}

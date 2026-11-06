@@ -72,6 +72,12 @@ written into `--into DIR` (default: a directory named after the collection), whi
 `--name` sets its name and `--json` prints a summary. Things that could not be imported exactly (scripts,
 unsupported auth or asserts, file paths to copy, variables nothing defines) are printed as warnings.
 
+Postman pre-request and test scripts become `[script]` tables: `pm.test`, `pm.expect` (Chai chains are
+supported as they are), `pm.response.*`, `pm.environment/collectionVariables/variables/globals.get/set` and the
+legacy `tests[...]`/`postman.*` API are rewritten to the `snapreq` API (see FORMAT.md, "Scripts"). Lines
+using something without an equivalent (`pm.sendRequest`, `pm.cookies`, `require`, …) are commented out, or the
+whole script is kept as a comment, with a warning.
+
 Credentials in the file (passwords, tokens, API keys, cookies, client secrets) are never written into
 collection files: they become secret variables, and their values are stored in `.secrets/` (sealed when
 `SNAPREQ_SECRET_KEY` is set). What each format maps to is described in ADR-029 (`docs/DECISIONS.md`).

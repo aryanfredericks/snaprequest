@@ -81,6 +81,18 @@
       "item": [
         {
           "name": "Login",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.sendRequest(\"https://auth.example.com/nonce\", function (err, res) {",
+                  "  pm.environment.set(\"nonce\", res.json().nonce);",
+                  "});"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "body": {

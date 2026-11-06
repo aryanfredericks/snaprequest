@@ -18,6 +18,7 @@ mod insomnia;
 mod model;
 mod openapi;
 mod postman;
+mod postman_script;
 mod util;
 
 use std::fmt;
