@@ -460,3 +460,18 @@ messages for every execution and accepts `cancel`; results of event streams carr
 an Events tab (live), and a Stop button for any running request.
 **Consequences:** No automatic reconnects (EventSource's retry loop): a debugging tool shows what the
 server did. `snapreq run` treats streams like any response, so an endless stream needs a `timeout_ms`.
+
+## ADR-035: GraphQL is a body type; introspection on the server, schema-aware editing in the browser
+**Status:** Accepted (2026-11-06)
+**Context:** PLAN P10.3: a GraphQL query editor, variables, and schema introspection.
+**Decision:** GraphQL is a body: core `Body::Graphql { query, variables, operation_name }` encodes the
+standard JSON document (variables must be a JSON object; checked before sending), and request files have
+`type = "graphql"` (`query` or `query_file`, `variables` as JSON text, both interpolated). Such a request
+defaults to POST. `snapreq-interop::graphql` holds the introspection query (fields every server supports)
+and turns `__schema` into SDL. The CLI has `--graphql/--variables/--operation` on `send` and `snapreq
+introspect`; the server has `POST /requests/graphql-schema` (built like an export: the request's own auth
+applies; viewers may use it because only the body changes). The UI uses `cm6-graphql` with `graphql-js`
+(`buildClientSchema`) for completion, validation and hover docs, loaded on demand in its own chunk, plus a
+schema browser.
+**Consequences:** GraphQL over GET, subscriptions (over WebSockets or SSE) and persisted queries are not
+special-cased; a GraphQL subscription can be tried with a WebSocket request and saved messages.

@@ -271,6 +271,14 @@ Two optional fields:
 - `"capture_wire": true`: record the raw bytes sent and received (a `wire` trace event), whatever the
   request's settings say. Credentials in the wire log are redacted like everywhere else.
 
+### GraphQL schemas
+
+`POST /api/v1/requests/graphql-schema` takes the body of `/requests/export` (without `format`), builds the
+request the same way, replaces its body with the standard introspection query (POST), sends it, and
+returns `{ "schema", "sdl" }`: the `__schema` object of the answer and the schema as SDL. The request's
+headers, auth and settings are used. An answer without a schema (introspection disabled, GraphQL errors, not
+JSON) is a 422 naming the reason. Viewers can introspect saved requests. Nothing is stored in history.
+
 ### Requests as code
 
 `POST /api/v1/requests/export` takes the same body as `/requests/execute` (without `capture_wire`) plus

@@ -21,7 +21,8 @@ export type CoreBody =
   | { type: "json"; content: string }
   | { type: "form"; fields: KeyValue[] }
   | { type: "multipart"; parts: CorePart[] }
-  | { type: "file"; path: string; content_type?: string };
+  | { type: "file"; path: string; content_type?: string }
+  | { type: "graphql"; query: string; variables?: string; operation_name?: string };
 
 export type CorePart = { name: string; enabled?: boolean } & (
   | { kind: "text"; value: string }
@@ -244,7 +245,8 @@ export type BodySpec =
   | { type: "json"; content?: string; file?: string }
   | { type: "form"; fields?: KvTable }
   | { type: "multipart"; parts?: PartSpec[] }
-  | { type: "file"; file: string; content_type?: string };
+  | { type: "file"; file: string; content_type?: string }
+  | { type: "graphql"; query?: string; query_file?: string; variables?: string; operation_name?: string };
 
 export interface PartSpec {
   name: string;

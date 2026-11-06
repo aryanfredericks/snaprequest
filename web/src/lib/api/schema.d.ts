@@ -403,6 +403,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/requests/graphql-schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["graphql_schema"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -801,6 +817,19 @@ export interface components {
             passed: boolean;
             target_key: string;
             workspace?: string | null;
+        };
+        SchemaBody: {
+            /** @description Or a collection request: collection id and request key (as for `/requests/execute`). */
+            collection?: string | null;
+            env?: string | null;
+            /** @description Unsaved contents of the request file (editors). */
+            file?: Record<string, unknown> | null;
+            key?: string | null;
+            /** @description A complete request (the core JSON model): its URL, headers, auth and settings are used. */
+            request?: Record<string, unknown> | null;
+            vars?: {
+                [key: string]: string;
+            };
         };
         SecretBody: {
             value: string;
@@ -2514,6 +2543,57 @@ export interface operations {
                 };
             };
             /** @description Does not build */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    graphql_schema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchemaBody"];
+            };
+        };
+        responses: {
+            /** @description `{ schema, sdl }`: the `__schema` object of the introspection answer and the schema as SDL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The request does not build, cannot be sent, or the answer has no schema */
             422: {
                 headers: {
                     [name: string]: unknown;

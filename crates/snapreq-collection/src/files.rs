@@ -202,9 +202,13 @@ impl RequestFile {
         }
     }
 
-    /// The method, defaulting to GET.
+    /// The method, defaulting to GET (POST for a GraphQL body).
     pub fn method(&self) -> &str {
-        self.method.as_deref().unwrap_or("GET")
+        match (&self.method, &self.body) {
+            (Some(m), _) => m,
+            (None, Some(BodySpec::Graphql { .. })) => "POST",
+            (None, _) => "GET",
+        }
     }
 
     /// Checks rules serde cannot express. Returns the problem, if any.
@@ -223,6 +227,15 @@ impl RequestFile {
                     _ => {}
                 }
             }
+            Some(BodySpec::Graphql {
+                query, query_file, ..
+            }) => match (query, query_file) {
+                (Some(_), Some(_)) => {
+                    return Err("body: set either `query` or `query_file`, not both".into());
+                }
+                (None, None) => return Err("body: set `query` or `query_file`".into()),
+                _ => {}
+            },
             Some(BodySpec::Multipart { parts }) => {
                 for p in parts {
                     match (&p.value, &p.file) {
@@ -452,6 +465,19 @@ pub enum BodySpec {
         file: PathBuf,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         content_type: Option<String>,
+    },
+    /// A GraphQL operation (PLAN P10.3): sent as JSON, POST unless `method` says otherwise.
+    Graphql {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        /// A `.graphql` file relative to the request file, instead of `query`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query_file: Option<PathBuf>,
+        /// A JSON object, as text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        variables: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation_name: Option<String>,
     },
 }
 

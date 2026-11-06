@@ -198,6 +198,21 @@ pub(crate) async fn encode(body: &Body) -> Result<EncodedBody> {
             vec![Segment::Bytes(Bytes::from(content.clone()))],
             content_type,
         ),
+        Body::Graphql {
+            query,
+            variables,
+            operation_name,
+        } => EncodedBody::from_segments(
+            vec![Segment::Bytes(Bytes::from(
+                crate::model::graphql_document(
+                    query,
+                    variables.as_deref(),
+                    operation_name.as_deref(),
+                )
+                .map_err(Error::InvalidRequest)?,
+            ))],
+            content_type,
+        ),
         Body::Form { fields } => {
             let mut ser = url::form_urlencoded::Serializer::new(String::new());
             for f in fields.iter().filter(|f| f.enabled) {

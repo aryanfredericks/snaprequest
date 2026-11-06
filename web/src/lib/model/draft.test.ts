@@ -129,3 +129,30 @@ describe("scripts", () => {
     expect(draftToFile(d).script).toBeUndefined();
   });
 });
+
+describe("GraphQL and WebSocket requests", () => {
+  it("GraphQL bodies default to POST and round-trip", () => {
+    const file: RequestFile = {
+      url: "{{base}}/graphql",
+      body: { type: "graphql", query: "query Me { me { id } }", variables: '{"a": 1}', operation_name: "Me" },
+    };
+    const d = draftFromFile(file);
+    expect(d.method).toBe("POST");
+    expect(draftToFile(d)).toEqual(file);
+    // An explicit GET is kept.
+    d.method = "GET";
+    expect(draftToFile(d).method).toBe("GET");
+    expect(draftToCore({ ...d, method: "POST" }).body).toEqual({ type: "graphql", query: "query Me { me { id } }", variables: '{"a": 1}', operation_name: "Me" });
+    const fromFile = draftFromFile({ url: "x", body: { type: "graphql", query_file: "q.graphql" } });
+    expect(draftToFile(fromFile).body).toEqual({ type: "graphql", query_file: "q.graphql" });
+  });
+
+  it("WebSocket requests are recognized by URL or table", async () => {
+    const { isWebSocket } = await import("./draft");
+    expect(isWebSocket(draftFromFile({ url: "wss://a/ws" }))).toBe(true);
+    expect(isWebSocket(draftFromFile({ url: "{{base}}/ws", websocket: {} }))).toBe(true);
+    expect(isWebSocket(draftFromFile({ url: "https://a" }))).toBe(false);
+    const f: RequestFile = { url: "ws://a", websocket: { messages: [{ name: "hi", content: "x" }] } };
+    expect(draftToFile(draftFromFile(f))).toEqual(f);
+  });
+});

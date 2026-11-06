@@ -57,6 +57,17 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Ws(WsArgs),
 
+    /// Fetch a GraphQL schema by introspection and print it as SDL.
+    ///
+    /// Sends the standard introspection query (POST) with the request's headers, auth and
+    /// settings; `--format json` prints the `__schema` object instead.
+    ///
+    /// Examples:
+    ///   snapreq introspect https://api.example.com/graphql -H 'Authorization: Bearer TOKEN'
+    ///   snapreq introspect -c my-api graphql/me -e dev > schema.graphql
+    #[command(verbatim_doc_comment)]
+    Introspect(IntrospectArgs),
+
     /// Read a Server-Sent Events stream and print each event as it arrives.
     ///
     /// Events are printed in the stream's own format (`id:`, `event:`, `data:` lines;
@@ -420,6 +431,12 @@ pub(crate) enum SecretCommand {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct IntrospectArgs {
+    #[command(flatten)]
+    pub request: SendArgs,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct SseArgs {
     /// Stop after this many events.
     #[arg(
@@ -701,6 +718,29 @@ pub(crate) struct SendArgs {
     /// Send this file as the raw body.
     #[arg(long, value_name = "PATH", group = "body", help_heading = "Request")]
     pub file: Option<PathBuf>,
+
+    /// A GraphQL query (`@file.graphql` reads a file); sent as JSON, with POST unless a
+    /// method is given.
+    #[arg(long, value_name = "QUERY", group = "body", help_heading = "Request")]
+    pub graphql: Option<String>,
+
+    /// GraphQL variables, a JSON object (`@file.json` reads a file).
+    #[arg(
+        long,
+        value_name = "JSON",
+        requires = "graphql",
+        help_heading = "Request"
+    )]
+    pub variables: Option<String>,
+
+    /// The GraphQL operation to run, when the query has several.
+    #[arg(
+        long,
+        value_name = "NAME",
+        requires = "graphql",
+        help_heading = "Request"
+    )]
+    pub operation: Option<String>,
 
     // --- Connection ---------------------------------------------------------------
     /// Total time limit in seconds (0 = none). Default 30.

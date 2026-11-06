@@ -5,6 +5,7 @@
   import { BODY_TYPES, part, type BodyDraft, type BodyType } from "../model/draft";
   import { CONTENT_TYPES } from "../model/headers";
   import CodeEditor from "./CodeEditor.svelte";
+  import GraphqlSchema from "./GraphqlSchema.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
 
   interface Props {
@@ -12,8 +13,22 @@
     vars?: VariableInfo[] | null;
     /** Paths are relative to the request file (collections) or the server's directory. */
     inCollection: boolean;
+    /** GraphQL: the schema fetched by introspection, and how to fetch it. */
+    graphql?: { schema: unknown; sdl: string } | null;
+    schemaState?: { busy: boolean; error: string | null };
+    onschema?: () => void;
   }
-  let { body, vars = null, inCollection }: Props = $props();
+  let { body, vars = null, inCollection, graphql = null, schemaState = { busy: false, error: null }, onschema }: Props = $props();
+  let browsing = $state(false);
+  const variablesError = $derived.by(() => {
+    if (body.type !== "graphql" || !body.variables.trim()) return null;
+    try {
+      const v: unknown = JSON.parse(body.variables.replace(/\{\{[^{}]*\}\}/g, "0"));
+      return v !== null && typeof v === "object" && !Array.isArray(v) ? null : "variables must be a JSON object";
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  });
 
   const labels: Record<BodyType, string> = {
     none: "None",
@@ -22,6 +37,7 @@
     form: "Form (urlencoded)",
     multipart: "Multipart",
     file: "File",
+    graphql: "GraphQL",
   };
   const pathHint = $derived(
     inCollection ? "path relative to the request file" : "path on the server",
@@ -30,7 +46,7 @@
   // Decided when another body is shown (another tab), not while typing the path.
   $effect.pre(() => {
     const b = body;
-    untrack(() => (fromFile = b.file !== "" && (b.type === "json" || b.type === "text")));
+    untrack(() => (fromFile = b.file !== "" && (b.type === "json" || b.type === "text" || b.type === "graphql")));
   });
   let jsonError = $derived.by(() => {
     if (body.type !== "json" || fromFile || !body.content.trim()) return null;
@@ -75,6 +91,39 @@
       />
       {#if jsonError}<p class="warn" role="status">Not valid JSON: {jsonError}</p>{/if}
     {/if}
+  {:else if body.type === "graphql"}
+    <div class="row">
+      <label class="check"><input type="checkbox" bind:checked={fromFile} onchange={() => !fromFile && (body.file = "")} /> Query from a file</label>
+      <label class="ct">Operation <input bind:value={body.operationName} placeholder="when the query has several" aria-label="Operation name" /></label>
+      {#if onschema}
+        <button type="button" onclick={onschema} disabled={schemaState.busy} title="Fetch the schema by introspection (completion and checks in the editor)">
+          {schemaState.busy ? "Fetching…" : graphql ? "Refresh schema" : "Fetch schema"}
+        </button>
+        {#if graphql}
+          <button type="button" aria-expanded={browsing} onclick={() => (browsing = !browsing)}>{browsing ? "Hide schema" : "Browse schema"}</button>
+        {/if}
+      {/if}
+    </div>
+    {#if schemaState.error}<p class="warn" role="alert">{schemaState.error}</p>{/if}
+    {#if browsing && graphql}
+      <GraphqlSchema schema={graphql.schema} sdl={graphql.sdl} />
+    {/if}
+    {#if fromFile}
+      <label class="field">File <input bind:value={body.file} placeholder="{pathHint}, e.g. queries/user.graphql" /></label>
+    {:else}
+      <CodeEditor
+        value={body.query}
+        lang="graphql"
+        schema={graphql?.schema ?? null}
+        label="GraphQL query"
+        placeholder={"query Me {\n  me { id name }\n}"}
+        onchange={(v) => (body.query = v)}
+        class="grow"
+      />
+    {/if}
+    <h4 class="sub">Variables <span class="muted">(a JSON object; placeholders allowed)</span></h4>
+    <CodeEditor value={body.variables} lang="json" highlightVars {vars} label="GraphQL variables" placeholder={'{ "id": "{{user_id}}" }'} onchange={(v) => (body.variables = v)} class="vars" />
+    {#if variablesError}<p class="warn" role="status">Variables: {variablesError}</p>{/if}
   {:else if body.type === "form"}
     <KeyValueEditor bind:rows={body.fields} label="Form fields" {vars} />
   {:else if body.type === "multipart"}
@@ -124,6 +173,13 @@
 </div>
 
 <style>
+  .sub {
+    margin: 0.3rem 0 0;
+    font-size: 0.85rem;
+  }
+  .body :global(.vars) {
+    min-height: 5rem;
+  }
   .body {
     display: flex;
     flex-direction: column;

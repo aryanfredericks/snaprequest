@@ -13,7 +13,7 @@ mod trace;
 
 pub use auth::{ApiKeyLocation, Auth, ClientAuth, OAuth2, OAuth2Grant};
 pub(crate) use body::guess_content_type;
-pub use body::{Body, KeyValue, MultipartPart, PartValue};
+pub use body::{Body, KeyValue, MultipartPart, PartValue, graphql_document};
 pub use request::Request;
 pub use response::{Header, HttpVersion, Response, Sizes, Timings};
 pub use settings::{

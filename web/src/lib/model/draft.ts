@@ -29,7 +29,7 @@ export interface Row {
 
 export const row = (name = "", value = "", enabled = true): Row => ({ id: uid(), name, value, enabled });
 
-export const BODY_TYPES = ["none", "json", "text", "form", "multipart", "file"] as const;
+export const BODY_TYPES = ["none", "json", "text", "form", "multipart", "file", "graphql"] as const;
 export type BodyType = (typeof BODY_TYPES)[number];
 
 export interface PartDraft {
@@ -66,6 +66,10 @@ export interface BodyDraft {
   contentType: string;
   fields: Row[];
   parts: PartDraft[];
+  /** GraphQL: the query (or `file`, a `.graphql` file), variables as JSON text, operation. */
+  query: string;
+  variables: string;
+  operationName: string;
 }
 
 export const AUTH_TYPES = [
@@ -156,7 +160,7 @@ export interface Draft {
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 
 export function emptyBody(): BodyDraft {
-  return { type: "none", content: "", file: "", contentType: "", fields: [], parts: [] };
+  return { type: "none", content: "", file: "", contentType: "", fields: [], parts: [], query: "", variables: "", operationName: "" };
 }
 
 export function emptyDraft(inCollection = false): Draft {
@@ -251,6 +255,12 @@ function bodyFromSpec(spec: BodySpec | undefined): BodyDraft {
       b.file = spec.file;
       b.contentType = spec.content_type ?? "";
       break;
+    case "graphql":
+      b.query = spec.query ?? "";
+      b.file = spec.query_file ?? "";
+      b.variables = spec.variables ?? "";
+      b.operationName = spec.operation_name ?? "";
+      break;
   }
   return b;
 }
@@ -288,6 +298,13 @@ function bodyToSpec(b: BodyDraft): BodySpec | undefined {
       };
     case "file":
       return clean<BodySpec>({ type: "file", file: b.file.trim(), content_type: opt(b.contentType) });
+    case "graphql":
+      return clean<BodySpec>({
+        type: "graphql",
+        ...(b.file.trim() ? { query_file: b.file.trim() } : { query: b.query }),
+        variables: opt(b.variables),
+        operation_name: opt(b.operationName),
+      });
   }
 }
 
@@ -328,7 +345,8 @@ export function draftFromFile(file: RequestFile): Draft {
   return {
     name: file.name ?? "",
     description: file.description ?? "",
-    method: (file.method ?? "GET").toUpperCase(),
+    // A GraphQL body without a method is sent with POST.
+    method: (file.method ?? (file.body?.type === "graphql" ? "POST" : "GET")).toUpperCase(),
     url: file.url,
     query: rowsFromTable(file.query),
     headers: rowsFromTable(file.headers),
@@ -345,7 +363,7 @@ export function draftToFile(d: Draft): RequestFile {
   return clean({
     name: opt(d.name),
     description: opt(d.description),
-    method: d.method === "GET" ? undefined : d.method,
+    method: d.method === (d.body.type === "graphql" ? "POST" : "GET") ? undefined : d.method,
     url: d.url,
     vars: d.rest.vars,
     query: rowsToTable(d.query),
@@ -399,6 +417,8 @@ function bodyToCore(b: BodyDraft): CoreBody | undefined {
       };
     case "file":
       return clean<CoreBody>({ type: "file", path: b.file.trim(), content_type: opt(b.contentType) });
+    case "graphql":
+      return clean<CoreBody>({ type: "graphql", query: b.query, variables: opt(b.variables), operation_name: opt(b.operationName) });
   }
 }
 

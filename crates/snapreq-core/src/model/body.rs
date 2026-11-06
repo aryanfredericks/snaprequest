@@ -62,6 +62,15 @@ pub enum Body {
     Form { fields: Vec<KeyValue> },
     /// `multipart/form-data` parts.
     Multipart { parts: Vec<MultipartPart> },
+    /// A GraphQL operation, sent as JSON `{"query", "variables", "operationName"}` (PLAN P10.3).
+    Graphql {
+        query: String,
+        /// A JSON object, as text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        variables: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation_name: Option<String>,
+    },
     /// The contents of a file, streamed from disk.
     File {
         path: PathBuf,
@@ -89,13 +98,58 @@ impl Body {
                     .as_deref()
                     .unwrap_or("text/plain; charset=utf-8"),
             ),
-            Self::Json { .. } => Some("application/json"),
+            Self::Json { .. } | Self::Graphql { .. } => Some("application/json"),
             Self::Form { .. } => Some("application/x-www-form-urlencoded"),
             Self::File { path, content_type } => Some(
                 content_type
                     .as_deref()
                     .unwrap_or_else(|| guess_content_type(path)),
             ),
+        }
+    }
+}
+
+/// The JSON document of a GraphQL request. `variables` must be a JSON object (or empty).
+pub fn graphql_document(
+    query: &str,
+    variables: Option<&str>,
+    operation_name: Option<&str>,
+) -> Result<String, String> {
+    let mut doc = serde_json::Map::new();
+    doc.insert("query".into(), serde_json::Value::String(query.to_owned()));
+    if let Some(v) = variables.map(str::trim).filter(|v| !v.is_empty()) {
+        let parsed: serde_json::Value = serde_json::from_str(v)
+            .map_err(|e| format!("GraphQL variables are not valid JSON: {e}"))?;
+        if !parsed.is_object() && !parsed.is_null() {
+            return Err("GraphQL variables must be a JSON object".into());
+        }
+        doc.insert("variables".into(), parsed);
+    }
+    if let Some(op) = operation_name.map(str::trim).filter(|o| !o.is_empty()) {
+        doc.insert(
+            "operationName".into(),
+            serde_json::Value::String(op.to_owned()),
+        );
+    }
+    Ok(serde_json::Value::Object(doc).to_string())
+}
+
+impl Body {
+    /// The text sent for text, JSON and GraphQL bodies (GraphQL: its JSON document, or the
+    /// problem with its variables).
+    pub fn text(&self) -> Option<Result<String, String>> {
+        match self {
+            Self::Text { content, .. } | Self::Json { content } => Some(Ok(content.clone())),
+            Self::Graphql {
+                query,
+                variables,
+                operation_name,
+            } => Some(graphql_document(
+                query,
+                variables.as_deref(),
+                operation_name.as_deref(),
+            )),
+            _ => None,
         }
     }
 }

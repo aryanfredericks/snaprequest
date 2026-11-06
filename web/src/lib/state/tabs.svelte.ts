@@ -38,6 +38,9 @@ export class RequestTab {
   liveEvents = $state<SseEvent[]>([]);
   /** Stops the running request (null when nothing runs). */
   stop = $state<(() => void) | null>(null);
+  /** A GraphQL schema fetched by introspection, and the state of fetching it. */
+  graphql = $state<{ schema: unknown; sdl: string } | null>(null);
+  schemaState = $state<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   /** The connection of a WebSocket request. */
   readonly ws = new WsSession();
 

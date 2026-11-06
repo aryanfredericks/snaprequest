@@ -62,6 +62,46 @@ async fn export_request(
     Json(body): Json<ExportBody>,
 ) -> ApiResult<Json<Value>> {
     let target: Target = body.format.parse().map_err(ApiError::bad_request)?;
+    let (request, named) = build(
+        &state,
+        &identity,
+        &headers,
+        Built {
+            request: body.request,
+            collection: body.collection,
+            key: body.key,
+            file: body.file,
+            env: body.env,
+            vars: body.vars,
+        },
+    )
+    .await?;
+    let content = snippet(&request, target, &named);
+    Ok(Json(
+        json!({ "format": target.as_str(), "content": content }),
+    ))
+}
+
+/// What names the request to build: a core request, or a collection request (with unsaved
+/// edits, environment and variables, as for `/requests/execute`).
+#[derive(Debug)]
+pub(crate) struct Built {
+    pub request: Option<Request>,
+    pub collection: Option<String>,
+    pub key: Option<String>,
+    pub file: Option<RequestFile>,
+    pub env: Option<String>,
+    pub vars: BTreeMap<String, String>,
+}
+
+/// Builds a request exactly as `/requests/execute` would (without scripts), with the names and
+/// values of its secret variables.
+pub(crate) async fn build(
+    state: &AppState,
+    identity: &Identity,
+    headers: &axum::http::HeaderMap,
+    body: Built,
+) -> ApiResult<(Request, Vec<(String, String)>)> {
     let (request, named) = match (body.request, body.collection, body.key) {
         (Some(req), None, None) => {
             if body.env.is_some() || !body.vars.is_empty() || body.file.is_some() {
@@ -72,8 +112,8 @@ async fn export_request(
             (req, Vec::new())
         }
         (None, Some(cid), Some(key)) => {
-            let ws = crate::workspaces::requested(&headers);
-            let space = Space::resolve(&state, &identity, &ws).await?;
+            let ws = crate::workspaces::requested(headers);
+            let space = Space::resolve(state, identity, &ws).await?;
             if body.file.is_some() || !body.vars.is_empty() {
                 space
                     .require(Role::Editor)
@@ -98,7 +138,7 @@ async fn export_request(
                 .map(|e| Environment::load(&collection, e))
                 .transpose()
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
-            let secrets = load_secrets(&state, &collection, body.env.as_deref())
+            let secrets = load_secrets(state, &collection, body.env.as_deref())
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
             let mut session = Session::new(
                 &collection,
@@ -122,10 +162,7 @@ async fn export_request(
             ));
         }
     };
-    let content = snippet(&request, target, &named);
-    Ok(Json(
-        json!({ "format": target.as_str(), "content": content }),
-    ))
+    Ok((request, named))
 }
 
 /// Secret variables (declared secret anywhere, even when a higher scope sets them) with values.

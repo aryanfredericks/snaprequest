@@ -10,6 +10,7 @@ pub mod backup;
 pub mod config;
 pub mod export;
 pub mod flow_states;
+mod graphql;
 pub mod import;
 pub mod oidc;
 pub mod outbound;
@@ -138,7 +139,8 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
                 .merge(security::router())
                 .merge(workspaces::router())
                 .merge(import::router())
-                .merge(export::router()),
+                .merge(export::router())
+                .merge(graphql::router()),
         )
         .split_for_parts();
     // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.

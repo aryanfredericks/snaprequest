@@ -17,6 +17,8 @@
     label: string;
     onchange?: (value: string) => void;
     onenter?: () => void;
+    /** For `graphql`: a schema's introspection `__schema` object (completion and checks). */
+    schema?: unknown;
     /** Receives the editor view (for commands such as search). */
     onview?: (view: EditorView) => void;
     class?: string;
@@ -34,6 +36,7 @@
     onchange,
     onenter,
     onview,
+    schema = null,
     class: cls = "",
   }: Props = $props();
 
@@ -69,7 +72,16 @@
   });
   $effect(() => {
     const l = lang;
-    view?.dispatch({ effects: languageSlot.reconfigure(language(l)) });
+    const s = schema;
+    if (l !== "graphql") {
+      view?.dispatch({ effects: languageSlot.reconfigure(language(l)) });
+      return;
+    }
+    let current = true;
+    void import("../editor/graphql").then((m) => {
+      if (current) view?.dispatch({ effects: languageSlot.reconfigure(m.graphqlLanguage(s ? m.clientSchema(s) : null)) });
+    });
+    return () => (current = false);
   });
   $effect(() => {
     const r = readonly;

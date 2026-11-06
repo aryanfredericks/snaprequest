@@ -309,8 +309,17 @@ $ snapreq send https://example.com/ -v -p ''
 | `--form name=value` | URL-encoded form field (repeatable). |
 | `-F, --multipart name=value` | Multipart field; `name=@path[;type=mime]` uploads a file (repeatable). |
 | `--file PATH` | Send a file as the raw body (content type guessed from the extension). |
+| `--graphql QUERY` | GraphQL query (`@file.graphql` reads a file), sent as JSON with POST unless a method is given; with `--variables JSON` (`@file` too) and `--operation NAME`. |
 
 Only one kind of body can be given per request.
+
+`snapreq introspect URL|REQUEST` fetches a GraphQL schema by introspection, with the request's headers,
+auth and settings, and prints it as SDL (`--format json`: the `__schema` object):
+
+```sh
+snapreq introspect https://api.example.com/graphql -H 'Authorization: Bearer TOKEN' > schema.graphql
+snapreq send https://api.example.com/graphql --graphql 'query { me { id } }'
+```
 
 ## Auth options
 

@@ -46,6 +46,13 @@
   function setScript(key: "pre_request" | "test", code: string) {
     d.rest.script = { ...(d.rest.script ?? {}), [key]: code };
   }
+  // GraphQL is sent with POST: switching to it moves a GET request to POST.
+  let lastBodyType: string | null = null;
+  $effect(() => {
+    const t = d.body.type;
+    if (lastBodyType !== null && t !== lastBodyType && t === "graphql" && d.method === "GET") d.method = "POST";
+    lastBodyType = t;
+  });
   const current = $derived(sections.some((s) => s.id === section) ? section : "params");
   const inheritedAuth = $derived.by(() => {
     const doc = tab.collection ? app.docs[tab.collection] : null;
@@ -113,7 +120,7 @@
       {:else if current === "messages"}
         <WsMessagesEditor spec={d.rest.websocket} onchange={(v) => (d.rest.websocket = v)} />
       {:else if current === "body"}
-        <BodyEditor body={d.body} vars={tab.vars} {inCollection} />
+        <BodyEditor body={d.body} vars={tab.vars} {inCollection} graphql={tab.graphql} schemaState={tab.schemaState} onschema={() => app.fetchSchema(tab)} />
       {:else if current === "auth"}
         <AuthEditor auth={d.auth} vars={tab.vars} {inCollection} inherited={inheritedAuth} />
       {:else if current === "checks"}

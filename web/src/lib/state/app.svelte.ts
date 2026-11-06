@@ -300,6 +300,33 @@ class AppState {
     }
   }
 
+  /** Fetches the GraphQL schema of a request by introspection (`POST /requests/graphql-schema`). */
+  async fetchSchema(tab: RequestTab) {
+    const body: Record<string, unknown> = {};
+    try {
+      if (tab.collection && tab.key) {
+        body.collection = tab.collection;
+        body.key = tab.key;
+        if (workspaces.canEdit) body.file = draftToFile(tab.draft);
+        const env = this.envs[tab.collection];
+        if (env) body.env = env;
+      } else {
+        body.request = draftToCore(tab.draft);
+      }
+    } catch (e) {
+      tab.schemaState = { busy: false, error: message(e) };
+      return;
+    }
+    tab.schemaState = { busy: true, error: null };
+    try {
+      const r = unwrap(await api.POST("/api/v1/requests/graphql-schema", { body: body as never })) as unknown as { schema: unknown; sdl: string };
+      tab.graphql = r;
+      tab.schemaState = { busy: false, error: null };
+    } catch (e) {
+      tab.schemaState = { busy: false, error: message(e) };
+    }
+  }
+
   /** Opens (or closes) the connection of a WebSocket request through the server. */
   toggleWebSocket(tab: RequestTab) {
     if (tab.ws.status === "open" || tab.ws.status === "connecting") {

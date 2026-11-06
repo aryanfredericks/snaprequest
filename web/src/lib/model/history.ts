@@ -35,6 +35,11 @@ function bodyFromCore(b: CoreBody | null | undefined): BodyDraft {
       out.file = b.path;
       out.contentType = b.content_type ?? "";
       break;
+    case "graphql":
+      out.query = b.query;
+      out.variables = b.variables ?? "";
+      out.operationName = b.operation_name ?? "";
+      break;
   }
   return out;
 }

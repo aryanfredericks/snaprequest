@@ -312,6 +312,11 @@ fn spec(req: &Request, secrets: &Secrets) -> Spec {
     let body = match &req.body {
         Body::None => None,
         Body::Text { content, .. } | Body::Json { content } => Some(BodyOut::Raw(t(content))),
+        Body::Graphql { .. } => Some(BodyOut::Raw(t(&req
+            .body
+            .text()
+            .and_then(Result::ok)
+            .unwrap_or_default()))),
         Body::Form { fields } => Some(BodyOut::Form(
             fields
                 .iter()

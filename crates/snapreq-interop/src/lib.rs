@@ -11,6 +11,7 @@
 mod curl;
 mod error;
 pub mod export;
+pub mod graphql;
 mod har;
 pub mod har_export;
 mod hurl;

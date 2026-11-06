@@ -37,6 +37,7 @@ fn every_route_is_described() {
         "PUT /api/v1/workspaces/{ws}/members/{username}",
         "DELETE /api/v1/workspaces/{ws}/members/{username}",
         "POST /api/v1/requests/execute",
+        "POST /api/v1/requests/graphql-schema",
         "GET /api/v1/history",
         "GET /api/v1/history/{id}",
         "DELETE /api/v1/history/{id}",

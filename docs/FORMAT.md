@@ -103,8 +103,22 @@ Header names are case-insensitive when sent; they are written as you type them.
 | `"form"` | `[body.fields]` key/value table | `application/x-www-form-urlencoded` |
 | `"multipart"` | `[[body.parts]]` | `multipart/form-data` |
 | `"file"` | `file`, optional `content_type` | raw file; type guessed from the extension |
+| `"graphql"` | `query` or `query_file`, optional `variables`, `operation_name` | `application/json`: `{"query", "variables", "operationName"}` |
 
-`content` and `file` cannot both be set. Multipart parts:
+`content` and `file` cannot both be set. A GraphQL request is sent with POST unless `method` says
+otherwise; `variables` is a JSON object written as text, and placeholders work in it and in the query:
+
+```toml
+url = "{{base_url}}/graphql"
+
+[body]
+type = "graphql"
+query_file = "queries/user.graphql"    # or query = '''query User($id: ID!) { user(id: $id) { name } }'''
+variables = '{"id": "{{user_id}}"}'
+operation_name = "User"                # optional; for documents with several operations
+```
+
+Multipart parts: Multipart parts:
 
 ```toml
 [[body.parts]]

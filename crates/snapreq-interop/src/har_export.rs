@@ -100,6 +100,10 @@ fn post_data(body: &Body, secrets: &[String]) -> Option<Value> {
         Body::Json { content } => {
             json!({ "mimeType": "application/json", "text": hide(content, secrets) })
         }
+        Body::Graphql { .. } => {
+            let doc = body.text().and_then(Result::ok).unwrap_or_default();
+            json!({ "mimeType": "application/json", "text": hide(&doc, secrets) })
+        }
         Body::Form { fields } => {
             let enabled: Vec<_> = fields.iter().filter(|f| f.enabled).collect();
             let text = enabled

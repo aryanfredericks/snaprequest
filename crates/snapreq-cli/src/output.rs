@@ -168,6 +168,10 @@ fn write_request_body(out: &mut dyn Write, body: &Body) -> io::Result<()> {
         Body::Json { content } => {
             write_body(out, content.as_bytes(), Some("application/json"), true)
         }
+        Body::Graphql { .. } => {
+            let doc = body.text().and_then(Result::ok).unwrap_or_default();
+            write_body(out, doc.as_bytes(), Some("application/json"), true)
+        }
         Body::Text {
             content,
             content_type,

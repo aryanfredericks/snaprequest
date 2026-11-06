@@ -34,7 +34,8 @@ import { tags as t } from "@lezer/highlight";
 import type { VariableInfo } from "../api/types";
 import { describeVar, DYNAMIC, placeholders, varState } from "../model/vars";
 
-export type Language = "json" | "xml" | "html" | "javascript" | "text";
+/** `graphql` is loaded on demand by the editor component (see `editor/graphql.ts`). */
+export type Language = "json" | "xml" | "html" | "javascript" | "graphql" | "text";
 
 export function language(lang: Language): Extension {
   switch (lang) {

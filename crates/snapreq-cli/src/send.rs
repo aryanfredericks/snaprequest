@@ -301,6 +301,29 @@ fn body(args: &SendArgs) -> Result<Body, ArgError> {
             content_type: None,
         });
     }
+    if let Some(query) = &args.graphql {
+        let read = |value: &str, what: &str| -> Result<String, ArgError> {
+            match value.strip_prefix('@') {
+                Some(path) => std::fs::read_to_string(path)
+                    .map_err(|e| ArgError(format!("cannot read the {what} file `{path}`: {e}"))),
+                None => Ok(value.to_owned()),
+            }
+        };
+        let variables = args
+            .variables
+            .as_deref()
+            .map(|v| read(v, "variables"))
+            .transpose()?;
+        let body = Body::Graphql {
+            query: read(query, "query")?,
+            variables,
+            operation_name: args.operation.clone(),
+        };
+        if let Some(Err(e)) = body.text() {
+            return Err(ArgError(e));
+        }
+        return Ok(body);
+    }
     Ok(Body::None)
 }
 

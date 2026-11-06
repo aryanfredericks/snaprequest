@@ -401,6 +401,29 @@ impl Builder<'_> {
             BodySpec::Form { fields } => Body::Form {
                 fields: self.key_values("body.fields", fields)?,
             },
+            BodySpec::Graphql {
+                query,
+                query_file,
+                variables,
+                operation_name,
+            } => {
+                let query = match (query, query_file) {
+                    (Some(q), _) => q.clone(),
+                    (None, Some(p)) => {
+                        let path = self.path("body.query_file", p)?;
+                        std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?
+                    }
+                    (None, None) => String::new(),
+                };
+                Body::Graphql {
+                    query: self.text("body.query", &query)?,
+                    variables: variables
+                        .as_deref()
+                        .map(|v| self.text("body.variables", v))
+                        .transpose()?,
+                    operation_name: operation_name.clone(),
+                }
+            }
             BodySpec::Multipart { parts } => {
                 let mut out = Vec::with_capacity(parts.len());
                 for p in parts {

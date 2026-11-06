@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 10 Advanced protocols and features (Phases 0–9 complete)
-- **Current checkpoint:** P10.3 GraphQL (query editor, variables, schema introspection). P10.1 and P10.2 done.
+- **Current checkpoint:** P10.4 gRPC (tonic): reflection and proto files, unary and streaming. P10.1–P10.3 done.
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,9 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P10.3 GraphQL, then P10.4 gRPC, P10.5 bench, P10.6 mock server, P10.7 (optional) Tauri.
+1. P10.4 gRPC, then P10.5 bench, P10.6 mock server, P10.7 (optional) Tauri.
 2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
    an admin role (server-wide audit, recovering ownerless workspaces).
+
+## GraphQL notes (P10.3)
+- Core `Body::Graphql { query, variables, operation_name }` + `model::graphql_document`, `Body::text()` (ADR-035).
+  Format `BodySpec::Graphql` (`query`/`query_file`, `variables`, `operation_name`); `RequestFile::method()` is POST for
+  it. CLI `--graphql/--variables/--operation`, `snapreq introspect` (`graphql_cmd.rs`).
+- `snapreq-interop::graphql` (`INTROSPECTION_QUERY`, `schema_of`, `to_sdl`); fixture
+  `tests/fixtures/graphql-introspection.json` (also served by mock_shop `POST /graphql`).
+- Server `graphql.rs` (`POST /requests/graphql-schema`); `export::build` is now shared. UI: `editor/graphql.ts` (lazy
+  cm6-graphql + graphql-js chunk), `CodeEditor` `schema` prop, `GraphqlSchema` browser, `app.fetchSchema`.
 
 ## SSE notes (P10.2)
 - Core (ADR-034): `BodyObserver` + `Streaming { observer, stop: CancellationToken, keep_limit }` in
@@ -677,6 +686,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P10.3 — 2026-11-06 — GraphQL: `graphql` body type (core, files, `send --graphql`), `snapreq introspect` and `POST /requests/graphql-schema` (SDL), schema-aware query editor and schema browser in the UI. ADR-035.
 - P10.2 — 2026-11-06 — Server-Sent Events: streaming body observer and stop in core, `snapreq sse`, live events and cancel over the server WebSocket, Events tab and Stop button in the UI. ADR-034.
 - P10.1 — 2026-11-06 — WebSocket client: core handshake through the engine, `[websocket]` in request files, `snapreq ws`, server-relayed sessions, message log in the UI. ADR-033.
 - P9.4 — 2026-11-06 — Postman pre-request/test scripts translated to `[script]` during import (`pm.*` and legacy API rewritten, untranslatable lines commented with warnings, result compile-checked). ADR-032. The Newman sample imports and its tests pass. **Phase 9 complete.**
@@ -721,3 +731,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-06 (28):** P9.4 done, which completes Phase 9: Postman pre-request/test scripts are translated during import (ADR-032); the Newman sample imports without warnings and its tests pass. 443 Rust tests pass. Stopped for the maintainer's report before Phase 10.
 - **2026-11-06 (29):** P10.1 done: WebSocket client in core, CLI, server and UI. 456 Rust tests, 50 unit tests and 39 Playwright tests pass.
 - **2026-11-06 (30):** P10.2 done: SSE parser and streaming in core, CLI, server and UI. 466 Rust tests, 51 unit tests and 40 Playwright tests pass.
+- **2026-11-06 (31):** P10.3 done: GraphQL bodies, introspection in CLI and server, schema-aware editor in the UI. 472 Rust tests, 53 unit tests and 41 Playwright tests pass.

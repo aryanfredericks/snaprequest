@@ -5,6 +5,7 @@ mod cli;
 mod collection_cmd;
 #[cfg(test)]
 mod fixtures;
+mod graphql_cmd;
 mod import_cmd;
 mod json_out;
 mod output;
@@ -78,6 +79,7 @@ async fn main() -> ExitCode {
         Command::Run(args) => run_cmd::run(&args).await,
         Command::Ws(args) => ws_cmd::run(&args).await,
         Command::Sse(args) => sse_cmd::run(&args).await,
+        Command::Introspect(args) => graphql_cmd::run(&args).await,
         Command::Serve(args) => serve(&args).await,
         Command::Ls(args) => report(collection_cmd::ls(
             args.dir.as_deref(),

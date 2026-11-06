@@ -17,6 +17,9 @@
 //! - `GET /page` → a small HTML page
 //! - `GET /old-health` → 302 to `/health`
 //! - `GET /events?n=N` → a Server-Sent Events stream of N `tick` events 50 ms apart (`n=0`: endless)
+//! - `POST /graphql` → a small GraphQL API: introspection (the schema of
+//!   `crates/snapreq-interop/tests/fixtures/graphql-introspection.json`) and any other query, which
+//!   answers `me` and echoes `variables` and `operationName` in `extensions`
 //! - `GET /ws` → a WebSocket that greets with `{"hello": <token header or null>}` and echoes
 #![allow(clippy::unwrap_used)] // example code
 
@@ -79,6 +82,7 @@ async fn handle(
 
     let resp = match (method.as_str(), path.as_str()) {
         ("GET", "/health") => reply(200, &json!({ "status": "ok" })),
+        ("POST", "/graphql") => graphql(&input),
         ("GET", "/catalog") => {
             let n: usize = query
                 .split('&')
@@ -155,6 +159,27 @@ async fn handle(
         _ => reply(404, &json!({ "error": "not found" })),
     };
     Ok(resp.map(BodyExt::boxed_unsync))
+}
+
+fn graphql(input: &Value) -> hyper::Response<Full<Bytes>> {
+    let query = input["query"].as_str().unwrap_or_default();
+    if query.is_empty() {
+        return reply(400, &json!({ "errors": [{ "message": "no query" }] }));
+    }
+    if query.contains("__schema") {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../snapreq-interop/tests/fixtures/graphql-introspection.json"
+        ))
+        .unwrap();
+        return reply(200, &schema);
+    }
+    reply(
+        200,
+        &json!({
+            "data": { "me": { "id": "1", "name": "Demo", "role": "CUSTOMER" } },
+            "extensions": { "variables": input["variables"], "operationName": input["operationName"] },
+        }),
+    )
 }
 
 /// `n` events named `tick` with ids and JSON data, 50 ms apart.
