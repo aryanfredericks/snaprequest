@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RequestTab } from "../state/app.svelte";
-  import { isWebSocket } from "../model/draft";
+  import { isGrpc, isWebSocket } from "../model/draft";
+  import GrpcPane from "./GrpcPane.svelte";
   import ResultView from "./ResultView.svelte";
   import WebSocketPane from "./WebSocketPane.svelte";
 
@@ -8,7 +9,9 @@
   const result = $derived(tab.result);
 </script>
 
-{#if isWebSocket(tab.draft)}
+{#if isGrpc(tab.draft)}
+  <GrpcPane {tab} />
+{:else if isWebSocket(tab.draft)}
   <WebSocketPane {tab} />
 {:else}
 <ResultView

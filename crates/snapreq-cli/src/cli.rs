@@ -57,6 +57,20 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Ws(WsArgs),
 
+    /// Call a gRPC method, or list and describe a server's services.
+    ///
+    /// Services come from server reflection, or from proto files (--proto). Messages are JSON
+    /// (proto3 mapping); responses are printed as they arrive, the status on stderr. Metadata
+    /// comes from -H and the auth options.
+    ///
+    /// Examples:
+    ///   snapreq grpc localhost:50051 --list
+    ///   snapreq grpc localhost:50051 shop.v1.Orders/Get -m '{"id": 7}'
+    ///   snapreq grpc grpcs://api.example.com shop.v1.Orders/Upload -m '{}' -m '{}' --proto shop.proto
+    ///   snapreq grpc -c my-api orders/get -e dev --describe shop.v1.Orders/Get
+    #[command(verbatim_doc_comment)]
+    Grpc(GrpcArgs),
+
     /// Fetch a GraphQL schema by introspection and print it as SDL.
     ///
     /// Sends the standard introspection query (POST) with the request's headers, auth and
@@ -428,6 +442,46 @@ pub(crate) enum SecretCommand {
         #[arg(short = 'c', long = "collection", value_name = "DIR")]
         collection: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct GrpcArgs {
+    /// A request message as JSON (`@file.json` reads a file); repeat for client streaming.
+    #[arg(
+        short = 'm',
+        long = "message",
+        value_name = "JSON",
+        help_heading = "gRPC"
+    )]
+    pub messages: Vec<String>,
+
+    /// The method (`package.Service/Method`), for collection requests (replaces the file's).
+    #[arg(long, value_name = "METHOD", help_heading = "gRPC")]
+    pub rpc: Option<String>,
+
+    /// List the services and their methods.
+    #[arg(long, help_heading = "gRPC", conflicts_with = "describe")]
+    pub list: bool,
+
+    /// Describe a service, method or message (methods: with a JSON template of the input).
+    #[arg(long, value_name = "NAME", help_heading = "gRPC")]
+    pub describe: Option<String>,
+
+    /// A proto file describing the services (instead of server reflection). Repeatable.
+    #[arg(long = "proto", value_name = "FILE", help_heading = "gRPC")]
+    pub protos: Vec<PathBuf>,
+
+    /// An import path for the proto files. Repeatable.
+    #[arg(
+        short = 'I',
+        long = "import-path",
+        value_name = "DIR",
+        help_heading = "gRPC"
+    )]
+    pub import_paths: Vec<PathBuf>,
+
+    #[command(flatten)]
+    pub request: SendArgs,
 }
 
 #[derive(Debug, Args)]

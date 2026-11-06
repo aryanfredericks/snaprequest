@@ -290,6 +290,35 @@ export interface RequestFile {
   assert?: Record<string, unknown>;
   script?: ScriptSpec;
   websocket?: WebSocketSpec;
+  grpc?: GrpcSpec;
+}
+
+/** `[grpc]`: makes a request a gRPC call (ADR-036). */
+export interface GrpcSpec {
+  /** `package.Service/Method`. */
+  method?: string;
+  protos?: string[];
+  import_paths?: string[];
+  /** JSON of the request message. */
+  message?: string;
+  /** JSON of each request message (client streaming). */
+  messages?: string[];
+}
+
+/** A service as `POST /grpc/describe` lists it. */
+export interface GrpcService {
+  name: string;
+  methods: GrpcMethod[];
+}
+
+export interface GrpcMethod {
+  name: string;
+  path: string;
+  input: string;
+  output: string;
+  client_streaming: boolean;
+  server_streaming: boolean;
+  template: unknown;
 }
 
 /** `[websocket]`: makes a request a WebSocket (ADR-033). */

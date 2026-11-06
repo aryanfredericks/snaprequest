@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package shop.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Orders of the mock shop (crates/snapreq-grpc/examples/mock_grpc.rs).
+service Orders {
+  // One order; id 404 is NOT_FOUND.
+  rpc Get(GetOrder) returns (Order);
+  // Three updates of an order, the last one READY.
+  rpc Watch(GetOrder) returns (stream Order);
+  // Counts the orders sent.
+  rpc Upload(stream Order) returns (Summary);
+  // Echoes each order with its item in upper case.
+  rpc Chat(stream Order) returns (stream Order);
+}
+
+message GetOrder {
+  int64 id = 1;
+}
+
+enum Status {
+  PENDING = 0;
+  READY = 1;
+}
+
+message Order {
+  int64 id = 1;
+  string item = 2;
+  Status status = 3;
+  repeated string tags = 4;
+  google.protobuf.Timestamp created = 5;
+}
+
+message Summary {
+  int32 count = 1;
+}

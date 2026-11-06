@@ -1798,6 +1798,67 @@
         }
       }
     },
+    "/api/v1/grpc/describe": {
+      "post": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "`POST /api/v1/grpc/describe`",
+        "operationId": "describe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Target"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "`{ services: [{ name, methods: [{ name, path, input, output, client_streaming, server_streaming, template }] }] }`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Cannot connect, or no descriptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/history": {
       "get": {
         "tags": [
@@ -3684,6 +3745,53 @@
           }
         },
         "additionalProperties": false
+      },
+      "Target": {
+        "type": "object",
+        "description": "Which request (as for `/requests/execute`).",
+        "properties": {
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Or a collection request: its `[grpc]` proto files are used, else reflection."
+          },
+          "env": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "A complete request (the core JSON model, `url` like `grpc://host:port`). Services come\nfrom server reflection."
+          },
+          "vars": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
       },
       "TokenBody": {
         "type": "object",

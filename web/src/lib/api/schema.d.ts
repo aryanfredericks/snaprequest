@@ -321,6 +321,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/grpc/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /api/v1/grpc/describe` */
+        post: operations["describe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/history": {
         parameters: {
             query?: never;
@@ -833,6 +850,22 @@ export interface components {
         };
         SecretBody: {
             value: string;
+        };
+        /** @description Which request (as for `/requests/execute`). */
+        Target: {
+            /** @description Or a collection request: its `[grpc]` proto files are used, else reflection. */
+            collection?: string | null;
+            env?: string | null;
+            file?: Record<string, unknown> | null;
+            key?: string | null;
+            /**
+             * @description A complete request (the core JSON model, `url` like `grpc://host:port`). Services come
+             *     from server reflection.
+             */
+            request?: Record<string, unknown> | null;
+            vars?: {
+                [key: string]: string;
+            };
         };
         TokenBody: {
             /**
@@ -2276,6 +2309,57 @@ export interface operations {
                 };
             };
             /** @description Does not validate */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    describe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Target"];
+            };
+        };
+        responses: {
+            /** @description `{ services: [{ name, methods: [{ name, path, input, output, client_streaming, server_streaming, template }] }] }` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JsonDocument"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Cannot connect, or no descriptions */
             422: {
                 headers: {
                     [name: string]: unknown;

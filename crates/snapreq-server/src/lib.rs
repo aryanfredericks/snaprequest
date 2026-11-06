@@ -11,6 +11,7 @@ pub mod config;
 pub mod export;
 pub mod flow_states;
 mod graphql;
+mod grpc;
 pub mod import;
 pub mod oidc;
 pub mod outbound;
@@ -140,7 +141,8 @@ fn routes() -> (Router<Arc<AppState>>, utoipa::openapi::OpenApi) {
                 .merge(workspaces::router())
                 .merge(import::router())
                 .merge(export::router())
-                .merge(graphql::router()),
+                .merge(graphql::router())
+                .merge(grpc::router()),
         )
         .split_for_parts();
     // OpenAPI path templates have no catch-all syntax: `{*key}` is the parameter `key`.
@@ -179,6 +181,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     router
         .route("/api/v1/ws", get(ws::upgrade))
         .route("/api/v1/ws/websocket", get(ws_session::upgrade))
+        .route("/api/v1/ws/grpc", get(grpc::upgrade))
         .route(
             "/api/v1/openapi.json",
             get(move || {

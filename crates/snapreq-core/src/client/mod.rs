@@ -8,6 +8,7 @@ mod decode;
 mod meter;
 mod oauth;
 mod proxy;
+pub mod raw;
 mod recorder;
 mod redact;
 mod redirect;

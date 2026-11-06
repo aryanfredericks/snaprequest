@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 10 Advanced protocols and features (Phases 0–9 complete)
-- **Current checkpoint:** P10.4 gRPC (tonic): reflection and proto files, unary and streaming. P10.1–P10.3 done.
+- **Current checkpoint:** P10.5 Load test mode (`snapreq bench`), not started. P10.1–P10.4 done; the maintainer asked to stop after gRPC (2026-11-06).
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,9 +25,20 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P10.4 gRPC, then P10.5 bench, P10.6 mock server, P10.7 (optional) Tauri.
+1. P10.5 `snapreq bench` (concurrency, rate, duration, hdrhistogram percentiles), then P10.6 mock server, P10.7 (optional) Tauri (webkit2gtk is not installed on this machine). Wait for the maintainer before continuing.
 2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
    an admin role (server-wide audit, recovering ownerless workspaces).
+
+## gRPC notes (P10.4)
+- New crate `snapreq-grpc` (ADR-036): `connect` (`Channel`: hyper h2 `SendRequest` as tower service, metadata from
+  headers + `Client::auth_header`), `reflect` (v1 then v1alpha, deps by file name), `compile_protos` (protox),
+  `describe`/`find_method`/`message_template`, `call` (one streaming path, `DynamicCodec`, statuses as outcomes).
+- Core: `conn::open` split from `connect` (tunnel flag), `client/raw.rs` (`open_h2_stream`, `auth_header`).
+- Format `[grpc]` (`GrpcSpec`, boxed, as is `websocket`), `RequestKind::Grpc`, `grpc_call`; `Session::grpc`.
+- CLI `snapreq grpc` (`grpc_cmd.rs`). Server `grpc.rs`: `POST /grpc/describe`, `/api/v1/ws/grpc` (protos must be
+  inside the workspace). UI: `state/grpc.svelte.ts` (`GrpcCall`), `GrpcCallEditor`, `GrpcPane`.
+- Mock: `crates/snapreq-grpc/examples/mock_grpc.rs` (shop.proto, reflection) — tests include it with `#[path]`;
+  web-e2e.sh runs it on port 8766. `serde-saphyr` updated 2.1.0 → 2.1.1 (2.1.0 was yanked).
 
 ## GraphQL notes (P10.3)
 - Core `Body::Graphql { query, variables, operation_name }` + `model::graphql_document`, `Body::text()` (ADR-035).
@@ -686,6 +697,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P10.4 — 2026-11-06 — gRPC: `snapreq-grpc` (reflection, proto files via protox, dynamic JSON messages, all four call kinds) over the engine's connections, `[grpc]` requests, `snapreq grpc`, describe endpoint and call socket, Call editor and live response pane in the UI. ADR-036.
 - P10.3 — 2026-11-06 — GraphQL: `graphql` body type (core, files, `send --graphql`), `snapreq introspect` and `POST /requests/graphql-schema` (SDL), schema-aware query editor and schema browser in the UI. ADR-035.
 - P10.2 — 2026-11-06 — Server-Sent Events: streaming body observer and stop in core, `snapreq sse`, live events and cancel over the server WebSocket, Events tab and Stop button in the UI. ADR-034.
 - P10.1 — 2026-11-06 — WebSocket client: core handshake through the engine, `[websocket]` in request files, `snapreq ws`, server-relayed sessions, message log in the UI. ADR-033.
@@ -732,3 +744,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-06 (29):** P10.1 done: WebSocket client in core, CLI, server and UI. 456 Rust tests, 50 unit tests and 39 Playwright tests pass.
 - **2026-11-06 (30):** P10.2 done: SSE parser and streaming in core, CLI, server and UI. 466 Rust tests, 51 unit tests and 40 Playwright tests pass.
 - **2026-11-06 (31):** P10.3 done: GraphQL bodies, introspection in CLI and server, schema-aware editor in the UI. 472 Rust tests, 53 unit tests and 41 Playwright tests pass.
+- **2026-11-06 (32):** P10.4 done: gRPC in a new crate, core, CLI, server and UI. 479 Rust tests, 56 unit tests and 42 Playwright tests pass. Stopped after gRPC at the maintainer's request; P10.5–P10.7 remain.

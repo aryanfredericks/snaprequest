@@ -102,6 +102,61 @@ pub fn build_file(
     Ok(req)
 }
 
+/// A gRPC call of a request file, resolved ([`grpc_call`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrpcCall {
+    pub method: Option<String>,
+    /// Absolute paths.
+    pub protos: Vec<PathBuf>,
+    pub import_paths: Vec<PathBuf>,
+    /// The request messages (JSON), placeholders resolved.
+    pub messages: Vec<String>,
+}
+
+/// The `[grpc]` table of the request file `file`, with placeholders resolved from `scopes` and
+/// paths made absolute; secret values used come second.
+pub fn grpc_call(
+    spec: &crate::files::GrpcSpec,
+    file: &Path,
+    scopes: &Scopes,
+) -> Result<(GrpcCall, Vec<String>)> {
+    let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
+    let mut interp = Interpolator::new(scopes);
+    let mut text = |place: &str, t: &str| {
+        interp
+            .interpolate(t)
+            .map_err(|e| Error::invalid(file, format!("{place}: {e}")))
+    };
+    let mut paths = |place: &str, list: &[PathBuf]| -> Result<Vec<PathBuf>> {
+        list.iter()
+            .map(|p| {
+                let p = PathBuf::from(text(place, &p.to_string_lossy())?);
+                Ok(if p.is_absolute() { p } else { dir.join(p) })
+            })
+            .collect()
+    };
+    let protos = paths("grpc.protos", &spec.protos)?;
+    let import_paths = paths("grpc.import_paths", &spec.import_paths)?;
+    let method = spec
+        .method
+        .as_deref()
+        .map(|m| text("grpc.method", m))
+        .transpose()?;
+    let mut messages = Vec::new();
+    for m in spec.message.iter().chain(&spec.messages) {
+        messages.push(text("grpc.message", m)?);
+    }
+    Ok((
+        GrpcCall {
+            method,
+            protos,
+            import_paths,
+            messages,
+        },
+        interp.into_secrets(),
+    ))
+}
+
 /// Saved WebSocket messages by name.
 pub type SavedMessages = Vec<(String, snapreq_core::client::ws::WsMessage)>;
 

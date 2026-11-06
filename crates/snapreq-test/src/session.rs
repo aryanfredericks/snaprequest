@@ -133,6 +133,15 @@ pub struct WsPrepared {
     pub hidden: Vec<String>,
 }
 
+/// A gRPC request ready to call ([`Session::grpc`]).
+#[derive(Debug)]
+pub struct GrpcPrepared {
+    pub request: Request,
+    pub call: snapreq_collection::GrpcCall,
+    pub logs: Vec<String>,
+    pub hidden: Vec<String>,
+}
+
 /// A request built by [`Session::build_for`].
 struct Built {
     request: Request,
@@ -535,6 +544,44 @@ impl<'a> Session<'a> {
                 subprotocols: spec.subprotocols,
             },
             messages,
+            logs: built.logs,
+            hidden,
+        })
+    }
+
+    /// Builds the gRPC request `key`: pre-request scripts run, and its `[grpc]` table is resolved
+    /// with the same variables (PLAN P10.4).
+    pub async fn grpc(&mut self, key: &str) -> Result<GrpcPrepared, String> {
+        let collection = self.collection;
+        let item = collection
+            .find(key)
+            .ok_or_else(|| format!("no request `{key}` in the collection"))?;
+        if item.file.kind() != snapreq_collection::RequestKind::Grpc {
+            return Err(format!("`{key}` is not a gRPC request"));
+        }
+        let path = collection.root.join(&item.path);
+        let built = match self
+            .build_for(&SendSpec::request(key), key, &item.file, &path)
+            .await
+        {
+            Ok(b) => b,
+            Err(run) => {
+                return Err(match run.outcome {
+                    RunOutcome::Invalid(why) => why,
+                    _ => "the request could not be built".into(),
+                });
+            }
+        };
+        let file = built.changed.as_ref().unwrap_or(&item.file);
+        let spec = file.grpc.clone().unwrap_or_default();
+        let (call, secrets) = snapreq_collection::grpc_call(&spec, &path, &built.scopes)
+            .map_err(|e| e.to_string())?;
+        let mut hidden = built.request.secrets();
+        hidden.extend(secrets);
+        hidden.extend(script::secret_values(&built.scopes));
+        Ok(GrpcPrepared {
+            request: built.request,
+            call,
             logs: built.logs,
             hidden,
         })

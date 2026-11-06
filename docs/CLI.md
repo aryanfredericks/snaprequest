@@ -386,6 +386,34 @@ snapreq tokens clear    # delete every cached token
 | `--cert PATH --key PATH` | Client certificate and key (PEM) for mutual TLS. |
 | `--tls-min 1.2\|1.3`, `--tls-max 1.2\|1.3` | Allowed TLS versions. |
 
+## gRPC (`snapreq grpc`)
+
+`snapreq grpc TARGET [package.Service/Method]` calls a gRPC method with JSON messages (proto3 mapping), or
+lists and describes services. TARGET is `host:port` (plaintext), `grpc://host:port`, `grpcs://host:port`
+(TLS) or a gRPC request of a collection. Services come from server reflection unless proto files are
+given. Response messages are printed as they arrive (pretty JSON), the status on stderr; `-H` adds metadata
+and the auth options add their header; `-v` shows the connection trace, response headers and trailers.
+
+```sh
+snapreq grpc localhost:50051 --list
+snapreq grpc localhost:50051 --describe shop.v1.Orders/Get        # with a JSON template of the input
+snapreq grpc localhost:50051 shop.v1.Orders/Get -m '{"id": 7}' -H 'x-user: ana'
+snapreq grpc grpcs://api.example.com shop.v1.Orders/Upload -m @a.json -m @b.json --proto shop.proto -I protos
+snapreq grpc -c my-api orders/get -e dev --format json
+```
+
+| Option | Meaning |
+|---|---|
+| `-m`, `--message JSON` | A request message (`@file` reads one); repeat for client streaming. A method that takes one message gets `{}` when none is given. |
+| `--rpc METHOD` | The method, for collection requests (replaces the file's). |
+| `--list` | List services and methods. |
+| `--describe NAME` | Describe a service, method or message as JSON. |
+| `--proto FILE`, `-I DIR` | Proto files and import paths instead of reflection (repeatable). |
+
+`--format json` prints `{"method", "headers", "messages", "status": {"code", "name", "message"}, "trailers",
+"duration_ms"}`. Exit codes: 0 for status OK, 4 for any other status, 3 for bad arguments or messages, 5
+when the connection or reflection fails.
+
 ## Server-Sent Events (`snapreq sse`)
 
 `snapreq sse` reads a `text/event-stream` response and prints each event as it arrives, in the stream's

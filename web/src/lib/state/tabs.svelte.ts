@@ -5,6 +5,7 @@ import type {
   HistoryRecord,
   RequestFile,
   RunReport,
+  GrpcService,
   RunStep,
   SseEvent,
   TraceEntry,
@@ -17,6 +18,7 @@ import { draftToFile, emptyDraft, sameFile, uid, type Draft } from "../model/dra
 import { sameScope, scopeToFile, type ScopeDraft, type ScopeFile, type VarRow } from "../model/scope";
 import type { Route } from "./route";
 import { WsSession } from "./websocket.svelte";
+import { GrpcCall } from "./grpc.svelte";
 
 /** A request being edited: a collection request (`collection` + `key`) or a scratch request. */
 export class RequestTab {
@@ -41,6 +43,10 @@ export class RequestTab {
   /** A GraphQL schema fetched by introspection, and the state of fetching it. */
   graphql = $state<{ schema: unknown; sdl: string } | null>(null);
   schemaState = $state<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  /** The call of a gRPC request, and the services it can call (`POST /grpc/describe`). */
+  readonly grpc = new GrpcCall();
+  grpcServices = $state<GrpcService[] | null>(null);
+  describeState = $state<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   /** The connection of a WebSocket request. */
   readonly ws = new WsSession();
 

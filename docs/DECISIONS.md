@@ -475,3 +475,22 @@ applies; viewers may use it because only the body changes). The UI uses `cm6-gra
 schema browser.
 **Consequences:** GraphQL over GET, subscriptions (over WebSockets or SSE) and persisted queries are not
 special-cased; a GraphQL subscription can be tried with a WebSocket request and saved messages.
+
+## ADR-036: gRPC with dynamic messages over the engine's connections
+**Status:** Accepted (2026-11-06)
+**Context:** PLAN P10.4: gRPC with server reflection and proto files, unary and streaming. A debugging tool
+cannot generate code for each API: services are only known at run time. Connections should get the same
+policy, proxy, TLS and trace treatment as HTTP.
+**Decision:** A new crate `snapreq-grpc` (tonic without transports, `prost-reflect` for dynamic messages
+and proto3 JSON, `protox` to compile proto files in Rust, no `protoc`, `tonic-reflection` for its client
+types). The core gained `Client::open_h2_stream` (DNS, policy, proxies always tunnelled with CONNECT, TLS
+with ALPN `h2` only; `conn::open` split from `connect`) and `Client::auth_header` (basic, bearer, header API
+key, OAuth 2.0 tokens). hyper's HTTP/2 client is the tower service tonic sends on. Every call uses tonic's
+streaming path (identical on the wire for all four kinds) with a `DynamicCodec`. Reflection tries `v1`, then
+`v1alpha`, and fetches dependencies by file name. Request files get `[grpc]` (method, protos, import paths,
+message or messages) and `grpc(s)://` URLs; `snapreq run` leaves them out. The CLI has `snapreq grpc`; the
+server has `POST /grpc/describe` and the `/api/v1/ws/grpc` call socket (proto paths must stay inside the
+workspace); the UI has a Call editor and a response pane with live messages. A mock server
+(`snapreq-grpc/examples/mock_grpc.rs`) serves tests and the end-to-end tests.
+**Consequences:** No code generation and no `protoc` dependency. Binary metadata (`-bin`), compression,
+Digest/AWS auth and assertions on gRPC responses are not supported yet; calls are not stored in history.

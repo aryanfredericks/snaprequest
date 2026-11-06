@@ -357,6 +357,29 @@ Tree items are `{ "type": "request", "key", "name", "method" }` or
 (`docs/FORMAT.md`), e.g. `{ "name": "Create user", "method": "POST", "url": "{{base}}/users",
 "headers": { "X-Team": "shop" }, "assert": { "status": 201 } }`.
 
+## gRPC
+
+`POST /api/v1/grpc/describe` takes the request fields of `/requests/export` (without `format`) and returns
+`{ "services": [{ "name", "methods": [{ "name", "path", "input", "output", "client_streaming",
+"server_streaming", "template" }] }] }`, from server reflection, or from a collection request's `[grpc]`
+proto files (which must be inside the workspace). Scratch requests use reflection only.
+
+`GET /api/v1/ws/grpc` upgrades to a WebSocket that runs one call (ADR-036). The first message:
+
+```json
+{ "type": "start", "collection": "shop", "key": "orders/get", "env": "dev",
+  "method": "shop.v1.Orders/Get", "messages": [{ "id": 7 }], "end": true }
+```
+
+`method` and `messages` default to the request file's `[grpc]` table; `request` (with a `grpc://` URL)
+works as for execute. With `"end": false` (client and bidirectional streaming) the client sends more with
+`{ "type": "send", "message": {…} }` and closes the request stream with `{ "type": "end" }`; `{ "type":
+"cancel" }` stops the call. The server sends `trace` events while connecting, `{ "type": "headers",
+"metadata" }`, `{ "type": "message", "at_ms", "message" }` for every response message, and finally `{
+"type": "status", "status": { "code", "name", "message" }, "trailers", "duration_ms" }`, or `{ "type":
+"error", "error" }`. The outbound policy applies; secret values are hidden in everything sent. Calls are not
+stored in history.
+
 ## WebSocket sessions
 
 `GET /api/v1/ws/websocket` upgrades to a WebSocket through which the server opens a connection to a target

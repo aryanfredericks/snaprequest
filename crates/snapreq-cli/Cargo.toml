@@ -16,6 +16,8 @@ snapreq-test.workspace = true
 snapreq-server.workspace = true
 snapreq-interop.workspace = true
 snapreq-script.workspace = true
+snapreq-grpc.workspace = true
+futures-util.workspace = true
 anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true
@@ -33,13 +35,17 @@ url.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["server", "http1"] }
-hyper-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["server"] }
+# The mock gRPC server (crates/snapreq-grpc/examples/mock_grpc.rs).
+prost-reflect = "0.16"
+tonic = { version = "0.14", default-features = false }
+tonic-reflection = { version = "0.14", default-features = false, features = ["server"] }
+tower-service = "0.3"
 insta.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
-futures-util.workspace = true
 
 [lints]
 workspace = true

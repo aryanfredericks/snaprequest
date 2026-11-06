@@ -19,6 +19,7 @@ snapreq-test = { path = "crates/snapreq-test", version = "0.1.0" }
 snapreq-server = { path = "crates/snapreq-server", version = "0.1.0" }
 snapreq-interop = { path = "crates/snapreq-interop", version = "0.1.0" }
 snapreq-script = { path = "crates/snapreq-script", version = "0.1.0" }
+snapreq-grpc = { path = "crates/snapreq-grpc", version = "0.1.0" }
 
 # Shared external dependencies (add new ones here, then use `dep.workspace = true`)
 anstream = "1"

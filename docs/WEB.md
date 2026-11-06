@@ -27,6 +27,11 @@ server's workspace directory, so collections edited in the browser can be commit
 - While a request runs, **Stop** ends it: a stream (such as Server-Sent Events) keeps what arrived. A
   `text/event-stream` response shows an **Events** tab, live while the stream is read and afterwards:
   arrival time, type, id and data (JSON pretty-printed on request), filtered by type or text.
+- A `grpc://` or `grpcs://` URL makes it a **gRPC request**: **Call** loads the server's services (by
+  reflection, or the proto files named in the request), picks a method, inserts a JSON template of its
+  input and edits the message (a JSON array of messages for client streaming); **Metadata** are the
+  headers sent. *Invoke* calls it through the server: response messages arrive live, with the status,
+  headers, trailers and the connection trace; streaming calls can send more messages and end the stream.
 - A `ws://` or `wss://` URL makes it a **WebSocket request**: *Connect* opens the connection through the
   server, the response area becomes a message log (sent and received messages with time and size, JSON
   pretty-printing, filtering, ping/pong on request, the handshake trace), and **Saved messages** edits the

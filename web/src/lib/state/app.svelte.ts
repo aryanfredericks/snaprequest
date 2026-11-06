@@ -2,6 +2,7 @@
 import { api, ApiError, currentWorkspace, unwrap } from "../api/client";
 import type {
   CollectionDoc,
+  GrpcService,
   CollectionListEntry,
   FlowFile,
   HistoryRecord,
@@ -14,7 +15,7 @@ import type {
 } from "../api/types";
 import { jobs } from "../api/ws";
 import type { ImportRequest, ImportSummary } from "../model/importing";
-import { draftFromFile, draftToCore, draftToFile, isWebSocket, uid } from "../model/draft";
+import { draftFromFile, draftToCore, draftToFile, isGrpc, isWebSocket, uid } from "../model/draft";
 import { draftFromHistory } from "../model/history";
 import { flowToFile } from "../model/flow";
 import { parseData } from "../model/runs";
@@ -186,7 +187,10 @@ class AppState {
     if (!force && tab.dirty && !confirm(`Close "${tab.title}" without saving?`)) return;
     const i = this.tabs.indexOf(tab);
     if (i < 0) return;
-    if (tab.kind === "request") tab.ws.disconnect();
+    if (tab.kind === "request") {
+      tab.ws.disconnect();
+      tab.grpc.stop();
+    }
     this.tabs.splice(i, 1);
     if (this.activeId === tab.id) {
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
@@ -259,6 +263,10 @@ class AppState {
       tab.error = "Enter a URL first.";
       return;
     }
+    if (isGrpc(tab.draft)) {
+      this.invokeGrpc(tab);
+      return;
+    }
     if (isWebSocket(tab.draft)) {
       this.toggleWebSocket(tab);
       return;
@@ -325,6 +333,65 @@ class AppState {
     } catch (e) {
       tab.schemaState = { busy: false, error: message(e) };
     }
+  }
+
+  /** The request part of a gRPC body: the collection request, or the scratch request. */
+  private grpcTarget(tab: RequestTab): Record<string, unknown> {
+    const body: Record<string, unknown> = {};
+    if (tab.collection && tab.key) {
+      body.collection = tab.collection;
+      body.key = tab.key;
+      if (workspaces.canEdit) body.file = draftToFile(tab.draft);
+      const env = this.envs[tab.collection];
+      if (env) body.env = env;
+    } else {
+      const core = draftToCore(tab.draft);
+      delete core.body;
+      body.request = { ...core, method: "GET" };
+    }
+    return body;
+  }
+
+  /** Lists the services a gRPC request can call (`POST /grpc/describe`). */
+  async describeGrpc(tab: RequestTab) {
+    let body: Record<string, unknown>;
+    try {
+      body = this.grpcTarget(tab);
+    } catch (e) {
+      tab.describeState = { busy: false, error: message(e) };
+      return;
+    }
+    tab.describeState = { busy: true, error: null };
+    try {
+      const r = unwrap(await api.POST("/api/v1/grpc/describe", { body: body as never })) as unknown as { services: GrpcService[] };
+      tab.grpcServices = r.services;
+      tab.describeState = { busy: false, error: null };
+    } catch (e) {
+      tab.describeState = { busy: false, error: message(e) };
+    }
+  }
+
+  /** Calls the request's gRPC method through the server, or cancels the running call. */
+  invokeGrpc(tab: RequestTab) {
+    if (tab.grpc.running) {
+      tab.grpc.cancel();
+      return;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = this.grpcTarget(tab);
+    } catch (e) {
+      tab.error = message(e);
+      return;
+    }
+    const spec = tab.draft.rest.grpc ?? {};
+    if (spec.method) body.method = spec.method;
+    const texts = spec.messages?.length ? spec.messages : spec.message !== undefined ? [spec.message] : [];
+    body.messages = texts;
+    const method = tab.grpcServices?.flatMap((s) => s.methods).find((m) => m.path === spec.method);
+    body.end = !method?.client_streaming;
+    tab.error = null;
+    tab.grpc.start(body);
   }
 
   /** Opens (or closes) the connection of a WebSocket request through the server. */

@@ -12,14 +12,15 @@
   import SettingsEditor from "./SettingsEditor.svelte";
   import Tabs from "./Tabs.svelte";
   import WsMessagesEditor from "./WsMessagesEditor.svelte";
-  import { isWebSocket } from "../model/draft";
+  import { isGrpc, isWebSocket } from "../model/draft";
+  import GrpcCallEditor from "./GrpcCallEditor.svelte";
 
   interface Props {
     tab: RequestTab;
   }
   let { tab }: Props = $props();
 
-  type Section = "params" | "headers" | "body" | "messages" | "auth" | "checks" | "scripts" | "settings";
+  type Section = "call" | "params" | "headers" | "body" | "messages" | "auth" | "checks" | "scripts" | "settings";
   let section = $state<Section>("params");
   let saving = $state(false);
   let exporter: ExportDialog | undefined = $state();
@@ -31,15 +32,18 @@
   );
   const scripts = $derived([d.rest.script?.pre_request || d.rest.script?.pre_request_file, d.rest.script?.test || d.rest.script?.test_file].filter(Boolean).length || "");
   const websocket = $derived(isWebSocket(d));
+  const grpcMode = $derived(isGrpc(d));
   const wsState = $derived(tab.ws.status);
   const sections = $derived([
-    { id: "params" as const, label: "Params", badge: count(d.query) },
-    { id: "headers" as const, label: "Headers", badge: count(d.headers) },
-    ...(websocket
+    ...(grpcMode ? [{ id: "call" as const, label: "Call", badge: d.rest.grpc?.method?.split("/").pop() ?? "" }] : [{ id: "params" as const, label: "Params", badge: count(d.query) }]),
+    { id: "headers" as const, label: grpcMode ? "Metadata" : "Headers", badge: count(d.headers) },
+    ...(grpcMode
+      ? []
+      : websocket
       ? [{ id: "messages" as const, label: "Saved messages", badge: d.rest.websocket?.messages?.length ?? "" }]
       : [{ id: "body" as const, label: "Body", badge: d.body.type === "none" ? "" : d.body.type }]),
     { id: "auth" as const, label: "Auth", badge: d.auth.type === "inherit" || d.auth.type === "none" ? "" : d.auth.type },
-    ...(inCollection && !websocket ? [{ id: "checks" as const, label: "Checks & vars", badge: checks }] : []),
+    ...(inCollection && !websocket && !grpcMode ? [{ id: "checks" as const, label: "Checks & vars", badge: checks }] : []),
     ...(inCollection ? [{ id: "scripts" as const, label: "Scripts", badge: scripts }] : []),
     { id: "settings" as const, label: "Settings", badge: Object.keys(d.settings).length },
   ]);
@@ -53,7 +57,7 @@
     if (lastBodyType !== null && t !== lastBodyType && t === "graphql" && d.method === "GET") d.method = "POST";
     lastBodyType = t;
   });
-  const current = $derived(sections.some((s) => s.id === section) ? section : "params");
+  const current = $derived(sections.some((s) => s.id === section) ? section : (sections[0]?.id ?? "params"));
   const inheritedAuth = $derived.by(() => {
     const doc = tab.collection ? app.docs[tab.collection] : null;
     return doc?.file.auth?.type ?? null;
@@ -75,7 +79,9 @@
     {/if}
   </div>
   <form class="line" onsubmit={(e) => (e.preventDefault(), app.send(tab))}>
-    {#if websocket}
+    {#if grpcMode}
+      <span class="proto" title="A gRPC request (grpc:// or grpcs:// URL)">gRPC</span>
+    {:else if websocket}
       <span class="proto" title="A WebSocket request (ws:// or wss:// URL)">WS</span>
     {:else}
       <MethodSelect bind:value={d.method} label="Method" />
@@ -91,7 +97,9 @@
       onenter={() => app.send(tab)}
       class="url"
     />
-    {#if websocket}
+    {#if grpcMode}
+      <button type="submit" class="primary" title="Call the method (Ctrl+Enter)">{tab.grpc.running ? "Cancel" : "Invoke"}</button>
+    {:else if websocket}
       <button type="submit" class="primary" title="Connect or disconnect (Ctrl+Enter)">
         {wsState === "open" ? "Disconnect" : wsState === "connecting" ? "Cancel" : "Connect"}
       </button>
@@ -103,7 +111,7 @@
       {/if}
     {/if}
     <button type="button" onclick={save} title="Save (Ctrl+S)">{tab.dirty ? "Save*" : "Save"}</button>
-    {#if !websocket}
+    {#if !websocket && !grpcMode}
       <button type="button" onclick={() => exporter?.open(tab)} title="Copy as cURL, Python, JavaScript, Go or Rust">Code</button>
     {/if}
   </form>
@@ -117,6 +125,8 @@
         <p class="muted small">Added to the query string of the URL (after any parameters written in the URL itself).</p>
       {:else if current === "headers"}
         <KeyValueEditor bind:rows={d.headers} label="Headers" vars={tab.vars} names={HEADER_NAMES} />
+      {:else if current === "call"}
+        <GrpcCallEditor spec={d.rest.grpc} onchange={(v) => (d.rest.grpc = v)} services={tab.grpcServices} describeState={tab.describeState} ondescribe={() => app.describeGrpc(tab)} {inCollection} />
       {:else if current === "messages"}
         <WsMessagesEditor spec={d.rest.websocket} onchange={(v) => (d.rest.websocket = v)} />
       {:else if current === "body"}

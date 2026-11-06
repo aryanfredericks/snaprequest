@@ -15,6 +15,7 @@ snapreq-core.workspace = true
 snapreq-collection.workspace = true
 snapreq-test.workspace = true
 snapreq-interop.workspace = true
+snapreq-grpc.workspace = true
 argon2.workspace = true
 axum.workspace = true
 base64.workspace = true
@@ -41,8 +42,13 @@ tokio-tungstenite = "0.29"
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["server", "http1"] }
-hyper-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["server"] }
+# The mock gRPC server (crates/snapreq-grpc/examples/mock_grpc.rs).
+prost-reflect = "0.16"
+tonic = { version = "0.14", default-features = false }
+tonic-reflection = { version = "0.14", default-features = false, features = ["server"] }
+tower-service = "0.3"
 tokio = { workspace = true, features = ["full"] }
 
 [lints]

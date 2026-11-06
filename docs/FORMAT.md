@@ -332,6 +332,28 @@ content = '{"room": "{{room}}", "token": "{{token}}"}'
 Placeholders in messages are resolved like the rest of the file (secret values are hidden wherever messages
 are shown). `snapreq run` and flows leave WebSocket requests out.
 
+### gRPC requests
+
+A request file with a `grpc://` (plaintext HTTP/2) or `grpcs://` (TLS) URL, or with a `[grpc]` table, is a
+gRPC call (ADR-036). It has no `method` or `[body]`; `[headers]` are sent as metadata, `[auth]` (basic,
+bearer, header API key, OAuth 2.0) adds its header, and `[settings]` apply (TLS, proxy, timeouts; the total
+timeout becomes the call's deadline). Services are described by server reflection, or by proto files:
+
+```toml
+url = "grpc://{{grpc_host}}"
+
+[headers]
+x-tenant = "acme"
+
+[grpc]
+method = "shop.v1.Orders/Get"           # package.Service/Method
+protos = ["protos/shop.proto"]          # optional; relative to this file (default: server reflection)
+import_paths = ["protos"]               # optional
+message = '{"id": "{{order_id}}"}'      # proto3 JSON; or `messages = [...]` for client streaming
+```
+
+Placeholders work in the method, paths and messages. `snapreq run` and flows leave gRPC requests out.
+
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,

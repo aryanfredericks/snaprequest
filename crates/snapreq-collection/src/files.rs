@@ -116,7 +116,31 @@ pub struct RequestFile {
     pub script: ScriptSpec,
     /// Makes this a WebSocket request (also implied by a `ws://` or `wss://` URL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub websocket: Option<WebSocketSpec>,
+    pub websocket: Option<Box<WebSocketSpec>>,
+    /// Makes this a gRPC call (also implied by a `grpc://` or `grpcs://` URL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grpc: Option<Box<GrpcSpec>>,
+}
+
+/// A `[grpc]` table (PLAN P10.4, ADR-036).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrpcSpec {
+    /// `package.Service/Method`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// Proto files relative to the request file; server reflection when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protos: Vec<PathBuf>,
+    /// Import paths for the proto files, relative to the request file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_paths: Vec<PathBuf>,
+    /// The request message as JSON (unary and server streaming).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Request messages as JSON, in order (client and bidirectional streaming).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<String>,
 }
 
 /// What kind of connection a request file describes.
@@ -124,6 +148,7 @@ pub struct RequestFile {
 pub enum RequestKind {
     Http,
     WebSocket,
+    Grpc,
 }
 
 impl RequestKind {
@@ -131,6 +156,7 @@ impl RequestKind {
         match self {
             Self::Http => "http",
             Self::WebSocket => "websocket",
+            Self::Grpc => "grpc",
         }
     }
 }
@@ -189,13 +215,17 @@ impl RequestFile {
             assert: Box::default(),
             script: ScriptSpec::default(),
             websocket: None,
+            grpc: None,
         }
     }
 
     /// HTTP, or a WebSocket when the file has `[websocket]` or a `ws://`/`wss://` URL.
     pub fn kind(&self) -> RequestKind {
         let url = self.url.trim_start().to_ascii_lowercase();
-        if self.websocket.is_some() || url.starts_with("ws://") || url.starts_with("wss://") {
+        if self.grpc.is_some() || url.starts_with("grpc://") || url.starts_with("grpcs://") {
+            RequestKind::Grpc
+        } else if self.websocket.is_some() || url.starts_with("ws://") || url.starts_with("wss://")
+        {
             RequestKind::WebSocket
         } else {
             RequestKind::Http
@@ -253,6 +283,23 @@ impl RequestFile {
                 }
             }
             _ => {}
+        }
+        if self.kind() == RequestKind::Grpc {
+            if self.method.is_some() {
+                return Err("a gRPC request has no `method`; name it in `[grpc]`".into());
+            }
+            if self.body.is_some() {
+                return Err("a gRPC request has no `[body]`; write the message in `[grpc]`".into());
+            }
+            if self.websocket.is_some() {
+                return Err("a request cannot have both `[grpc]` and `[websocket]`".into());
+            }
+            if let Some(g) = &self.grpc
+                && g.message.is_some()
+                && !g.messages.is_empty()
+            {
+                return Err("grpc: set either `message` or `messages`, not both".into());
+            }
         }
         if self.kind() == RequestKind::WebSocket {
             if self.method() != "GET" {

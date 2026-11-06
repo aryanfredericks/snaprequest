@@ -227,6 +227,72 @@ pub(crate) async fn connect(
     policy: Option<&dyn super::ConnectPolicy>,
     rec: &mut Recorder,
 ) -> Result<Conn> {
+    let opened = open(url, settings, tls, proxy, policy, rec, false).await?;
+    let (stream, use_h2, remote, forward_proxy) = (
+        opened.stream,
+        opened.h2,
+        opened.remote,
+        opened.forward_proxy,
+    );
+    let meter = Meter::default();
+    let io = TokioIo::new(MeteredIo::new(stream, meter.clone()));
+    let handshake_failed = |e: hyper::Error| format!("HTTP handshake failed: {}", error_chain(&e));
+    let sender = if use_h2 {
+        let (sender, connection) = http2::Builder::new(TokioExecutor::new())
+            .handshake(io)
+            .await
+            .map_err(|e| rec.fail(handshake_failed(e), false))?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                tracing::debug!(error = %e, %remote, "HTTP/2 connection closed with error");
+            }
+        });
+        Sender::H2(sender)
+    } else {
+        let (sender, connection) = http1::Builder::new()
+            .title_case_headers(true)
+            .handshake(io)
+            .await
+            .map_err(|e| rec.fail(handshake_failed(e), false))?;
+        tokio::spawn(async move {
+            // With upgrades, a `101 Switching Protocols` hands the socket to the WebSocket client.
+            if let Err(e) = connection.with_upgrades().await {
+                tracing::debug!(error = %e, %remote, "connection closed with error");
+            }
+        });
+        Sender::H1(sender)
+    };
+
+    Ok(Conn {
+        sender,
+        meter,
+        remote,
+        forward_proxy,
+    })
+}
+
+/// An open TCP or TLS stream, before any HTTP.
+#[derive(Debug)]
+pub(crate) struct Opened {
+    pub stream: MaybeTls,
+    /// HTTP/2 was negotiated (ALPN) or asked for over plain TCP.
+    pub h2: bool,
+    pub remote: SocketAddr,
+    pub forward_proxy: Option<Option<String>>,
+}
+
+/// Resolves, connects (through a proxy if any) and does TLS for `https`, recording each step.
+/// With `tunnel`, plain-HTTP targets go through an HTTP proxy with `CONNECT` too (for protocols
+/// other than HTTP/1.1, which cannot be forwarded in absolute form).
+pub(crate) async fn open(
+    url: &Url,
+    settings: &RequestSettings,
+    tls: Option<&RequestTls>,
+    proxy: Option<&Proxy>,
+    policy: Option<&dyn super::ConnectPolicy>,
+    rec: &mut Recorder,
+    tunnel: bool,
+) -> Result<Opened> {
     let port = url.port_or_known_default().unwrap_or(80);
     let target = url
         .host()
@@ -276,7 +342,7 @@ pub(crate) async fn connect(
         let authority = format!("{}:{port}", url.host_str().unwrap_or_default());
         let started = Instant::now();
         match proxy.kind {
-            ProxyKind::Http if url.scheme() == "http" => {
+            ProxyKind::Http if url.scheme() == "http" && !tunnel => {
                 forward_proxy = Some(proxy.basic_authorization());
             }
             ProxyKind::Http => {
@@ -337,38 +403,9 @@ pub(crate) async fn connect(
         ),
     };
 
-    let meter = Meter::default();
-    let io = TokioIo::new(MeteredIo::new(stream, meter.clone()));
-    let handshake_failed = |e: hyper::Error| format!("HTTP handshake failed: {}", error_chain(&e));
-    let sender = if use_h2 {
-        let (sender, connection) = http2::Builder::new(TokioExecutor::new())
-            .handshake(io)
-            .await
-            .map_err(|e| rec.fail(handshake_failed(e), false))?;
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::debug!(error = %e, %remote, "HTTP/2 connection closed with error");
-            }
-        });
-        Sender::H2(sender)
-    } else {
-        let (sender, connection) = http1::Builder::new()
-            .title_case_headers(true)
-            .handshake(io)
-            .await
-            .map_err(|e| rec.fail(handshake_failed(e), false))?;
-        tokio::spawn(async move {
-            // With upgrades, a `101 Switching Protocols` hands the socket to the WebSocket client.
-            if let Err(e) = connection.with_upgrades().await {
-                tracing::debug!(error = %e, %remote, "connection closed with error");
-            }
-        });
-        Sender::H1(sender)
-    };
-
-    Ok(Conn {
-        sender,
-        meter,
+    Ok(Opened {
+        stream,
+        h2: use_h2,
         remote,
         forward_proxy,
     })

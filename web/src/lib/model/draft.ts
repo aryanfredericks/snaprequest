@@ -154,7 +154,7 @@ export interface Draft {
   /** Requests outside a collection: `host:port:addr[,addr]` lines (curl's `--resolve`). */
   resolve: string;
   /** File keys the builder does not edit. */
-  rest: Pick<RequestFile, "vars" | "capture" | "assert" | "script" | "websocket">;
+  rest: Pick<RequestFile, "vars" | "capture" | "assert" | "script" | "websocket" | "grpc">;
 }
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -354,7 +354,7 @@ export function draftFromFile(file: RequestFile): Draft {
     auth: authFromSpec(file.auth),
     settings: { ...(file.settings ?? {}) },
     resolve: "",
-    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert, script: file.script, websocket: file.websocket }),
+    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert, script: file.script, websocket: file.websocket, grpc: file.grpc }),
   };
 }
 
@@ -363,7 +363,8 @@ export function draftToFile(d: Draft): RequestFile {
   return clean({
     name: opt(d.name),
     description: opt(d.description),
-    method: d.method === (d.body.type === "graphql" ? "POST" : "GET") ? undefined : d.method,
+    // gRPC and WebSocket requests have no method.
+    method: isGrpc(d) || isWebSocket(d) || d.method === (d.body.type === "graphql" ? "POST" : "GET") ? undefined : d.method,
     url: d.url,
     vars: d.rest.vars,
     query: rowsToTable(d.query),
@@ -375,12 +376,18 @@ export function draftToFile(d: Draft): RequestFile {
     assert: d.rest.assert,
     script: scriptOf(d.rest.script),
     websocket: d.rest.websocket,
+    grpc: d.rest.grpc,
   });
+}
+
+/** A gRPC request: a `grpc://`/`grpcs://` URL or a `[grpc]` table (ADR-036). */
+export function isGrpc(d: Draft): boolean {
+  return d.rest.grpc !== undefined || /^\s*grpcs?:\/\//i.test(d.url);
 }
 
 /** A WebSocket request: a `ws://`/`wss://` URL or a `[websocket]` table (ADR-033). */
 export function isWebSocket(d: Draft): boolean {
-  return d.rest.websocket !== undefined || /^\s*wss?:\/\//i.test(d.url);
+  return !isGrpc(d) && d.rest.websocket !== undefined || /^\s*wss?:\/\//i.test(d.url);
 }
 
 // --- Core requests (outside a collection) ------------------------------------------------
