@@ -38,6 +38,43 @@ use crate::{Error, Result};
 /// secrets known at that moment; the trace in the final response or error is authoritative.
 pub type TraceSink = Arc<dyn Fn(&crate::model::TraceEntry) + Send + Sync>;
 
+/// Watches a response body as it arrives, for live views of streams (Server-Sent Events).
+/// `head` is called for every response read, including redirects and auth retries.
+pub trait BodyObserver: std::fmt::Debug + Send + Sync {
+    fn head(&self, _status: u16, _headers: &[Header]) {}
+    fn chunk(&self, data: &[u8]);
+}
+
+/// Live access to an execution: an observer of response bodies and a way to stop it. A stopped
+/// execution ends with what was read so far (the response is still returned, and says so in
+/// the trace); before the response headers arrive, stopping is an error.
+#[derive(Debug, Clone)]
+pub struct Streaming {
+    pub observer: Option<Arc<dyn BodyObserver>>,
+    pub stop: tokio_util::sync::CancellationToken,
+    /// Most body bytes kept in the final response; the rest is only observed.
+    pub keep_limit: usize,
+}
+
+impl Default for Streaming {
+    fn default() -> Self {
+        Self {
+            observer: None,
+            stop: tokio_util::sync::CancellationToken::new(),
+            keep_limit: 16 * 1024 * 1024,
+        }
+    }
+}
+
+impl Streaming {
+    pub fn new(observer: Arc<dyn BodyObserver>) -> Self {
+        Self {
+            observer: Some(observer),
+            ..Self::default()
+        }
+    }
+}
+
 /// Decides which destinations the client may connect to (an outbound request policy, for
 /// servers that send requests on behalf of others).
 ///
@@ -183,9 +220,21 @@ impl Client {
 
     /// [`execute`](Self::execute), also sending every trace event to `sink` as it happens.
     pub async fn execute_with(&self, req: &Request, sink: Option<TraceSink>) -> Result<Response> {
+        self.execute_streaming(req, sink, None).await
+    }
+
+    /// [`execute_with`](Self::execute_with), also showing response bodies to an observer as
+    /// they arrive and allowing the execution to be stopped (see [`Streaming`]).
+    pub async fn execute_streaming(
+        &self,
+        req: &Request,
+        sink: Option<TraceSink>,
+        stream: Option<Streaming>,
+    ) -> Result<Response> {
         let url = req.effective_url()?;
         let mut rec = self.recorder(req);
         rec.sink = sink.map(recorder::Sink);
+        rec.stream = stream;
         let shadowed = crate::auth::shadowed_by_header(req);
         if let Some(name) = &shadowed {
             rec.record(TraceEvent::Info {
@@ -548,7 +597,17 @@ impl Client {
             prepared.to_http(false)
         };
 
-        let response = match conn.sender.send(request).await {
+        let stream = rec.stream.clone();
+        let sent = match &stream {
+            Some(s) => tokio::select! {
+                r = conn.sender.send(request) => r,
+                () = s.stop.cancelled() => {
+                    return Err(rec.fail("stopped before the response arrived", false));
+                }
+            },
+            None => conn.sender.send(request).await,
+        };
+        let response = match sent {
             Ok(r) => r,
             Err(e) => {
                 // HTTP/2 "canceled"/"closed" means the stream was never processed.
@@ -579,16 +638,51 @@ impl Client {
             version,
             headers: headers.clone(),
         });
+        let observer = stream.as_ref().and_then(|s| s.observer.clone());
+        if let Some(o) = &observer {
+            o.head(parts.status.as_u16(), &headers);
+        }
 
         rec.phase = Phase::Download;
         let mut buf = BytesMut::new();
-        while let Some(frame) = body.frame().await {
+        let mut received = 0u64;
+        let mut stopped = false;
+        let keep = stream.as_ref().map_or(usize::MAX, |s| s.keep_limit);
+        loop {
+            let frame = match &stream {
+                Some(s) => tokio::select! {
+                    f = body.frame() => f,
+                    () = s.stop.cancelled() => {
+                        stopped = true;
+                        None
+                    }
+                },
+                None => body.frame().await,
+            };
+            let Some(frame) = frame else { break };
             let frame = frame.map_err(|e| rec.fail(error_chain(&e), false))?;
             if let Ok(data) = frame.into_data() {
-                buf.extend_from_slice(&data);
+                received += data.len() as u64;
+                if let Some(o) = &observer {
+                    o.chunk(&data);
+                }
+                let room = keep.saturating_sub(buf.len());
+                buf.extend_from_slice(&data[..data.len().min(room)]);
             }
         }
-        let body_len = buf.len() as u64;
+        if stopped {
+            rec.record(TraceEvent::Info {
+                message: format!("stopped reading the body after {received} bytes"),
+            });
+        }
+        if received > buf.len() as u64 {
+            rec.record(TraceEvent::Info {
+                message: format!("kept the first {} of {received} body bytes", buf.len()),
+            });
+        }
+        let truncated = received > buf.len() as u64;
+        // As received on the wire, even when not all of it was kept.
+        let body_len = received;
         rec.record(TraceEvent::ResponseComplete {
             body_bytes: body_len,
             download: first_byte.elapsed(),
@@ -627,12 +721,14 @@ impl Client {
 
         let decoded_len = body.len() as u64;
         let snap = conn.meter.snapshot();
-        let reusable = h2
-            || !parts
-                .headers
-                .get_all(header::CONNECTION)
-                .iter()
-                .any(|v| v.as_bytes().eq_ignore_ascii_case(b"close"));
+        let reusable = !stopped
+            && !truncated
+            && (h2
+                || !parts
+                    .headers
+                    .get_all(header::CONNECTION)
+                    .iter()
+                    .any(|v| v.as_bytes().eq_ignore_ascii_case(b"close")));
 
         Ok(Outcome::Done(
             Response {

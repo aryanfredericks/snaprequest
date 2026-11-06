@@ -4,7 +4,7 @@
 
 ## Current position
 - **Phase:** 10 Advanced protocols and features (Phases 0–9 complete)
-- **Current checkpoint:** P10.2 Server-Sent Events viewer. Phase 10 started 2026-11-06 (maintainer: "complete phase 10 fully"); P10.1 done.
+- **Current checkpoint:** P10.3 GraphQL (query editor, variables, schema introspection). P10.1 and P10.2 done.
 
 ## Waiting on the maintainer
 | # | Item | Notes |
@@ -25,9 +25,18 @@ Local directory: `/home/cruxi/Projects/snap-request` (renamed from `thunder-http
 - MSRV is 1.89 (ADR-019); `scripts/check.sh` checks it with the local 1.89 toolchain.
 
 ## Next steps
-1. P10.2 SSE viewer, then P10.3 GraphQL, P10.4 gRPC, P10.5 bench, P10.6 mock server, P10.7 (optional) Tauri.
+1. P10.3 GraphQL, then P10.4 gRPC, P10.5 bench, P10.6 mock server, P10.7 (optional) Tauri.
 2. Possible follow-ups from docs/SECURITY-REVIEW.md "Accepted risks": key rotation for sealed secrets,
    an admin role (server-wide audit, recovering ownerless workspaces).
+
+## SSE notes (P10.2)
+- Core (ADR-034): `BodyObserver` + `Streaming { observer, stop: CancellationToken, keep_limit }` in
+  `client/mod.rs`, carried in the `Recorder` (`rec.stream`) to `exchange`; `Client::execute_streaming`;
+  `snapreq_core::sse` (`SseParser`, `SseEvent`, `TimedEvent`, `observer`, `is_event_stream`).
+- `Session.stream`; server `execute_body(.., stream)`, `events` in execute results (`events_json`), `ws.rs`
+  split socket with a queue, `event` messages and `cancel`. CLI `snapreq sse` (`sse_cmd.rs`).
+- UI: `JobHandlers.onEvent/control`, `RequestTab.liveEvents/stop`, Stop button, `EventsView` tab. mock_shop
+  `GET /events?n=N` (boxed unsync bodies).
 
 ## WebSocket notes (P10.1)
 - `snapreq-core::client::ws` (ADR-033): `Client::websocket(req, WsOptions, sink)` sends the handshake through the
@@ -668,6 +677,7 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - P7.6 — 2026-11-03 — History: search and filters, stored exchange view, re-run (without stored credentials), compare two responses (body/headers diff, timing).
 - P7.7 — 2026-11-03 — Runner (iterations, data rows, live progress, report with per-step debug, HTML/JUnit/JSON downloads), runs list, flow editor with step-by-step runs, captured variables after each step, re-run from step N.
 - P7.8 — 2026-11-03 — Light/dark/system themes, keyboard shortcuts with help dialog, accessibility pass (axe WCAG 2.1 AA in both themes), CLI parity review (proxy, TLS, resolve, run -k/-t). Phase 7 complete. 352 Rust + 40 unit + 30 browser tests.
+- P10.2 — 2026-11-06 — Server-Sent Events: streaming body observer and stop in core, `snapreq sse`, live events and cancel over the server WebSocket, Events tab and Stop button in the UI. ADR-034.
 - P10.1 — 2026-11-06 — WebSocket client: core handshake through the engine, `[websocket]` in request files, `snapreq ws`, server-relayed sessions, message log in the UI. ADR-033.
 - P9.4 — 2026-11-06 — Postman pre-request/test scripts translated to `[script]` during import (`pm.*` and legacy API rewritten, untranslatable lines commented with warnings, result compile-checked). ADR-032. The Newman sample imports and its tests pass. **Phase 9 complete.**
 - P9.3 — 2026-11-04 — Pre-request and test scripts in JavaScript (QuickJS sandbox, `snapreq.*` API with Jest/Chai `expect`), in send, run, flows, the server and the UI. ADR-031.
@@ -710,3 +720,4 @@ Legend: ⬜ not started · 🟨 in progress · ✅ done
 - **2026-11-04 (27):** P9.3 done: `snapreq-script` (rquickjs) with sandbox tests (loops, memory, stack, no modules or host APIs), `[script]` in the format, scripts in sessions, CLI send/run, server and UI. 439 Rust tests, 47 unit tests and 38 Playwright tests pass.
 - **2026-11-06 (28):** P9.4 done, which completes Phase 9: Postman pre-request/test scripts are translated during import (ADR-032); the Newman sample imports without warnings and its tests pass. 443 Rust tests pass. Stopped for the maintainer's report before Phase 10.
 - **2026-11-06 (29):** P10.1 done: WebSocket client in core, CLI, server and UI. 456 Rust tests, 50 unit tests and 39 Playwright tests pass.
+- **2026-11-06 (30):** P10.2 done: SSE parser and streaming in core, CLI, server and UI. 466 Rust tests, 51 unit tests and 40 Playwright tests pass.

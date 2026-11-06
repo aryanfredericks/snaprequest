@@ -6,6 +6,7 @@ import type {
   RequestFile,
   RunReport,
   RunStep,
+  SseEvent,
   TraceEntry,
   VariableInfo,
 } from "../api/types";
@@ -33,6 +34,10 @@ export class RequestTab {
   error = $state<string | null>(null);
   /** Variables visible to this request (null: outside a collection). */
   vars = $state<VariableInfo[] | null>(null);
+  /** Server-Sent Events of the running request, as they arrive. */
+  liveEvents = $state<SseEvent[]>([]);
+  /** Stops the running request (null when nothing runs). */
+  stop = $state<(() => void) | null>(null);
   /** The connection of a WebSocket request. */
   readonly ws = new WsSession();
 

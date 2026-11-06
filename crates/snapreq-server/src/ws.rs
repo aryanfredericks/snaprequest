@@ -15,13 +15,19 @@
 //! trace entry), `progress` events of runs (`{ "type": "progress", "id", "event":
 //! "request_started" | "request_done", ... }`) and finally `{ "type": "result", "id",
 //! "result" }` (the same document as the REST endpoint) or `{ "type": "error", "id", "error" }`.
-//! Jobs on one connection run one after another.
+//! Executions whose response is a `text/event-stream` also send `{ "type": "event", "id",
+//! "event": { "event", "data", "id", "retry", "at_ms" } }` for every event as it arrives.
+//! `{ "type": "cancel", "id" }` stops a running execution (it ends with what it read so far).
+//! Jobs on one connection run one after another; messages sent meanwhile wait their turn.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -37,13 +43,21 @@ pub async fn upgrade(
     ws.on_upgrade(move |socket| serve(socket, state, identity))
 }
 
-async fn serve(mut socket: WebSocket, state: Arc<AppState>, identity: Identity) {
-    while let Some(Ok(msg)) = socket.recv().await {
-        let text = match msg {
-            Message::Text(t) => t.to_string(),
-            Message::Close(_) => break,
-            // Pings are answered by axum; binary messages are not part of the protocol.
-            _ => continue,
+type Tx = SplitSink<WebSocket, Message>;
+type Rx = SplitStream<WebSocket>;
+
+async fn serve(socket: WebSocket, state: Arc<AppState>, identity: Identity) {
+    let (mut tx, mut rx) = socket.split();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    loop {
+        let text = match queue.pop_front() {
+            Some(t) => t,
+            None => match rx.next().await {
+                Some(Ok(Message::Text(t))) => t.to_string(),
+                Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+                // Pings are answered by axum; binary messages are not part of the protocol.
+                Some(Ok(_)) => continue,
+            },
         };
         // A logout, password change or revoked token ends the connection.
         if !identity.still_valid(&state).await.unwrap_or(false) {
@@ -52,10 +66,13 @@ async fn serve(mut socket: WebSocket, state: Arc<AppState>, identity: Identity) 
                 "unauthorized",
                 "the session has ended; log in again",
             );
-            let _ = send(&mut socket, &error_message(&Value::Null, &e)).await;
+            let _ = send(&mut tx, &error_message(&Value::Null, &e)).await;
             break;
         }
-        if job(&mut socket, &state, &identity, &text).await.is_err() {
+        if job(&mut tx, &mut rx, &mut queue, &state, &identity, &text)
+            .await
+            .is_err()
+        {
             break; // the client went away
         }
     }
@@ -65,13 +82,21 @@ fn error_message(id: &Value, e: &ApiError) -> Value {
     json!({ "type": "error", "id": id, "error": { "kind": e.kind, "message": e.message } })
 }
 
-async fn send(socket: &mut WebSocket, v: &Value) -> Result<(), axum::Error> {
+async fn send(socket: &mut Tx, v: &Value) -> Result<(), axum::Error> {
     socket.send(Message::Text(v.to_string().into())).await
+}
+
+/// A `{ "type": "cancel", "id" }` message: the id it cancels.
+fn cancel_of(text: &str) -> Option<Value> {
+    let v: Value = serde_json::from_str(text).ok()?;
+    (v["type"] == "cancel").then(|| v["id"].clone())
 }
 
 /// Runs one job, forwarding its live events while it runs.
 async fn job(
-    socket: &mut WebSocket,
+    socket: &mut Tx,
+    incoming: &mut Rx,
+    queue: &mut VecDeque<String>,
     state: &AppState,
     identity: &Identity,
     text: &str,
@@ -104,6 +129,12 @@ async fn job(
         .unwrap_or_default();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    let event_tx = tx.clone();
+    let event_id = id.clone();
+    let streaming = snapreq_core::Streaming::new(snapreq_core::sse::observer(move |e| {
+        let _ = event_tx.send(json!({ "type": "event", "id": event_id, "event": e }));
+    }));
+    let stop = streaming.stop.clone();
     let trace_tx = tx.clone();
     let trace_id = id.clone();
     let trace: snapreq_core::TraceSink = Arc::new(move |entry| {
@@ -129,9 +160,10 @@ async fn job(
             "execute" => {
                 drop(progress);
                 let body: ExecuteBody = serde_json::from_value(doc).map_err(bad)?;
-                execute_body(state, identity, &ws, body, Some(trace)).await
+                execute_body(state, identity, &ws, body, Some(trace), Some(streaming)).await
             }
             "run" => {
+                drop(streaming);
                 let body: RunBody = serde_json::from_value(doc).map_err(bad)?;
                 let live = snapreq_test::Live {
                     trace: Some(trace),
@@ -140,11 +172,14 @@ async fn job(
                 let space = crate::workspaces::Space::resolve(state, identity, &ws).await?;
                 run_body(state, &space, owner, body, Some(live)).await
             }
-            other => Err(ApiError::new(
-                axum::http::StatusCode::BAD_REQUEST,
-                "bad_request",
-                format!("unknown message type `{other}` (expected `execute` or `run`)"),
-            )),
+            other => {
+                drop((streaming, progress, trace));
+                Err(ApiError::new(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    format!("unknown message type `{other}` (expected `execute` or `run`)"),
+                ))
+            }
         }
         // Every sender is dropped here, which ends the forwarding loop below.
     };
@@ -164,6 +199,22 @@ async fn job(
                 None => closed = true,
             },
             r = &mut work, if result.is_none() => result = Some(r),
+            m = incoming.next(), if result.is_none() => match m {
+                Some(Ok(Message::Text(t))) => {
+                    let t = t.to_string();
+                    match cancel_of(&t) {
+                        Some(cancelled) if cancelled == id => stop.cancel(),
+                        // Cancelling a job that is not running does nothing.
+                        Some(_) => {}
+                        None => queue.push_back(t),
+                    }
+                }
+                Some(Ok(Message::Close(_)) | Err(_)) | None => {
+                    stop.cancel();
+                    return Err(axum::Error::new("the client went away"));
+                }
+                Some(Ok(_)) => {}
+            },
         }
     }
     let message = match result.unwrap_or_else(|| {

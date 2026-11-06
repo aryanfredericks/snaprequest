@@ -275,14 +275,34 @@ fn exchange_json(history_id: Option<i64>, run: &snapreq_test::RequestRun) -> Val
         ),
         RunOutcome::Failed(e) => (Value::Null, error_json(e)),
     };
-    json!({
+    let mut doc = json!({
         "history_id": history_id,
         "response": response,
         "error": error,
         "assertions": assertions,
         "captures": captures_json(&run.captures, &secrets),
         "logs": run.logs.iter().map(|l| snapreq_test::report::hide(l, &secrets)).collect::<Vec<_>>(),
-    })
+    });
+    if let Some(events) = run.response().and_then(|r| events_json(r, &secrets)) {
+        doc["events"] = events;
+    }
+    doc
+}
+
+/// The events of a `text/event-stream` response (as much of the body as was kept).
+fn events_json(resp: &snapreq_core::Response, secrets: &[String]) -> Option<Value> {
+    let ct = resp.header("content-type")?;
+    if !snapreq_core::sse::is_event_stream(ct) {
+        return None;
+    }
+    let events: Vec<Value> = snapreq_core::sse::SseParser::parse_all(&resp.body)
+        .into_iter()
+        .map(|mut e| {
+            e.data = snapreq_test::report::hide(&e.data, secrets);
+            json!(e)
+        })
+        .collect();
+    Some(json!(events))
 }
 
 fn error_json(e: &snapreq_core::Error) -> Value {
@@ -308,7 +328,7 @@ async fn execute_request(
 ) -> ApiResult<Json<Value>> {
     let ws = crate::workspaces::requested(&headers);
     Ok(Json(
-        execute_body(&state, &identity, &ws, body, None).await?,
+        execute_body(&state, &identity, &ws, body, None, None).await?,
     ))
 }
 
@@ -321,6 +341,7 @@ pub(crate) async fn execute_body(
     ws: &str,
     body: ExecuteBody,
     trace: Option<snapreq_core::client::TraceSink>,
+    stream: Option<snapreq_core::Streaming>,
 ) -> ApiResult<Value> {
     let owner = identity.owner();
     match (body.request, body.collection, body.key) {
@@ -333,7 +354,7 @@ pub(crate) async fn execute_body(
             req.settings.capture_wire |= body.capture_wire;
             req.effective_url()
                 .map_err(|e| ApiError::invalid(e.to_string()))?;
-            let result = state.client.execute_with(&req, trace).await;
+            let result = state.client.execute_streaming(&req, trace, stream).await;
             let id = state
                 .store
                 .add_history(
@@ -342,7 +363,13 @@ pub(crate) async fn execute_body(
                 )
                 .await?;
             Ok(match result {
-                Ok(resp) => json!({ "history_id": id, "response": resp, "error": null }),
+                Ok(resp) => {
+                    let mut doc = json!({ "history_id": id, "response": resp, "error": null });
+                    if let Some(events) = events_json(&resp, &req.secrets()) {
+                        doc["events"] = events;
+                    }
+                    doc
+                }
                 Err(e) => json!({ "history_id": id, "response": null, "error": error_json(&e) }),
             })
         }
@@ -384,6 +411,7 @@ pub(crate) async fn execute_body(
             session.overrides = vars_of(&body.vars);
             hide_declared(&mut session, &key);
             session.trace = trace;
+            session.stream = stream;
             let wire = body.capture_wire;
             let run = session
                 .send(&key, |r| r.settings.capture_wire |= wire)

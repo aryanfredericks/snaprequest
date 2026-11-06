@@ -40,6 +40,8 @@ pub(crate) struct Recorder {
     capture: Option<Meter>,
     /// Receives every event as it is recorded (redacted with what is known by then).
     pub(crate) sink: Option<Sink>,
+    /// Watches and can stop response bodies as they are read.
+    pub(crate) stream: Option<super::Streaming>,
 }
 
 /// A [`TraceSink`](super::TraceSink) with a `Debug` impl.
@@ -61,6 +63,7 @@ impl Recorder {
             redactor,
             capture: None,
             sink: None,
+            stream: None,
         }
     }
 

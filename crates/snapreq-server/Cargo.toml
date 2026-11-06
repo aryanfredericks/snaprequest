@@ -10,6 +10,7 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 snapreq-core.workspace = true
 snapreq-collection.workspace = true
 snapreq-test.workspace = true

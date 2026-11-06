@@ -9,7 +9,8 @@
 </script>
 
 <script lang="ts">
-  import type { AssertionOutcome, CaptureOutcome, ExecutionError, TraceEntry } from "../api/types";
+  import type { AssertionOutcome, CaptureOutcome, ExecutionError, SseEvent, TraceEntry } from "../api/types";
+  import EventsView from "./EventsView.svelte";
   import { formatBytes, formatMs, header, PHASES, responseCookies, statusClass, statusText } from "../model/http";
   import BodyViewer from "./BodyViewer.svelte";
   import ChecksView from "./ChecksView.svelte";
@@ -29,6 +30,8 @@
     logs?: string[];
     running?: boolean;
     live?: TraceEntry[];
+    /** Server-Sent Events (live while running); null when the response is not a stream. */
+    events?: SseEvent[] | null;
     /** Base file name for downloads. */
     name?: string;
     idPrefix: string;
@@ -44,13 +47,14 @@
     logs = [],
     running = false,
     live = [],
+    events = null,
     name = "response",
     idPrefix,
     label = "Response",
     empty = "Send the request to see the response.",
   }: Props = $props();
 
-  type Section = "body" | "headers" | "cookies" | "checks" | "debug";
+  type Section = "events" | "body" | "headers" | "cookies" | "checks" | "debug";
   /** What the user picked; shown whenever it is available (only Debug is, while sending). */
   let chosen = $state<Section>("body");
 
@@ -58,7 +62,9 @@
   const failed = $derived(assertions.filter((a) => !a.passed).length);
   const trace = $derived(running ? live : (r?.trace ?? failure?.trace ?? []));
   const done = $derived(!running && !problem);
+  const streaming = $derived(events !== null && (events.length > 0 || !running));
   const sections = $derived([
+    ...((running && events?.length) || (done && events !== null) ? [{ id: "events" as const, label: running ? "Events (live)" : "Events", badge: events?.length ?? 0 }] : []),
     ...(r && done
       ? [
           { id: "body" as const, label: "Body" },
@@ -71,7 +77,11 @@
       : []),
     ...(trace.length || running ? [{ id: "debug" as const, label: running ? "Debug (live)" : "Debug" }] : []),
   ]);
-  const section = $derived(sections.some((s) => s.id === chosen) ? chosen : (sections[0]?.id ?? "body"));
+  // A stream opens on its events, unless something else was picked.
+  let picked = $state(false);
+  const section = $derived(
+    sections.some((s) => s.id === chosen) && (picked || !streaming) ? chosen : (sections[0]?.id ?? "body"),
+  );
   const fileName = $derived.by(() => {
     const ct = header(r?.headers, "content-type") ?? "";
     const ext = ct.includes("json") ? "json" : ct.includes("html") ? "html" : ct.includes("xml") ? "xml" : ct.startsWith("text/") ? "txt" : "bin";
@@ -81,7 +91,7 @@
 
 <section class="response" aria-label={label} aria-busy={running}>
   {#if running}
-    <p class="muted" role="status">Sending… {live.length} trace events so far</p>
+    <p class="muted" role="status">Sending… {live.length} trace events so far{events?.length ? `, ${events.length} event(s)` : ""}</p>
   {:else if problem}
     <p class="s-err" role="alert">{problem}</p>
   {:else if failure}
@@ -109,9 +119,11 @@
   {/if}
 
   {#if sections.length}
-    <Tabs tabs={sections} selected={section} label="Response parts" {idPrefix} onselect={(s) => (chosen = s)} />
+    <Tabs tabs={sections} selected={section} label="Response parts" {idPrefix} onselect={(s) => ((chosen = s), (picked = true))} />
     <div class="panel" role="tabpanel" id="{idPrefix}-panel" aria-labelledby="{idPrefix}-tab-{section}">
-      {#if section === "debug"}
+      {#if section === "events"}
+        <EventsView events={events ?? []} live={running} />
+      {:else if section === "debug"}
         <DebugView {trace} live={running} idPrefix="{idPrefix}-dbg" />
       {:else if !r}
         <!-- only Debug without a response -->

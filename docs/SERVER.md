@@ -279,6 +279,9 @@ it, and returns `{ "format", "content" }`. Variables are filled in; secret value
 them from `SNAPREQ_SECRET_<NAME>` environment variables (`${SNAPREQ_SECRET_TOKEN}` in a cURL command).
 Viewers can export saved requests, not unsaved edits or variables, as for execute.
 
+When the response is a `text/event-stream`, the result also has `events`: the Server-Sent Events of the
+body (`event`, `data`, `id`, `retry`). Bodies of streamed responses are kept up to 16 MiB.
+
 ## History
 
 | Method and path | Result |
@@ -389,6 +392,12 @@ runs, the server sends:
   `{ "type": "progress", "id", "event": "request_done", "iteration", "key", "passed", "status",
   "duration_ms" }` for runs.
 
+- `{ "type": "event", "id", "event": { "event", "data", "id", "retry", "at_ms" } }` for every
+  Server-Sent Event of an execution whose response is `text/event-stream`, as it arrives.
+
 and finally `{ "type": "result", "id", "result": … }` (the same document as the REST endpoint, and
 stored in history or runs the same way) or `{ "type": "error", "id", "error": { "kind", "message" } }`.
+`{ "type": "cancel", "id" }` stops a running execution: it ends with what was read so far (a stream's
+response is returned normally; before the response arrives, stopping is an error). Other messages sent
+while a job runs wait their turn.
 A malformed message gets an `error` and the connection stays open.

@@ -377,6 +377,31 @@ snapreq tokens clear    # delete every cached token
 | `--cert PATH --key PATH` | Client certificate and key (PEM) for mutual TLS. |
 | `--tls-min 1.2\|1.3`, `--tls-max 1.2\|1.3` | Allowed TLS versions. |
 
+## Server-Sent Events (`snapreq sse`)
+
+`snapreq sse` reads a `text/event-stream` response and prints each event as it arrives, in the stream's
+own format (`id:`, `event:` and `data:` lines, a blank line between events), until the server ends the
+stream, a limit is reached or Ctrl-C. It takes the options of `send` (collection requests, `-e`, auth,
+TLS, `-v` for the trace) and sends `Accept: text/event-stream` unless the request sets `Accept`. A
+request file's `[assert]` checks run on the response when the stream ends.
+
+```sh
+snapreq sse https://api.example.com/events --max-events 10
+snapreq sse -c my-api prices/stream -e dev --duration 30 --event price
+snapreq sse http://localhost:8080/feed --last-event-id 42 --format json
+```
+
+| Option | Meaning |
+|---|---|
+| `-n`, `--max-events N` | Stop after N events. |
+| `--duration SECONDS` | Stop after this long. |
+| `--event TYPE` | Only print (and count) events of this type (repeatable). |
+| `--last-event-id ID` | Send `Last-Event-ID` to resume a stream. |
+
+`--format json` prints one JSON object per event (`event`, `data`, `id`, `retry`, `at_ms`) and a final
+`{"end": "server" | "max_events" | "duration" | "interrupted", "status", "events"}`. A response that is not
+an event stream is printed with an error (exit code 4 for a status of 400 or more, else 5).
+
 ## WebSockets (`snapreq ws`)
 
 `snapreq ws` opens a WebSocket, sends messages and prints what arrives: sent messages as `> …`, received

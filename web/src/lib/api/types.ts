@@ -208,6 +208,17 @@ export interface ExecuteResult {
   captures?: CaptureOutcome[];
   /** `console.log` output of the request's scripts. */
   logs?: string[];
+  /** The events of a `text/event-stream` response. */
+  events?: SseEvent[];
+}
+
+/** One Server-Sent Event (`at_ms`: when it arrived, for live events). */
+export interface SseEvent {
+  event: string;
+  data: string;
+  id?: string;
+  retry?: number;
+  at_ms?: number;
 }
 
 // --- Collection files (docs/FORMAT.md) ---------------------------------------------------

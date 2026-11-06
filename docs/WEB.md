@@ -20,6 +20,9 @@ server's workspace directory, so collections edited in the browser can be commit
   **Save** (`Ctrl+S`) writes the request file.
 - **Scripts** (collection requests) edits the request's pre-request and test JavaScript (`[script]`, see
   docs/FORMAT.md); test results appear with the checks, and `console.log` output under *Script output*.
+- While a request runs, **Stop** ends it: a stream (such as Server-Sent Events) keeps what arrived. A
+  `text/event-stream` response shows an **Events** tab, live while the stream is read and afterwards:
+  arrival time, type, id and data (JSON pretty-printed on request), filtered by type or text.
 - A `ws://` or `wss://` URL makes it a **WebSocket request**: *Connect* opens the connection through the
   server, the response area becomes a message log (sent and received messages with time and size, JSON
   pretty-printing, filtering, ping/pong on request, the handshake trace), and **Saved messages** edits the

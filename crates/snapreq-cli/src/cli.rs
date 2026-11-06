@@ -57,6 +57,19 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Ws(WsArgs),
 
+    /// Read a Server-Sent Events stream and print each event as it arrives.
+    ///
+    /// Events are printed in the stream's own format (`id:`, `event:`, `data:` lines;
+    /// `--format json`: one JSON object per line). The stream is read until the server ends
+    /// it, --max-events or --duration is reached, or Ctrl-C.
+    ///
+    /// Examples:
+    ///   snapreq sse https://api.example.com/events --max-events 10
+    ///   snapreq sse -c my-api prices/stream -e dev --duration 30 --event price
+    ///   snapreq sse http://localhost:8080/feed --last-event-id 42 --format json
+    #[command(verbatim_doc_comment)]
+    Sse(SseArgs),
+
     /// Start the self-hosted server (API and web UI).
     ///
     /// Examples:
@@ -404,6 +417,33 @@ pub(crate) enum SecretCommand {
         #[arg(short = 'c', long = "collection", value_name = "DIR")]
         collection: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SseArgs {
+    /// Stop after this many events.
+    #[arg(
+        short = 'n',
+        long = "max-events",
+        value_name = "N",
+        help_heading = "Events"
+    )]
+    pub max_events: Option<usize>,
+
+    /// Stop after this many seconds.
+    #[arg(long, value_name = "SECONDS", help_heading = "Events")]
+    pub duration: Option<f64>,
+
+    /// Resume a stream: send `Last-Event-ID`.
+    #[arg(long = "last-event-id", value_name = "ID", help_heading = "Events")]
+    pub last_event_id: Option<String>,
+
+    /// Only print (and count) events of this type. Repeatable.
+    #[arg(long = "event", value_name = "TYPE", help_heading = "Events")]
+    pub event: Vec<String>,
+
+    #[command(flatten)]
+    pub request: SendArgs,
 }
 
 #[derive(Debug, Args)]

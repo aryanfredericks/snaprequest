@@ -1,6 +1,6 @@
 // Client for `GET /api/v1/ws` (docs/SERVER.md, "Live traces and run progress"): one JSON message
 // per job; the server answers with `trace` and `progress` events and then a `result` or `error`.
-import type { ExecuteResult, RunReport, TraceEntry } from "./types";
+import type { ExecuteResult, RunReport, SseEvent, TraceEntry } from "./types";
 import { ApiError, currentWorkspace, sessionEnded, sessionMayHaveEnded } from "./client";
 
 export type ProgressEvent =
@@ -17,11 +17,16 @@ export type ProgressEvent =
 export interface JobHandlers {
   onTrace?: (entry: TraceEntry) => void;
   onProgress?: (event: ProgressEvent) => void;
+  /** Server-Sent Events of the response, as they arrive. */
+  onEvent?: (event: SseEvent) => void;
+  /** Filled in when the job starts: `stop()` asks the server to stop it. */
+  control?: { stop?: () => void };
 }
 
 type Message =
   | { type: "trace"; id: number; entry: TraceEntry }
   | ({ type: "progress"; id: number } & ProgressEvent)
+  | { type: "event"; id: number; event: SseEvent }
   | { type: "result"; id: number; result: unknown }
   | { type: "error"; id: number; error: { kind: string; message: string } };
 
@@ -73,6 +78,7 @@ export class JobClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { ...handlers, resolve, reject });
+      if (handlers.control) handlers.control.stop = () => socket.send(JSON.stringify({ type: "cancel", id }));
       socket.send(JSON.stringify({ ...body, type, id, workspace: currentWorkspace() }));
     });
   }
@@ -127,6 +133,9 @@ export class JobClient {
     switch (msg.type) {
       case "trace":
         p.onTrace?.(msg.entry);
+        break;
+      case "event":
+        p.onEvent?.(msg.event);
         break;
       case "progress": {
         const { type: _t, id: _i, ...event } = msg;

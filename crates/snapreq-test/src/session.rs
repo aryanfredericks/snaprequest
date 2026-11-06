@@ -210,6 +210,8 @@ pub struct Session<'a> {
     hidden: Vec<String>,
     /// Receives the trace events of every request as they happen.
     pub trace: Option<snapreq_core::TraceSink>,
+    /// Watches (and can stop) response bodies as they arrive (live Server-Sent Events).
+    pub stream: Option<snapreq_core::Streaming>,
     /// Receives progress events.
     pub progress: Option<ProgressSink>,
     /// Iteration number reported in progress events.
@@ -243,6 +245,7 @@ impl<'a> Session<'a> {
             runtime: Variables::default(),
             hidden: Vec::new(),
             trace: None,
+            stream: None,
             progress: None,
             iteration: 1,
         }
@@ -429,7 +432,11 @@ impl<'a> Session<'a> {
             }
         }
 
-        let resp = match self.client.execute_with(&request, self.trace.clone()).await {
+        let resp = match self
+            .client
+            .execute_streaming(&request, self.trace.clone(), self.stream.clone())
+            .await
+        {
             Ok(resp) => resp,
             Err(e) => {
                 return RequestRun {

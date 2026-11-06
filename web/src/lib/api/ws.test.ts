@@ -57,6 +57,22 @@ describe("JobClient", () => {
     expect(progress).toEqual(["request_started health"]);
   });
 
+  it("passes stream events on and can stop a job", async () => {
+    const socket = new FakeSocket();
+    const client = new JobClient(() => socket);
+    const events: string[] = [];
+    const control: { stop?: () => void } = {};
+    const job = client.execute({ request: { method: "GET", url: "http://a/events" } }, { onEvent: (e) => events.push(e.data), control });
+    socket.accept();
+    await tick();
+    socket.push({ type: "event", id: 1, event: { event: "message", data: "one", at_ms: 3 } });
+    control.stop!();
+    expect(socket.sent.at(-1)).toEqual({ type: "cancel", id: 1 });
+    socket.push({ type: "result", id: 1, result: { events: [{ event: "message", data: "one" }] } });
+    await expect(job).resolves.toMatchObject({ events: [{ data: "one" }] });
+    expect(events).toEqual(["one"]);
+  });
+
   it("fails pending jobs when the connection drops, then reconnects", async () => {
     const sockets: FakeSocket[] = [];
     const client = new JobClient(() => {

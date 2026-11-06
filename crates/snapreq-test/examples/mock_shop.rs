@@ -16,6 +16,7 @@
 //! - `GET /catalog?items=N` → a JSON array of `N` products (default 20), with a `Set-Cookie`
 //! - `GET /page` → a small HTML page
 //! - `GET /old-health` → 302 to `/health`
+//! - `GET /events?n=N` → a Server-Sent Events stream of N `tick` events 50 ms apart (`n=0`: endless)
 //! - `GET /ws` → a WebSocket that greets with `{"hello": <token header or null>}` and echoes
 #![allow(clippy::unwrap_used)] // example code
 
@@ -53,12 +54,17 @@ fn reply(status: u16, body: &Value) -> hyper::Response<Full<Bytes>> {
         .unwrap()
 }
 
+type Body = http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible>;
+
 async fn handle(
     shop: Arc<Mutex<Shop>>,
     mut req: hyper::Request<hyper::body::Incoming>,
-) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
+) -> Result<hyper::Response<Body>, Infallible> {
     if req.uri().path() == "/ws" {
-        return Ok(websocket(&mut req));
+        return Ok(websocket(&mut req).map(BodyExt::boxed_unsync));
+    }
+    if req.uri().path() == "/events" {
+        return Ok(events(req.uri().query().unwrap_or("")));
     }
     let method = req.method().as_str().to_owned();
     let path = req.uri().path().trim_end_matches('/').to_owned();
@@ -148,7 +154,32 @@ async fn handle(
         }
         _ => reply(404, &json!({ "error": "not found" })),
     };
-    Ok(resp)
+    Ok(resp.map(BodyExt::boxed_unsync))
+}
+
+/// `n` events named `tick` with ids and JSON data, 50 ms apart.
+fn events(query: &str) -> hyper::Response<Body> {
+    use futures_util::StreamExt;
+    let n: usize = query
+        .split('&')
+        .find_map(|p| p.strip_prefix("n="))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(5);
+    let stream = futures_util::stream::unfold(0usize, move |i| async move {
+        if n != 0 && i >= n {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let chunk = format!("id: {i}\nevent: tick\ndata: {{\"tick\": {i}}}\n\n");
+        Some((Ok(hyper::body::Frame::data(Bytes::from(chunk))), i + 1))
+    });
+    hyper::Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(BodyExt::boxed_unsync(http_body_util::StreamBody::new(
+            stream.boxed(),
+        )))
+        .unwrap()
 }
 
 /// Answers the WebSocket handshake and echoes messages on the upgraded connection.

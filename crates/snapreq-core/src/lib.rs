@@ -8,10 +8,11 @@ pub mod client;
 pub mod error;
 pub mod model;
 mod serde_util;
+pub mod sse;
 
 pub use client::{
-    Certificate, Client, ClientConfig, ConnectPolicy, DEFAULT_SENSITIVE_HEADERS, StoredCookie,
-    TraceSink,
+    BodyObserver, Certificate, Client, ClientConfig, ConnectPolicy, DEFAULT_SENSITIVE_HEADERS,
+    StoredCookie, Streaming, TraceSink,
 };
 pub use error::{Error, ExecutionError, Result};
 pub use model::{Body, Request, Response};

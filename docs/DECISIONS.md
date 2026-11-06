@@ -444,3 +444,19 @@ relays one target connection per client WebSocket (`/api/v1/ws/websocket`); save
 the server so secret values never reach the browser, and secret values are hidden in everything relayed.
 **Consequences:** WebSocket debugging gets traces, policies and auth for free; no HTTP/2 WebSockets (RFC
 8441) and no automated assertions on messages yet. Sessions are not recorded in history.
+
+## ADR-034: Server-Sent Events through a body observer and a stop token
+**Status:** Accepted (2026-11-06)
+**Context:** PLAN P10.2 adds a Server-Sent Events viewer. The engine read whole bodies before returning;
+event streams can be endless and must be shown while they arrive, and stopped.
+**Decision:** `Client::execute_streaming(req, sink, Streaming)` keeps the whole engine (redirects, auth
+retries, traces) and adds a `BodyObserver` (`head` for every response read, `chunk` for every piece of
+body) and a `CancellationToken`: stopping while the body is read ends the response normally with what
+arrived (traced, connection not reused); before the headers it is an error. Bodies are kept up to
+`keep_limit` (16 MiB), sizes still count every byte. `snapreq_core::sse` has an incremental parser of the
+HTML standard's format (BOM, CR/LF, comments, `id` carry-over, `retry`) and `sse::observer`, which parses
+only `text/event-stream` responses. The CLI has `snapreq sse`; the server's `/api/v1/ws` sends `event`
+messages for every execution and accepts `cancel`; results of event streams carry `events`. The UI shows
+an Events tab (live), and a Stop button for any running request.
+**Consequences:** No automatic reconnects (EventSource's retry loop): a debugging tool shows what the
+server did. `snapreq run` treats streams like any response, so an endless stream needs a `timeout_ms`.

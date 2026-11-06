@@ -281,14 +281,22 @@ class AppState {
     tab.running = true;
     tab.error = null;
     tab.live = [];
+    tab.liveEvents = [];
+    const control: { stop?: () => void } = {};
+    tab.stop = () => control.stop?.();
     try {
-      tab.result = await jobs.execute(body, { onTrace: (e) => tab.live.push(e) });
+      tab.result = await jobs.execute(body, {
+        onTrace: (e) => tab.live.push(e),
+        onEvent: (e) => tab.liveEvents.push(e),
+        control,
+      });
       this.historyVersion++;
     } catch (e) {
       tab.result = null;
       tab.error = message(e);
     } finally {
       tab.running = false;
+      tab.stop = null;
     }
   }
 

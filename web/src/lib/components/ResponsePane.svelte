@@ -18,6 +18,7 @@
   assertions={result?.assertions ?? []}
   captures={result?.captures ?? []}
   logs={result?.logs ?? []}
+  events={tab.running ? tab.liveEvents : (result?.events ?? null)}
   running={tab.running}
   live={tab.live}
   name={tab.draft.name || tab.key?.split("/").pop() || "response"}

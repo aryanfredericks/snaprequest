@@ -89,9 +89,11 @@
         {wsState === "open" ? "Disconnect" : wsState === "connecting" ? "Cancel" : "Connect"}
       </button>
     {:else}
-      <button type="submit" class="primary" disabled={tab.running} title="Send (Ctrl+Enter)">
-        {tab.running ? "Sending…" : "Send"}
-      </button>
+      {#if tab.running}
+        <button type="button" class="primary" onclick={() => tab.stop?.()} title="Stop reading the response (streams end with what arrived)">Stop</button>
+      {:else}
+        <button type="submit" class="primary" title="Send (Ctrl+Enter)">Send</button>
+      {/if}
     {/if}
     <button type="button" onclick={save} title="Save (Ctrl+S)">{tab.dirty ? "Save*" : "Save"}</button>
     {#if !websocket}

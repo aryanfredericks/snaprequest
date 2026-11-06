@@ -12,6 +12,7 @@ mod run_cmd;
 mod send;
 #[cfg(test)]
 mod snapshot_tests;
+mod sse_cmd;
 mod tokens;
 mod trace_view;
 mod user_cmd;
@@ -76,6 +77,7 @@ async fn main() -> ExitCode {
         Command::Send(args) => run_send(&args).await,
         Command::Run(args) => run_cmd::run(&args).await,
         Command::Ws(args) => ws_cmd::run(&args).await,
+        Command::Sse(args) => sse_cmd::run(&args).await,
         Command::Serve(args) => serve(&args).await,
         Command::Ls(args) => report(collection_cmd::ls(
             args.dir.as_deref(),
