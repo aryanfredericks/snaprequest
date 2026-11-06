@@ -377,6 +377,32 @@ snapreq tokens clear    # delete every cached token
 | `--cert PATH --key PATH` | Client certificate and key (PEM) for mutual TLS. |
 | `--tls-min 1.2\|1.3`, `--tls-max 1.2\|1.3` | Allowed TLS versions. |
 
+## WebSockets (`snapreq ws`)
+
+`snapreq ws` opens a WebSocket, sends messages and prints what arrives: sent messages as `> …`, received
+ones as `< …` (binary as hex), status lines on stderr. It takes the same request, auth, connection, TLS and
+collection options as `send`; the handshake trace is shown with `-v`.
+
+```sh
+snapreq ws wss://echo.example.com/ws --send hello --count 1
+snapreq ws ws://localhost:8080/chat -H 'Authorization: Bearer TOKEN' -i   # type lines to send
+snapreq ws -c my-api chat/room -e dev --message join --wait 10
+snapreq ws ws://localhost:8080/feed --format json > messages.ndjson
+```
+
+| Option | Meaning |
+|---|---|
+| `-m`, `--send TEXT` | Send a text message once connected (repeatable). |
+| `--message NAME` | Send a saved message of the request file (`[[websocket.messages]]`); `all` sends every one. |
+| `--subprotocol NAME` | Offer a subprotocol (repeatable; replaces the file's). |
+| `-i`, `--interactive` | Also send each line typed on stdin (the default when nothing else is sent). |
+| `-n`, `--count N` | Close after receiving N text or binary messages. |
+| `--wait SECONDS` | Once everything is sent, close after this long without a message (default 2; `0` waits for the server). |
+
+`--format json` prints one JSON object per line: `{"event": "open", …}`, messages as `{"kind", "data",
+"direction", "at_ms"}` and `{"event": "close", …}`. Exit codes are those of `send`: 0 when the connection
+ends normally, 5 when it cannot be opened (or fails), 6 on a timeout.
+
 ## Requests as code (`--export`)
 
 `snapreq send … --export FORMAT` prints the request as code instead of sending it: `curl`, `python`

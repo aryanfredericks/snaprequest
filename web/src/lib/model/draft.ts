@@ -150,7 +150,7 @@ export interface Draft {
   /** Requests outside a collection: `host:port:addr[,addr]` lines (curl's `--resolve`). */
   resolve: string;
   /** File keys the builder does not edit. */
-  rest: Pick<RequestFile, "vars" | "capture" | "assert" | "script">;
+  rest: Pick<RequestFile, "vars" | "capture" | "assert" | "script" | "websocket">;
 }
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -336,7 +336,7 @@ export function draftFromFile(file: RequestFile): Draft {
     auth: authFromSpec(file.auth),
     settings: { ...(file.settings ?? {}) },
     resolve: "",
-    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert, script: file.script }),
+    rest: clean({ vars: file.vars, capture: file.capture, assert: file.assert, script: file.script, websocket: file.websocket }),
   };
 }
 
@@ -356,7 +356,13 @@ export function draftToFile(d: Draft): RequestFile {
     capture: d.rest.capture,
     assert: d.rest.assert,
     script: scriptOf(d.rest.script),
+    websocket: d.rest.websocket,
   });
+}
+
+/** A WebSocket request: a `ws://`/`wss://` URL or a `[websocket]` table (ADR-033). */
+export function isWebSocket(d: Draft): boolean {
+  return d.rest.websocket !== undefined || /^\s*wss?:\/\//i.test(d.url);
 }
 
 // --- Core requests (outside a collection) ------------------------------------------------

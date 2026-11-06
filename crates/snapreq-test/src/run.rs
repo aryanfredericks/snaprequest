@@ -91,10 +91,12 @@ pub struct RunOptions {
     pub parallel: usize,
 }
 
-/// The keys of every request of the collection, or of `folder` (a folder key such as
-/// `users` or `users/admin`), in tree order.
+/// The keys of every HTTP request of the collection, or of `folder` (a folder key such as
+/// `users` or `users/admin`), in tree order. WebSocket requests are left out: they are opened
+/// interactively, not run.
 pub fn request_keys(collection: &Collection, folder: Option<&str>) -> Result<Vec<String>, String> {
-    let all = collection.requests();
+    let mut all = collection.requests();
+    all.retain(|(_, item)| item.file.kind() == snapreq_collection::RequestKind::Http);
     let keys: Vec<String> = match folder.map(|f| f.trim_matches('/')) {
         None | Some("") => all.into_iter().map(|(k, _)| k).collect(),
         Some(f) => {

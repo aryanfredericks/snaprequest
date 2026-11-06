@@ -12,6 +12,7 @@ mod recorder;
 mod redact;
 mod redirect;
 mod tls;
+pub mod ws;
 
 pub use self::cookies::StoredCookie;
 pub use self::redact::DEFAULT_SENSITIVE_HEADERS;

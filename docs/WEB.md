@@ -20,6 +20,10 @@ server's workspace directory, so collections edited in the browser can be commit
   **Save** (`Ctrl+S`) writes the request file.
 - **Scripts** (collection requests) edits the request's pre-request and test JavaScript (`[script]`, see
   docs/FORMAT.md); test results appear with the checks, and `console.log` output under *Script output*.
+- A `ws://` or `wss://` URL makes it a **WebSocket request**: *Connect* opens the connection through the
+  server, the response area becomes a message log (sent and received messages with time and size, JSON
+  pretty-printing, filtering, ping/pong on request, the handshake trace), and **Saved messages** edits the
+  file's `[websocket]` messages, which the log can send with one click.
 - **Code** shows the request as a cURL command or a Python, JavaScript, Go or Rust snippet, with
   variables filled in and secret values read from environment variables (`SNAPREQ_SECRET_<NAME>`).
 

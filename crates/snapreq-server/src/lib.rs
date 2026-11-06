@@ -19,6 +19,7 @@ pub mod tree;
 pub mod ui;
 pub mod workspaces;
 pub mod ws;
+mod ws_session;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -175,6 +176,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     let doc = Arc::new(doc);
     router
         .route("/api/v1/ws", get(ws::upgrade))
+        .route("/api/v1/ws/websocket", get(ws_session::upgrade))
         .route(
             "/api/v1/openapi.json",
             get(move || {

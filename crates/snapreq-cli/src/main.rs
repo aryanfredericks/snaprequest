@@ -16,6 +16,7 @@ mod tokens;
 mod trace_view;
 mod user_cmd;
 mod waterfall;
+mod ws_cmd;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -74,6 +75,7 @@ async fn main() -> ExitCode {
     let code = match cli.command {
         Command::Send(args) => run_send(&args).await,
         Command::Run(args) => run_cmd::run(&args).await,
+        Command::Ws(args) => ws_cmd::run(&args).await,
         Command::Serve(args) => serve(&args).await,
         Command::Ls(args) => report(collection_cmd::ls(
             args.dir.as_deref(),

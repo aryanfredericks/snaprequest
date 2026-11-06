@@ -105,6 +105,23 @@ pub(crate) fn parse_vars(raw: &[String]) -> Result<Variables, ArgError> {
 /// Collection warnings are printed to stderr.
 /// Builds the request, its `[assert]` checks (empty with `--no-assert`) and its captures.
 pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Built, ArgError> {
+    build_full(root, key, args).map(|f| f.built)
+}
+
+/// A built collection request with what was used to build it.
+#[derive(Debug)]
+pub(crate) struct Full {
+    pub built: Built,
+    /// The variables after pre-request scripts.
+    pub scopes: Scopes,
+    /// The request file (as changed by pre-request scripts).
+    pub file: RequestFile,
+    /// Where the request file is.
+    pub path: PathBuf,
+}
+
+/// [`build`], also returning the scopes and the request file.
+pub(crate) fn build_full(root: &Path, key: &str, args: &SendArgs) -> Result<Full, ArgError> {
     let (collection, warnings) = Collection::load(root).map_err(|e| ArgError(e.to_string()))?;
     for w in &warnings {
         eprintln!("warning: {w}");
@@ -236,7 +253,12 @@ pub(crate) fn build(root: &Path, key: &str, args: &SendArgs) -> Result<Built, Ar
         hidden: snapreq_test::script::secret_values(&scopes),
         codes: tests,
     });
-    Ok((req, checks, captures, named, tests))
+    Ok(Full {
+        built: (req, checks, captures, named, tests),
+        scopes,
+        file,
+        path: item_path,
+    })
 }
 
 /// A built request with its checks, captures, named secret values and test scripts.

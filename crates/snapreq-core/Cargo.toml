@@ -34,6 +34,7 @@ time.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "time", "rt"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
+tokio-tungstenite.workspace = true
 tracing.workspace = true
 url.workspace = true
 webpki-roots.workspace = true
@@ -46,6 +47,7 @@ rcgen = { workspace = true, features = ["pem"] }
 rustls.workspace = true
 hyper = { workspace = true, features = ["server", "http1", "http2"] }
 tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
 
 [lints]
 workspace = true

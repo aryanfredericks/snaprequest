@@ -105,16 +105,26 @@ impl Request {
     ///
     /// Only `http` and `https` URLs with a host are accepted.
     pub fn effective_url(&self) -> Result<Url> {
+        self.effective_url_for(&["http", "https"])
+    }
+
+    /// [`effective_url`](Self::effective_url) for a WebSocket: `ws`, `wss` (or `http`, `https`).
+    pub fn effective_ws_url(&self) -> Result<Url> {
+        self.effective_url_for(&["ws", "wss", "http", "https"])
+    }
+
+    fn effective_url_for(&self, schemes: &[&str]) -> Result<Url> {
         let invalid = |reason: String| Error::InvalidUrl {
             url: self.url.clone(),
             reason,
         };
 
         let mut url = Url::parse(self.url.trim()).map_err(|e| invalid(e.to_string()))?;
-        if !matches!(url.scheme(), "http" | "https") {
+        if !schemes.contains(&url.scheme()) {
             return Err(invalid(format!(
-                "unsupported scheme `{}` (expected http or https)",
-                url.scheme()
+                "unsupported scheme `{}` (expected {})",
+                url.scheme(),
+                schemes[..schemes.len() - 1].join(", ") + " or " + schemes[schemes.len() - 1]
             )));
         }
         if url.host_str().is_none_or(str::is_empty) {

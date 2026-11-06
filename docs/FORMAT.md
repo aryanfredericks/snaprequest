@@ -296,6 +296,28 @@ Scripts run in a sandbox (ADR-031): only the JavaScript language itself (ES2023,
 `require`, `fetch`, files, timers or processes), a fresh engine for every script, at most 2 seconds,
 32 MiB of memory and a bounded stack. Tests are synchronous.
 
+### WebSocket requests
+
+A request file with a `ws://` or `wss://` URL, or with a `[websocket]` table, is a WebSocket request
+(ADR-033). It has no `method` or `[body]`; `[query]`, `[headers]`, `[auth]` and `[settings]` apply to the
+opening handshake, and `[script]` pre-request scripts run before it. Saved messages are sent from the UI
+or with `snapreq ws --message NAME`:
+
+```toml
+url = "{{ws_base}}/chat"            # an http(s) URL works too when `[websocket]` is present
+
+[websocket]
+subprotocols = ["chat.v2"]          # offered in Sec-WebSocket-Protocol
+
+[[websocket.messages]]
+name = "join"
+kind = "json"                       # text (default), json (checked to be JSON) or binary (base64)
+content = '{"room": "{{room}}", "token": "{{token}}"}'
+```
+
+Placeholders in messages are resolved like the rest of the file (secret values are hidden wherever messages
+are shown). `snapreq run` and flows leave WebSocket requests out.
+
 ## `folder.toml`
 
 Optional. Same keys as `snapreq.toml` except `format`: `name`, `description`, `order`, `[vars]`,

@@ -18,12 +18,13 @@ pub mod vars;
 pub use assert::{AssertSpec, Check, Checks, JsonType};
 pub use build::{
     build_assertions, build_file, build_request, effective_auth, interpolate_assertions,
+    websocket_messages,
 };
 pub use capture::{CaptureSource, CaptureSpec, Captures};
 pub use error::{Error, Result, Warning};
 pub use files::{
     AuthSpec, BodySpec, CollectionFile, FORMAT_VERSION, FolderFile, OAuth2Spec, PartSpec,
-    RequestFile, ScriptSpec, Settings,
+    RequestFile, RequestKind, ScriptSpec, Settings, WebSocketSpec, WsMessageKind, WsMessageSpec,
 };
 pub use flow::{FLOW_SUFFIX, FlowFile, RetrySpec, StepSpec};
 pub use kv::KeyValues;

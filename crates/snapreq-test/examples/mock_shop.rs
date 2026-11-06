@@ -16,6 +16,7 @@
 //! - `GET /catalog?items=N` → a JSON array of `N` products (default 20), with a `Set-Cookie`
 //! - `GET /page` → a small HTML page
 //! - `GET /old-health` → 302 to `/health`
+//! - `GET /ws` → a WebSocket that greets with `{"hello": <token header or null>}` and echoes
 #![allow(clippy::unwrap_used)] // example code
 
 use std::collections::BTreeMap;
@@ -54,8 +55,11 @@ fn reply(status: u16, body: &Value) -> hyper::Response<Full<Bytes>> {
 
 async fn handle(
     shop: Arc<Mutex<Shop>>,
-    req: hyper::Request<hyper::body::Incoming>,
+    mut req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<Full<Bytes>>, Infallible> {
+    if req.uri().path() == "/ws" {
+        return Ok(websocket(&mut req));
+    }
     let method = req.method().as_str().to_owned();
     let path = req.uri().path().trim_end_matches('/').to_owned();
     let query = req.uri().query().unwrap_or("").to_owned();
@@ -147,6 +151,54 @@ async fn handle(
     Ok(resp)
 }
 
+/// Answers the WebSocket handshake and echoes messages on the upgraded connection.
+fn websocket(req: &mut hyper::Request<hyper::body::Incoming>) -> hyper::Response<Full<Bytes>> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+    let Some(key) = req.headers().get("sec-websocket-key").cloned() else {
+        return reply(400, &json!({ "error": "not a WebSocket handshake" }));
+    };
+    let token = req
+        .headers()
+        .get("x-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let upgrade = hyper::upgrade::on(req);
+    tokio::spawn(async move {
+        let Ok(io) = upgrade.await else { return };
+        let mut ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+            TokioIo::new(io),
+            Role::Server,
+            None,
+        )
+        .await;
+        let hello = json!({ "hello": token }).to_string();
+        if ws.send(Message::text(hello)).await.is_err() {
+            return;
+        }
+        while let Some(Ok(m)) = ws.next().await {
+            if m.is_close() {
+                let _ = ws.close(None).await;
+                break;
+            }
+            if (m.is_text() || m.is_binary()) && ws.send(m).await.is_err() {
+                break;
+            }
+        }
+    });
+    hyper::Response::builder()
+        .status(101)
+        .header("connection", "Upgrade")
+        .header("upgrade", "websocket")
+        .header(
+            "sec-websocket-accept",
+            tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes()),
+        )
+        .body(Full::new(Bytes::new()))
+        .unwrap()
+}
+
 #[tokio::main]
 async fn main() {
     let port: u16 = std::env::args()
@@ -165,6 +217,7 @@ async fn main() {
                     TokioIo::new(stream),
                     service_fn(move |r| handle(shop.clone(), r)),
                 )
+                .with_upgrades()
                 .await;
         });
     }

@@ -246,7 +246,7 @@ pub async fn guard(State(state): State<Arc<AppState>>, mut req: Request, next: N
     if bearer_sent && let Some(left) = state.limits.token_ip.blocked(&ip.key()) {
         return crate::security::too_many(left, "unknown API tokens");
     }
-    if path == "/api/v1/ws" && !same_origin(req.headers()) {
+    if (path == "/api/v1/ws" || path.starts_with("/api/v1/ws/")) && !same_origin(req.headers()) {
         tracing::warn!("refused a WebSocket from another origin");
         return forbidden("WebSocket connections must come from this server's pages")
             .into_response();

@@ -276,7 +276,29 @@ export interface RequestFile {
   capture?: Record<string, unknown>;
   assert?: Record<string, unknown>;
   script?: ScriptSpec;
+  websocket?: WebSocketSpec;
 }
+
+/** `[websocket]`: makes a request a WebSocket (ADR-033). */
+export interface WebSocketSpec {
+  subprotocols?: string[];
+  messages?: WsMessageSpec[];
+}
+
+export interface WsMessageSpec {
+  name: string;
+  /** Default `text`; `binary` content is base64. */
+  kind?: "text" | "json" | "binary";
+  content: string;
+}
+
+/** A WebSocket message as the server relays it (binary data is base64). */
+export type WsMessage =
+  | { kind: "text"; data: string }
+  | { kind: "binary"; data: string }
+  | { kind: "ping"; data: string }
+  | { kind: "pong"; data: string }
+  | { kind: "close"; code?: number; reason?: string };
 
 /** `[script]`: JavaScript run before the request is built and after the response (ADR-031). */
 export interface ScriptSpec {

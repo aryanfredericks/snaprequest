@@ -346,6 +346,27 @@ Tree items are `{ "type": "request", "key", "name", "method" }` or
 (`docs/FORMAT.md`), e.g. `{ "name": "Create user", "method": "POST", "url": "{{base}}/users",
 "headers": { "X-Team": "shop" }, "assert": { "status": 201 } }`.
 
+## WebSocket sessions
+
+`GET /api/v1/ws/websocket` upgrades to a WebSocket through which the server opens a connection to a target
+for the client (the web UI's WebSocket requests, ADR-033). The outbound request policy, secret values and
+auth apply as for executed requests, and the same origin rule holds as for `/api/v1/ws`. The first message
+says what to open, with the fields of `POST /api/v1/requests/execute` (viewers: saved requests only):
+
+```json
+{ "type": "connect", "collection": "chat", "key": "room", "env": "dev", "workspace": "default" }
+{ "type": "connect", "request": { "method": "GET", "url": "wss://echo.example/ws" }, "subprotocols": ["chat"] }
+```
+
+Then the client sends `{ "type": "send", "message": { "kind": "text", "data": "hi" } }` (kinds `text`,
+`binary` with base64 `data`, `ping`, `pong`), `{ "type": "send", "name": "join" }` (a saved message of the
+request file, resolved on the server) and `{ "type": "close", "code"?, "reason"? }`. The server sends the
+handshake's `trace` events, `{ "type": "open", "handshake", "protocol", "messages": [names] }`, `{ "type":
+"message", "direction": "sent" | "received", "at_ms", "message" }` for every message, and finally `{ "type":
+"closed", "by": "server" | "client", "code", "reason" }`, or `{ "type": "error", "error": { "kind",
+"message", "trace"? } }`. Secret values are hidden in everything the server sends. Sessions are not stored
+in history.
+
 ## Live traces and run progress (WebSocket)
 
 `GET /api/v1/ws` upgrades to a WebSocket. The client sends one JSON message per job; jobs on one

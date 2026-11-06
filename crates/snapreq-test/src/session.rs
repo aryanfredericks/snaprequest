@@ -120,6 +120,29 @@ pub enum Target<'t> {
     },
 }
 
+/// A WebSocket request ready to open ([`Session::websocket`]).
+#[derive(Debug)]
+pub struct WsPrepared {
+    pub request: Request,
+    pub options: snapreq_core::client::ws::WsOptions,
+    /// Saved messages by name, placeholders resolved.
+    pub messages: Vec<(String, snapreq_core::client::ws::WsMessage)>,
+    /// Pre-request script output.
+    pub logs: Vec<String>,
+    /// Values to hide in what is shown (secrets of the request and of its messages).
+    pub hidden: Vec<String>,
+}
+
+/// A request built by [`Session::build_for`].
+struct Built {
+    request: Request,
+    scopes: Scopes,
+    /// The request file as a pre-request script changed it.
+    changed: Option<RequestFile>,
+    logs: Vec<String>,
+    test_codes: Vec<(String, String)>,
+}
+
 /// One send with everything a flow step can add; [`SendSpec::request`] is a plain
 /// collection request.
 #[derive(Debug, Clone, Copy)]
@@ -357,65 +380,26 @@ impl<'a> Session<'a> {
             },
             Target::Inline { key, file, path } => (key, file, path.to_path_buf()),
         };
-        let mut scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
-        let scripts = Scripts::for_request(self.collection, key, file, &path, spec.script);
-        let (pre_codes, test_codes) =
-            match (scripts.codes(Phase::PreRequest), scripts.codes(Phase::Test)) {
-                (Ok(p), Ok(t)) => (p, t),
-                (Err(e), _) | (_, Err(e)) => return RequestRun::invalid(key, None, e),
-            };
-        let mut logs = Vec::new();
-        let mut changed: Option<RequestFile> = None;
-        if !pre_codes.is_empty() {
-            let before = script::script_request(file);
-            let chain = script::run_async(
-                pre_codes,
-                script::input(Phase::PreRequest, &scopes, before.clone(), None),
-            )
-            .await;
-            let mut hidden = script::secret_values(&scopes);
-            self.apply_script_vars(&chain.vars);
-            hidden.extend(self.hidden.iter().cloned());
-            logs.extend(chain.logs.iter().map(|l| crate::report::hide(l, &hidden)));
-            if let Some((label, e)) = &chain.error {
-                return RequestRun::invalid(
-                    key,
-                    None,
-                    crate::report::hide(&format!("{label} pre-request script: {e}"), &hidden),
-                )
-                .with_logs(logs);
-            }
-            if let Some(after) = &chain.request
-                && *after != before
-            {
-                let mut f = file.clone();
-                script::apply_request(&mut f, &before, after);
-                if let Err(e) = f.validate() {
-                    return RequestRun::invalid(
-                        key,
-                        None,
-                        format!("after the pre-request script: {e}"),
-                    )
-                    .with_logs(logs);
-                }
-                changed = Some(f);
-            }
-            scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+        if file.kind() != snapreq_collection::RequestKind::Http {
+            return RequestRun::invalid(
+                key,
+                None,
+                format!(
+                    "`{key}` is a {} request; runs and flows send HTTP requests only",
+                    file.kind().as_str()
+                ),
+            );
         }
-        let built = match (spec.target, &changed) {
-            (Target::Request(key), None) => build_request(self.collection, key, &scopes),
-            (_, Some(f)) => build_file(self.collection, key, f, &path, &scopes),
-            (Target::Inline { .. }, None) => build_file(self.collection, key, file, &path, &scopes),
+        let Built {
+            mut request,
+            scopes,
+            changed,
+            mut logs,
+            test_codes,
+        } = match self.build_for(&spec, key, file, &path).await {
+            Ok(b) => b,
+            Err(run) => return *run,
         };
-        let mut request = match built {
-            Ok(r) => r,
-            Err(e) => return RequestRun::invalid(key, None, e.to_string()).with_logs(logs),
-        };
-        for v in &self.hidden {
-            if !request.settings.secrets.contains(v) {
-                request.settings.secrets.push(v.clone());
-            }
-        }
         adjust(&mut request);
 
         let compile = |spec: &AssertSpec, file: &Path| -> Result<Assertions, String> {
@@ -505,6 +489,135 @@ impl<'a> Session<'a> {
             captures,
             logs,
         }
+    }
+
+    /// Builds the WebSocket request `key` for opening: pre-request scripts run, and its saved
+    /// messages are resolved with the same variables.
+    pub async fn websocket(&mut self, key: &str) -> Result<WsPrepared, String> {
+        let collection = self.collection;
+        let item = collection
+            .find(key)
+            .ok_or_else(|| format!("no request `{key}` in the collection"))?;
+        if item.file.kind() != snapreq_collection::RequestKind::WebSocket {
+            return Err(format!("`{key}` is not a WebSocket request"));
+        }
+        let path = collection.root.join(&item.path);
+        let built = match self
+            .build_for(&SendSpec::request(key), key, &item.file, &path)
+            .await
+        {
+            Ok(b) => b,
+            Err(run) => {
+                return Err(match run.outcome {
+                    RunOutcome::Invalid(why) => why,
+                    _ => "the request could not be built".into(),
+                });
+            }
+        };
+        let file = built.changed.as_ref().unwrap_or(&item.file);
+        let spec = file.websocket.clone().unwrap_or_default();
+        let (messages, secrets) =
+            snapreq_collection::websocket_messages(&spec, &path, &built.scopes)
+                .map_err(|e| e.to_string())?;
+        let mut hidden = built.request.secrets();
+        hidden.extend(secrets);
+        hidden.extend(script::secret_values(&built.scopes));
+        Ok(WsPrepared {
+            request: built.request,
+            options: snapreq_core::client::ws::WsOptions {
+                subprotocols: spec.subprotocols,
+            },
+            messages,
+            logs: built.logs,
+            hidden,
+        })
+    }
+
+    /// Runs pre-request scripts and builds the request of `spec` (the first half of a send).
+    async fn build_for(
+        &mut self,
+        spec: &SendSpec<'_>,
+        key: &str,
+        file: &RequestFile,
+        path: &Path,
+    ) -> Result<Built, Box<RequestRun>> {
+        let path = path.to_path_buf();
+        let mut scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+        let scripts = Scripts::for_request(self.collection, key, file, &path, spec.script);
+        let (pre_codes, test_codes) =
+            match (scripts.codes(Phase::PreRequest), scripts.codes(Phase::Test)) {
+                (Ok(p), Ok(t)) => (p, t),
+                (Err(e), _) | (_, Err(e)) => {
+                    return Err(Box::new(RequestRun::invalid(key, None, e)));
+                }
+            };
+        let mut logs = Vec::new();
+        let mut changed: Option<RequestFile> = None;
+        if !pre_codes.is_empty() {
+            let before = script::script_request(file);
+            let chain = script::run_async(
+                pre_codes,
+                script::input(Phase::PreRequest, &scopes, before.clone(), None),
+            )
+            .await;
+            let mut hidden = script::secret_values(&scopes);
+            self.apply_script_vars(&chain.vars);
+            hidden.extend(self.hidden.iter().cloned());
+            logs.extend(chain.logs.iter().map(|l| crate::report::hide(l, &hidden)));
+            if let Some((label, e)) = &chain.error {
+                return Err(Box::new(
+                    RequestRun::invalid(
+                        key,
+                        None,
+                        crate::report::hide(&format!("{label} pre-request script: {e}"), &hidden),
+                    )
+                    .with_logs(logs),
+                ));
+            }
+            if let Some(after) = &chain.request
+                && *after != before
+            {
+                let mut f = file.clone();
+                script::apply_request(&mut f, &before, after);
+                if let Err(e) = f.validate() {
+                    return Err(Box::new(
+                        RequestRun::invalid(
+                            key,
+                            None,
+                            format!("after the pre-request script: {e}"),
+                        )
+                        .with_logs(logs),
+                    ));
+                }
+                changed = Some(f);
+            }
+            scopes = self.scopes_with(key, spec.lower_vars, spec.upper_vars);
+        }
+        let built = match (spec.target, &changed) {
+            (Target::Request(key), None) => build_request(self.collection, key, &scopes),
+            (_, Some(f)) => build_file(self.collection, key, f, &path, &scopes),
+            (Target::Inline { .. }, None) => build_file(self.collection, key, file, &path, &scopes),
+        };
+        let mut request = match built {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(Box::new(
+                    RequestRun::invalid(key, None, e.to_string()).with_logs(logs),
+                ));
+            }
+        };
+        for v in &self.hidden {
+            if !request.settings.secrets.contains(v) {
+                request.settings.secrets.push(v.clone());
+            }
+        }
+        Ok(Built {
+            request,
+            scopes,
+            changed,
+            logs,
+            test_codes,
+        })
     }
 
     /// Variables set by scripts become runtime variables, like captured values.

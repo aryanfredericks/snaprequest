@@ -358,7 +358,8 @@ pub(crate) async fn connect(
             .await
             .map_err(|e| rec.fail(handshake_failed(e), false))?;
         tokio::spawn(async move {
-            if let Err(e) = connection.await {
+            // With upgrades, a `101 Switching Protocols` hands the socket to the WebSocket client.
+            if let Err(e) = connection.with_upgrades().await {
                 tracing::debug!(error = %e, %remote, "connection closed with error");
             }
         });

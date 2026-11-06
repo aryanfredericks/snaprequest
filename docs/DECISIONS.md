@@ -429,3 +429,18 @@ whole script is kept as a comment. Every loss is a warning. Collection, folder a
 Postman's sandbox libraries (`pm.sendRequest`, cookies, `require('lodash')`, visualizer) needs editing, and the
 import says where. Rewriting can, rarely, touch text inside strings that looks like a `pm.` call.
 
+## ADR-033: WebSockets reuse the HTTP engine for the handshake; the server relays sessions
+**Status:** Accepted (2026-11-06)
+**Context:** PLAN P10.1 adds a WebSocket client (send/receive, message log). The handshake should get the
+same treatment as any request: outbound policy, proxies, TLS settings, auth, cookies and the trace. The web
+UI cannot set headers on a browser WebSocket, and a self-hosted server must keep its policy and secrets.
+**Decision:** `snapreq-core::client::ws` sends the opening handshake as an HTTP/1.1 request through the
+engine (`connect`, `prepare_hop`, the recorder; HTTP/1.1 connections are driven `with_upgrades`), checks
+`Sec-WebSocket-Accept`, and hands the upgraded connection to `tokio-tungstenite` (framing only, no TLS or
+connect features). Messages are limited to 16 MiB. Redirects are not followed. In collections a request is a
+WebSocket when its URL is `ws(s)://` or it has a `[websocket]` table (subprotocols, named saved messages);
+`snapreq run` and flows leave them out. The CLI has `snapreq ws` (flattened `send` options). The server
+relays one target connection per client WebSocket (`/api/v1/ws/websocket`); saved messages are resolved on
+the server so secret values never reach the browser, and secret values are hidden in everything relayed.
+**Consequences:** WebSocket debugging gets traces, policies and auth for free; no HTTP/2 WebSockets (RFC
+8441) and no automated assertions on messages yet. Sessions are not recorded in history.

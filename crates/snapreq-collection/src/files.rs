@@ -114,6 +114,61 @@ pub struct RequestFile {
     /// JavaScript run before the request is built and after the response.
     #[serde(default, skip_serializing_if = "ScriptSpec::is_empty")]
     pub script: ScriptSpec,
+    /// Makes this a WebSocket request (also implied by a `ws://` or `wss://` URL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websocket: Option<WebSocketSpec>,
+}
+
+/// What kind of connection a request file describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestKind {
+    Http,
+    WebSocket,
+}
+
+impl RequestKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::WebSocket => "websocket",
+        }
+    }
+}
+
+/// A `[websocket]` table: subprotocols and saved messages (PLAN P10.1, ADR-033).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSocketSpec {
+    /// Offered in `Sec-WebSocket-Protocol`, in order of preference.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subprotocols: Vec<String>,
+    /// Messages to send, by name (`[[websocket.messages]]`); placeholders are resolved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<WsMessageSpec>,
+}
+
+/// One saved WebSocket message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WsMessageSpec {
+    pub name: String,
+    /// `text` (default), `json` (text that must be valid JSON) or `binary` (base64 content).
+    #[serde(default, skip_serializing_if = "is_text")]
+    pub kind: WsMessageKind,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WsMessageKind {
+    #[default]
+    Text,
+    Json,
+    Binary,
+}
+
+fn is_text(k: &WsMessageKind) -> bool {
+    *k == WsMessageKind::Text
 }
 
 impl RequestFile {
@@ -133,6 +188,17 @@ impl RequestFile {
             capture: Captures::default(),
             assert: Box::default(),
             script: ScriptSpec::default(),
+            websocket: None,
+        }
+    }
+
+    /// HTTP, or a WebSocket when the file has `[websocket]` or a `ws://`/`wss://` URL.
+    pub fn kind(&self) -> RequestKind {
+        let url = self.url.trim_start().to_ascii_lowercase();
+        if self.websocket.is_some() || url.starts_with("ws://") || url.starts_with("wss://") {
+            RequestKind::WebSocket
+        } else {
+            RequestKind::Http
         }
     }
 
@@ -174,6 +240,25 @@ impl RequestFile {
                 }
             }
             _ => {}
+        }
+        if self.kind() == RequestKind::WebSocket {
+            if self.method() != "GET" {
+                return Err("a WebSocket request has no `method` (it opens with GET)".into());
+            }
+            if self.body.is_some() {
+                return Err(
+                    "a WebSocket request has no `[body]`; save messages in `[websocket]`".into(),
+                );
+            }
+            let mut names = std::collections::HashSet::new();
+            for m in self.websocket.iter().flat_map(|w| &w.messages) {
+                if m.name.trim().is_empty() {
+                    return Err("websocket: every message needs a `name`".into());
+                }
+                if !names.insert(m.name.as_str()) {
+                    return Err(format!("websocket: two messages are named `{}`", m.name));
+                }
+            }
         }
         self.capture.validate()?;
         self.script.validate()?;
@@ -539,6 +624,44 @@ mod tests {
                 .unwrap_err()
                 .contains("unknown field `timeout`")
         );
+    }
+
+    #[test]
+    fn websocket_requests() {
+        let r = request(
+            r#"
+            url = "{{ws_base}}/chat"
+            [websocket]
+            subprotocols = ["chat"]
+            [[websocket.messages]]
+            name = "hello"
+            content = "hi"
+            [[websocket.messages]]
+            name = "join"
+            kind = "json"
+            content = '{"room": "{{room}}"}'
+            "#,
+        )
+        .unwrap();
+        assert_eq!(r.kind(), RequestKind::WebSocket);
+        assert!(r.validate().is_ok());
+        assert_eq!(
+            r.websocket.as_ref().unwrap().messages[1].kind,
+            WsMessageKind::Json
+        );
+        let implied = request("url = \"wss://a.test/ws\"").unwrap();
+        assert_eq!(implied.kind(), RequestKind::WebSocket);
+        assert_eq!(
+            request("url = \"https://a.test\"").unwrap().kind(),
+            RequestKind::Http
+        );
+        let post = request("method = \"POST\"\nurl = \"ws://a.test\"").unwrap();
+        assert!(post.validate().unwrap_err().contains("no `method`"));
+        let twice = request(
+            "url = \"ws://a\"\n[[websocket.messages]]\nname = \"a\"\ncontent = \"\"\n[[websocket.messages]]\nname = \"a\"\ncontent = \"\"",
+        )
+        .unwrap();
+        assert!(twice.validate().unwrap_err().contains("two messages"));
     }
 
     #[test]

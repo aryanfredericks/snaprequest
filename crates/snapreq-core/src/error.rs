@@ -22,6 +22,10 @@ pub enum Error {
     #[error("unsupported HTTP version {0}")]
     UnsupportedVersion(String),
 
+    /// A WebSocket connection failed after it was opened (bad frame, reset, too large).
+    #[error("WebSocket error: {0}")]
+    WebSocket(String),
+
     /// Sending the request failed. Carries the trace recorded up to the failure.
     #[error(transparent)]
     Execution(Box<ExecutionError>),

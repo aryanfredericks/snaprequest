@@ -102,6 +102,46 @@ pub fn build_file(
     Ok(req)
 }
 
+/// Saved WebSocket messages by name.
+pub type SavedMessages = Vec<(String, snapreq_core::client::ws::WsMessage)>;
+
+/// The saved messages of a WebSocket request file, by name, with placeholders resolved from
+/// `scopes`. Secret values used end up in the second list. `file` is named in errors.
+pub fn websocket_messages(
+    spec: &crate::files::WebSocketSpec,
+    file: &Path,
+    scopes: &Scopes,
+) -> Result<(SavedMessages, Vec<String>)> {
+    use base64::Engine as _;
+    use snapreq_core::client::ws::WsMessage;
+
+    use crate::files::WsMessageKind;
+    let mut interp = Interpolator::new(scopes);
+    let mut out = Vec::new();
+    for m in &spec.messages {
+        let place = format!("websocket message `{}`", m.name);
+        let content = interp
+            .interpolate(&m.content)
+            .map_err(|e| Error::invalid(file, format!("{place}: {e}")))?;
+        let msg = match m.kind {
+            WsMessageKind::Text => WsMessage::Text { data: content },
+            WsMessageKind::Json => {
+                serde_json::from_str::<serde_json::Value>(&content)
+                    .map_err(|e| Error::invalid(file, format!("{place}: not valid JSON: {e}")))?;
+                WsMessage::Text { data: content }
+            }
+            WsMessageKind::Binary => WsMessage::Binary {
+                data: base64::engine::general_purpose::STANDARD
+                    .decode(content.trim())
+                    .map_err(|e| Error::invalid(file, format!("{place}: not valid base64: {e}")))?
+                    .into(),
+            },
+        };
+        out.push((m.name.clone(), msg));
+    }
+    Ok((out, interp.into_secrets()))
+}
+
 /// The `[assert]` checks of the request at `key_path`, with placeholders resolved from
 /// `scopes` and the schema path made absolute (relative paths are relative to the request
 /// file). Assertions are not inherited from folders or the collection.

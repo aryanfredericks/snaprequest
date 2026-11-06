@@ -11,13 +11,15 @@
   import SaveDialog from "./SaveDialog.svelte";
   import SettingsEditor from "./SettingsEditor.svelte";
   import Tabs from "./Tabs.svelte";
+  import WsMessagesEditor from "./WsMessagesEditor.svelte";
+  import { isWebSocket } from "../model/draft";
 
   interface Props {
     tab: RequestTab;
   }
   let { tab }: Props = $props();
 
-  type Section = "params" | "headers" | "body" | "auth" | "checks" | "scripts" | "settings";
+  type Section = "params" | "headers" | "body" | "messages" | "auth" | "checks" | "scripts" | "settings";
   let section = $state<Section>("params");
   let saving = $state(false);
   let exporter: ExportDialog | undefined = $state();
@@ -28,18 +30,23 @@
     Object.keys(d.rest.assert ?? {}).length + Object.keys(d.rest.capture ?? {}).length,
   );
   const scripts = $derived([d.rest.script?.pre_request || d.rest.script?.pre_request_file, d.rest.script?.test || d.rest.script?.test_file].filter(Boolean).length || "");
+  const websocket = $derived(isWebSocket(d));
+  const wsState = $derived(tab.ws.status);
   const sections = $derived([
     { id: "params" as const, label: "Params", badge: count(d.query) },
     { id: "headers" as const, label: "Headers", badge: count(d.headers) },
-    { id: "body" as const, label: "Body", badge: d.body.type === "none" ? "" : d.body.type },
+    ...(websocket
+      ? [{ id: "messages" as const, label: "Saved messages", badge: d.rest.websocket?.messages?.length ?? "" }]
+      : [{ id: "body" as const, label: "Body", badge: d.body.type === "none" ? "" : d.body.type }]),
     { id: "auth" as const, label: "Auth", badge: d.auth.type === "inherit" || d.auth.type === "none" ? "" : d.auth.type },
-    ...(inCollection ? [{ id: "checks" as const, label: "Checks & vars", badge: checks }] : []),
+    ...(inCollection && !websocket ? [{ id: "checks" as const, label: "Checks & vars", badge: checks }] : []),
     ...(inCollection ? [{ id: "scripts" as const, label: "Scripts", badge: scripts }] : []),
     { id: "settings" as const, label: "Settings", badge: Object.keys(d.settings).length },
   ]);
   function setScript(key: "pre_request" | "test", code: string) {
     d.rest.script = { ...(d.rest.script ?? {}), [key]: code };
   }
+  const current = $derived(sections.some((s) => s.id === section) ? section : "params");
   const inheritedAuth = $derived.by(() => {
     const doc = tab.collection ? app.docs[tab.collection] : null;
     return doc?.file.auth?.type ?? null;
@@ -61,7 +68,11 @@
     {/if}
   </div>
   <form class="line" onsubmit={(e) => (e.preventDefault(), app.send(tab))}>
-    <MethodSelect bind:value={d.method} label="Method" />
+    {#if websocket}
+      <span class="proto" title="A WebSocket request (ws:// or wss:// URL)">WS</span>
+    {:else}
+      <MethodSelect bind:value={d.method} label="Method" />
+    {/if}
     <CodeEditor
       value={d.url}
       singleLine
@@ -73,27 +84,37 @@
       onenter={() => app.send(tab)}
       class="url"
     />
-    <button type="submit" class="primary" disabled={tab.running} title="Send (Ctrl+Enter)">
-      {tab.running ? "Sending…" : "Send"}
-    </button>
+    {#if websocket}
+      <button type="submit" class="primary" title="Connect or disconnect (Ctrl+Enter)">
+        {wsState === "open" ? "Disconnect" : wsState === "connecting" ? "Cancel" : "Connect"}
+      </button>
+    {:else}
+      <button type="submit" class="primary" disabled={tab.running} title="Send (Ctrl+Enter)">
+        {tab.running ? "Sending…" : "Send"}
+      </button>
+    {/if}
     <button type="button" onclick={save} title="Save (Ctrl+S)">{tab.dirty ? "Save*" : "Save"}</button>
-    <button type="button" onclick={() => exporter?.open(tab)} title="Copy as cURL, Python, JavaScript, Go or Rust">Code</button>
+    {#if !websocket}
+      <button type="button" onclick={() => exporter?.open(tab)} title="Copy as cURL, Python, JavaScript, Go or Rust">Code</button>
+    {/if}
   </form>
   <ExportDialog bind:this={exporter} />
 
-  <Tabs tabs={sections} selected={section} label="Request parts" idPrefix="req-{tab.id}" onselect={(s) => (section = s)} />
-  <div class="panel" role="tabpanel" id="req-{tab.id}-panel" aria-labelledby="req-{tab.id}-tab-{section}">
+  <Tabs tabs={sections} selected={current} label="Request parts" idPrefix="req-{tab.id}" onselect={(s) => (section = s)} />
+  <div class="panel" role="tabpanel" id="req-{tab.id}-panel" aria-labelledby="req-{tab.id}-tab-{current}">
     {#key tab.id}
-      {#if section === "params"}
+      {#if current === "params"}
         <KeyValueEditor bind:rows={d.query} label="Query parameters" vars={tab.vars} />
         <p class="muted small">Added to the query string of the URL (after any parameters written in the URL itself).</p>
-      {:else if section === "headers"}
+      {:else if current === "headers"}
         <KeyValueEditor bind:rows={d.headers} label="Headers" vars={tab.vars} names={HEADER_NAMES} />
-      {:else if section === "body"}
+      {:else if current === "messages"}
+        <WsMessagesEditor spec={d.rest.websocket} onchange={(v) => (d.rest.websocket = v)} />
+      {:else if current === "body"}
         <BodyEditor body={d.body} vars={tab.vars} {inCollection} />
-      {:else if section === "auth"}
+      {:else if current === "auth"}
         <AuthEditor auth={d.auth} vars={tab.vars} {inCollection} inherited={inheritedAuth} />
-      {:else if section === "checks"}
+      {:else if current === "checks"}
         <div class="checks">
           <h4>Checks <span class="muted">(<code>[assert]</code>, see docs/FORMAT.md)</span></h4>
           <JsonField value={d.rest.assert} label="Checks" placeholder={'{ "status": 200, "json": { "$.id": { "type": "integer" } } }'} onchange={(v) => (d.rest.assert = v as Record<string, unknown> | undefined)} />
@@ -102,7 +123,7 @@
           <h4>Request variables <span class="muted">(<code>[vars]</code>)</span></h4>
           <JsonField value={d.rest.vars} label="Request variables" placeholder={'{ "role": "admin" }'} onchange={(v) => (d.rest.vars = v as typeof d.rest.vars)} />
         </div>
-      {:else if section === "scripts"}
+      {:else if current === "scripts"}
         <div class="checks">
           {#each [{ key: "pre_request" as const, file: d.rest.script?.pre_request_file, title: "Pre-request script", hint: "Runs before the request is built: snapreq.variables, snapreq.request." }, { key: "test" as const, file: d.rest.script?.test_file, title: "Test script", hint: "Runs after the response: snapreq.response, snapreq.test(name, fn), snapreq.expect(value)." }] as s (s.key)}
             <h4>{s.title} <span class="muted">{s.hint}</span></h4>
@@ -114,7 +135,7 @@
           {/each}
           <p class="muted small">Scripts run in a sandbox without file or network access, with time and memory limits. Collection and folder scripts run first (see docs/FORMAT.md).</p>
         </div>
-      {:else if section === "settings"}
+      {:else if current === "settings"}
         <SettingsEditor settings={d.settings} {inCollection} bind:resolve={d.resolve} />
       {/if}
     {/key}
@@ -156,6 +177,16 @@
     display: flex;
     gap: 0.4rem;
     align-items: stretch;
+  }
+  .proto {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--accent);
   }
   .line :global(.url) {
     flex: 1;

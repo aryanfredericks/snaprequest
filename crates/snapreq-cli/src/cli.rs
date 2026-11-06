@@ -43,6 +43,20 @@ pub(crate) enum Command {
     #[command(verbatim_doc_comment)]
     Run(RunArgs),
 
+    /// Open a WebSocket, send messages and print what arrives.
+    ///
+    /// Sent messages are printed as `> …`, received ones as `< …` (`--format json`: one JSON
+    /// object per line). Lines typed on stdin are sent when no --send or --message is given
+    /// (or with -i). After everything is sent, the connection is closed once nothing has
+    /// arrived for --wait seconds.
+    ///
+    /// Examples:
+    ///   snapreq ws wss://echo.example.com/ws --send hello
+    ///   snapreq ws ws://localhost:8080/chat -H 'Authorization: Bearer TOKEN' -i
+    ///   snapreq ws -c my-api chat/room --message join --count 5 -e dev
+    #[command(verbatim_doc_comment)]
+    Ws(WsArgs),
+
     /// Start the self-hosted server (API and web UI).
     ///
     /// Examples:
@@ -390,6 +404,48 @@ pub(crate) enum SecretCommand {
         #[arg(short = 'c', long = "collection", value_name = "DIR")]
         collection: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct WsArgs {
+    /// Send this text message once connected. Repeatable.
+    #[arg(
+        short = 'm',
+        long = "send",
+        value_name = "TEXT",
+        help_heading = "WebSocket"
+    )]
+    pub send: Vec<String>,
+
+    /// Send a saved message of the request file (`[[websocket.messages]]`) by name, before
+    /// the --send ones; `all` sends every saved message. Repeatable.
+    #[arg(long = "message", value_name = "NAME", help_heading = "WebSocket")]
+    pub saved: Vec<String>,
+
+    /// Offer this subprotocol (replaces the request file's). Repeatable.
+    #[arg(long = "subprotocol", value_name = "NAME", help_heading = "WebSocket")]
+    pub subprotocols: Vec<String>,
+
+    /// Also send each line read from stdin.
+    #[arg(short = 'i', long, help_heading = "WebSocket")]
+    pub interactive: bool,
+
+    /// Close after receiving this many text or binary messages.
+    #[arg(short = 'n', long, value_name = "N", help_heading = "WebSocket")]
+    pub count: Option<usize>,
+
+    /// Once everything is sent, close after this many seconds without a message
+    /// (`0`: wait until the server closes).
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value = "2",
+        help_heading = "WebSocket"
+    )]
+    pub wait: f64,
+
+    #[command(flatten)]
+    pub request: SendArgs,
 }
 
 #[derive(Debug, Args)]

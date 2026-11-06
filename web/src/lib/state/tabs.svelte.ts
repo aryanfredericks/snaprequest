@@ -15,6 +15,7 @@ import { row, type Row } from "../model/draft";
 import { draftToFile, emptyDraft, sameFile, uid, type Draft } from "../model/draft";
 import { sameScope, scopeToFile, type ScopeDraft, type ScopeFile, type VarRow } from "../model/scope";
 import type { Route } from "./route";
+import { WsSession } from "./websocket.svelte";
 
 /** A request being edited: a collection request (`collection` + `key`) or a scratch request. */
 export class RequestTab {
@@ -32,6 +33,8 @@ export class RequestTab {
   error = $state<string | null>(null);
   /** Variables visible to this request (null: outside a collection). */
   vars = $state<VariableInfo[] | null>(null);
+  /** The connection of a WebSocket request. */
+  readonly ws = new WsSession();
 
   constructor(collection: string | null = null, key: string | null = null) {
     this.collection = collection;

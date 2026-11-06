@@ -24,6 +24,8 @@ tokio = { workspace = true, features = ["time", "rt"] }
 url.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
 bytes.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server", "http1"] }

@@ -14,7 +14,7 @@ import type {
 } from "../api/types";
 import { jobs } from "../api/ws";
 import type { ImportRequest, ImportSummary } from "../model/importing";
-import { draftFromFile, draftToCore, draftToFile, uid } from "../model/draft";
+import { draftFromFile, draftToCore, draftToFile, isWebSocket, uid } from "../model/draft";
 import { draftFromHistory } from "../model/history";
 import { flowToFile } from "../model/flow";
 import { parseData } from "../model/runs";
@@ -186,6 +186,7 @@ class AppState {
     if (!force && tab.dirty && !confirm(`Close "${tab.title}" without saving?`)) return;
     const i = this.tabs.indexOf(tab);
     if (i < 0) return;
+    if (tab.kind === "request") tab.ws.disconnect();
     this.tabs.splice(i, 1);
     if (this.activeId === tab.id) {
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
@@ -258,6 +259,10 @@ class AppState {
       tab.error = "Enter a URL first.";
       return;
     }
+    if (isWebSocket(tab.draft)) {
+      this.toggleWebSocket(tab);
+      return;
+    }
     const body: Record<string, unknown> = { capture_wire: true };
     try {
       if (tab.collection && tab.key) {
@@ -285,6 +290,35 @@ class AppState {
     } finally {
       tab.running = false;
     }
+  }
+
+  /** Opens (or closes) the connection of a WebSocket request through the server. */
+  toggleWebSocket(tab: RequestTab) {
+    if (tab.ws.status === "open" || tab.ws.status === "connecting") {
+      tab.ws.close();
+      return;
+    }
+    const body: Record<string, unknown> = {};
+    try {
+      if (tab.collection && tab.key) {
+        body.collection = tab.collection;
+        body.key = tab.key;
+        if (workspaces.canEdit) body.file = draftToFile(tab.draft);
+        const env = this.envs[tab.collection];
+        if (env) body.env = env;
+      } else {
+        const core = draftToCore(tab.draft);
+        delete core.body;
+        body.request = { ...core, method: "GET" };
+        const sub = tab.draft.rest.websocket?.subprotocols;
+        if (sub?.length) body.subprotocols = sub;
+      }
+    } catch (e) {
+      tab.error = message(e);
+      return;
+    }
+    tab.error = null;
+    tab.ws.connect(body);
   }
 
   /** The request as code (`POST /requests/export`); secret values become environment variables. */
